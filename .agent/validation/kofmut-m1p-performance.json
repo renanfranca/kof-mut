@@ -1,0 +1,53 @@
+{
+  "timer": "time.perf_counter_ns",
+  "pythonCommit": "adec628b08d1a221801295463ae642856ce502ee",
+  "warmBuilds": {
+    "python": 0,
+    "kof": 0
+  },
+  "command": "--version",
+  "python": {
+    "n": 33,
+    "median": 0.673821451,
+    "minimum": 0.654308921,
+    "q1": 0.667537226,
+    "q3": 0.676573795,
+    "maximum": 0.688398086,
+    "mean": 0.6728326666060606,
+    "sd": 0.008060906018947479,
+    "blockMedians": [
+      0.680852735,
+      0.670917335,
+      0.672823215
+    ]
+  },
+  "kof": {
+    "n": 33,
+    "median": 0.712937439,
+    "minimum": 0.685307968,
+    "q1": 0.704080036,
+    "q3": 0.719638273,
+    "maximum": 0.740841611,
+    "mean": 0.7111435206666666,
+    "sd": 0.013304636498744644,
+    "blockMedians": [
+      0.713856667,
+      0.712098969,
+      0.713394617
+    ]
+  },
+  "ratio": 1.0580509687573005,
+  "limit": 0.7412035961000001,
+  "passed": true,
+  "cold": [
+    5.053044044,
+    5.15282579,
+    5.165226537
+  ],
+  "localEvidence": ".agent/tmp/m1p-performance-nqdouzzx",
+  "sources": {
+    "src/main/kof/kofmut/Frontend.kf": "22c37c880b585dc3903e8fca409ca39f5a8d9287c429bfb7157a4c33a8c055b7",
+    "src/main/kof/kofmut/Main.kf": "3cc37b46f41b8750e451b83ea3c7a561d0cfabbe654fbf57045340629e21b748",
+    "src/main/kof/kofmut/launch/RuntimeEntry.kf": "62f41c0707054b3be6c4e58e615360b48fb293b783d64902ca9193a53b2af787"
+  }
+}

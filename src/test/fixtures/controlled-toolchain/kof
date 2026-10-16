@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${KOF_MUT_TEST_COMPILE:-}" == refuse && ( "$1" == run || "$1" == build ) ]]; then
+    echo 'controlled toolchain refuses compilation' >&2
+    exit 91
+fi
 if [[ "$1" == info ]]; then
     if [[ "${KOF_MUT_TEST_INFO:-}" == invalid ]]; then
         printf '%s\n' 'invalid JSON'

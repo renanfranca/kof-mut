@@ -4,15 +4,15 @@
 
 KofMut é uma ferramenta de teste de mutação em desenvolvimento para Kof. A lógica de seleção, transformação, execução de processos e relatório pertence ao código Kof, com execução inicial na JVM em Linux.
 
-**Estado de desenvolvimento: marcos M1 e M1R implementados.** Estão disponíveis o lançador de fonte em Kof, a leitura de arquivos e a integração com o frontend oficial. Execuções de mutação, configuração do projeto, sandboxes e relatório JSON versão 1 estão pendentes. O valor `0.1.0` identifica este fonte em desenvolvimento; não significa que o produto planejado esteja concluído.
+**Estado de desenvolvimento: marcos M1, M1R e M1P implementados.** Estão disponíveis o lançador de fonte em Kof, a leitura de arquivos e a integração com o frontend oficial. Execuções de mutação, configuração do projeto, sandboxes e relatório JSON versão 1 estão pendentes. O valor `0.1.0` identifica este fonte em desenvolvimento; não significa que o produto planejado esteja concluído.
 
 ## Requisitos
 
-- Linux com Bash 4.4 ou posterior e utilitários GNU usuais (`dirname`, `readlink`, `mktemp` e `rm`).
+- Linux com Bash 4.4 ou posterior e GNU coreutils (`dirname`, `readlink`, `mktemp`, `rm`, `cat`, `sort`, `sha256sum` e `b2sum`), GNU findutils (`find`) e `cmp` do GNU diffutils.
 - Distribuição Linux oficial do **Kof 0.6.4** no `PATH`, incluindo `lib/kof.jar` e seu JDK embutido.
 - Permissão de escrita no checkout para o diretório local `build/cache/`.
 
-Kof 0.6.5 e outras versões são rejeitados até que seus contratos de frontend sejam verificados. O lançador descobre a instalação por `kof info --json`; ele não baixa nem atualiza Kof.
+Kof 0.6.5 e outras versões são rejeitados até que seus contratos de frontend sejam verificados. O lançador oficial do Kof também exige `sed` e `head`. O lançador descobre a instalação por `kof info --json`; ele não baixa nem atualiza Kof.
 
 Se outra versão estiver selecionada na máquina, coloque a instalação suportada primeiro no `PATH`:
 
@@ -33,9 +33,17 @@ Na raiz do checkout:
 
 O comando de versão imprime `KofMut 0.1.0`, lendo `VERSION`. Versão e ajuda retornam código 0. Comandos não suportados, incluindo `run` nesta etapa, retornam 2. Um comando de versão ou ajuda não representa avaliação de qualidade.
 
-O bootstrap Kof em `scripts/bootstrap/Launch.kf` valida a ferramenta, gerencia o cache de compilação e prepara o comando da JVM. Ele usa as APIs Kof de JSON e processos, além de APIs JDK para hashes, bloqueios de arquivo e publicação atômica de diretório. A pequena ponte Bash fixa o executável Kof, recebe um comando identificado por `kofmut-launch-v1` com campos separados por NUL e usa `exec` para iniciar `Default.Main` com os argumentos originais da aplicação, diretório de trabalho e ambiente. Python não é necessário.
+A ponte Bash fixa o executável Kof por caminho real e obtém `info --json` fresco em cada chamada. Com cache quente, calcula os hashes dos inputs do lançador e do jar instalado inteiro, depois usa `exec` para iniciar `kofmut.launch.RuntimeEntry` compilado. Essa entrada Kof valida a evidência fresca da instalação, os caminhos e a identidade da imagem, remove seu contexto temporário, configura as propriedades da aplicação e chama `Default.Main.main` na mesma JVM. Versão, ajuda e demais comandos usam esse caminho. Argumentos, diretório de trabalho, ambiente, códigos de saída e sinais chegam diretamente à aplicação. Python não é necessário. O script oficial Kof 0.6.4 inicia também uma sondagem curta `java -version` antes da consulta da instalação: são duas JVMs de trabalho mais essa sondagem, e as medições de inicialização incluem as três execuções Java.
 
-O bootstrap executa por `kof run` a cada chamada. A aplicação e os contratos do frontend compilam com `kof build --target jvm --classpath` e usam `build/cache/kof-bootstrap-v1/`. As chaves do cache incluem modo, caminhos resolvidos e informações da ferramenta, conteúdo do jar do compilador, lançadores, manifesto, versão e conteúdo dos fontes. Um bloqueio serializa a compilação, e o build completo é publicado atomicamente após o compilador terminar com sucesso. Builds com falha ou interrompidos não podem virar entradas utilizáveis do cache. Remover `build/cache/` força a recompilação; entradas do antigo lançador Python são ignoradas.
+`scripts/bootstrap/Launch.kf` executa por `kof run` somente quando é necessário preparar o cache. Ele valida a instalação, confere os hashes dos inputs capturados, compila os bytes capturados dos fontes com `kof build --target jvm --classpath` e publica a imagem completa atomicamente sob bloqueio de arquivo. As duas entradas JVM e o runtime JSON gerado especificamente para a aplicação são compilados juntos. A imagem publicada inclui hashes SHA-256 das classes geradas; o lançador confere esses hashes antes da execução. Uma nova consulta ao cache sob bloqueio impede compilação duplicada. Falhas de validação e compilação retornam 2 sem executar uma imagem antiga como alternativa.
+
+O cache usa `build/cache/kof-launch-v2/locations/` para descritores da instalação e `build/cache/kof-launch-v2/images/` para programas compilados. A identidade preliminar SHA-256 inclui modo, raiz do checkout, caminho e conteúdo do Kof fixado, JSON bruto fresco, lançadores, VERSION, manifesto e conteúdos dos fontes pertinentes, em ordem determinística com campos terminados por NUL. A identidade final SHA-256 inclui também o hash BLAKE2b de 512 bits do jar instalado inteiro, calculado pelo GNU `b2sum`. Os timestamps não determinam a validade. Alterações em um futuro projeto avaliado não recompilam o KofMut.
+
+A entrega anterior `kofmut-launch-v1` foi substituída por `kofmut-location-v1`, cujos campos terminados por NUL carregam os caminhos validados de Java e jar. Bash lê esses campos sem interpretar JSON nem avaliar texto de comandos. Cada chamada passa cinco argumentos internos (raiz, Kof fixado, modo, diretório do contexto e diretório da imagem), seguidos dos argumentos originais da aplicação. Nenhum argumento da aplicação passa pelo parser de opções de `kof run`. Entradas dos caches Python e `kof-bootstrap-v1` são ignoradas.
+
+Descritores ausentes ou inconsistentes e imagens incompletas acionam preparação automática. Para descartar o novo cache e recuperar após uma interrupção abrupta, execute `rm -rf -- build/cache/kof-launch-v2` na raiz do checkout. Isso também remove diretórios temporários sem uso e força preparação na próxima chamada. O filesystem do cache precisa oferecer bloqueios de arquivo e movimentos atômicos de diretórios. O custo de preparação inicial e a comparação de inicialização quente estão no [relatório de validação M1P](.agent/validation/kofmut-m1p.md); a meta de cache quente não se aplica ao primeiro build.
+
+A inicialização quente cumpriu a meta M1P: mediana Kof **0.7129 s**, mediana Python **0.6738 s** (5.81% acima do Python, dentro de 10%), em 33 pares alternados sem compilação. Três chamadas com cache vazio levaram 5.05 s, 5.15 s, 5.17 s. Veja dispersão, resultados brutos e condições no [relatório M1P](.agent/validation/kofmut-m1p.md). O orçamento de integração de 90 segundos continua sem comprovação.
 
 ## O que M1 comprova
 

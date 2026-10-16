@@ -1,0 +1,59 @@
+package kofmut.launch
+
+import java.lang.Class
+import java.lang.System
+
+record LaunchInstallation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
+
+String launchText(String path) {
+    var text = File(path).readText()
+    if (text != null) { return text }
+    throw "cannot read " + path
+}
+
+class RuntimeEntry {
+    static void main(String[] arguments) {
+        if (arguments.length < 5) { process.exit(2) }
+        var root = arguments[0]
+        var kof = arguments[1]
+        var mode = arguments[2]
+        var context = arguments[3]
+        var image = arguments[4]
+        var valid = true
+        try {
+            var raw = launchText(context + "/info.json")
+            var installation = json.decode<LaunchInstallation>(raw)
+            if (installation.kof != "0.6.4" || installation.compiler != "0.6.4" || installation.runtime != "0.6.4" || installation.stdlib != "0.6.4") { throw "this build requires Kof/compiler/runtime/stdlib 0.6.4" }
+            if (installation.os != "linux" || !installation.embeddedJdk) { throw "this build requires the Linux distribution with its embedded JDK" }
+            var distribution = new java.io.File(installation.install).getCanonicalPath()
+            var jar = distribution + "/lib/kof.jar"
+            var java = distribution + "/jdk/bin/java"
+            if (!File(jar).isFile() || !new java.io.File(java).canExecute()) { throw "incomplete Kof distribution" }
+            var request = launchText(context + "/request")
+            var fields = request.split("\0")
+            if (fields.length < 7 || fields[0] != "kofmut-request-v2" || fields[1] != mode || fields[2] != root || fields[3] != kof || fields[4] != raw) { throw "invalid launch request" }
+            var identity = launchText(context + "/identity")
+            var parts = identity.split("\0")
+            var preliminary = crypto.sha256(request)
+            if (parts.length != 9 || parts[0] != "kofmut-image-v2" || parts[1] != root || parts[2] != kof || parts[3] != mode || parts[4] != preliminary || parts[7] != java || parts[8] != jar) { throw "invalid image identity" }
+            var key = crypto.sha256(preliminary + "\0" + jar + "\0" + parts[5] + "\0")
+            if (parts[6] != key || image != root + "/build/cache/kof-launch-v2/images/" + key || launchText(image + "/identity") != identity || System.getProperty("java.class.path") != image + "/classes:" + jar) { throw "compiled image identity mismatch" }
+            var previousRoot = System.setProperty("kofmut.root", root)
+            var previousVersion = System.setProperty("kofmut.kof.version", installation.kof)
+        } catch (String error) {
+            System.err.println("kof-mut: " + error)
+            valid = false
+        } finally {
+            if (!Directory(context).delete()) { System.err.println("kof-mut: cannot remove launch context"); valid = false }
+        }
+        if (!valid) { process.exit(2) }
+        var applicationArgs = new String[arguments.length - 5]
+        for (var i = 0; i < applicationArgs.length; i++) { applicationArgs[i] = arguments[i + 5] }
+        var signature = new Class[1]
+        signature[0] = Class.forName("[Ljava.lang.String;")
+        var method = Class.forName("Default.Main").getMethod("main", signature)
+        var invocation = new Object[1]
+        invocation[0] = applicationArgs
+        var invoked = method.invoke(null, invocation)
+    }
+}
