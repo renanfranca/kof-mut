@@ -1,0 +1,159 @@
+package kofmut
+
+import java.lang.ProcessBuilder
+import java.lang.System
+import java.lang.Thread
+import java.util.concurrent.TimeUnit
+
+record CommandResult(Int? exitCode, Long durationMs, String stdout, String stderr, String stdoutPath, String stderrPath, Bool timeout, Bool started, Bool cleaned)
+record CheckDiagnostic(String code, String severity, String message)
+record CheckOutput(Bool success, Int filesChecked, Int errorCount, List<CheckDiagnostic> diagnostics)
+record PhaseEvidence(Int? exitCode, Long? durationMs, String? summary, Int? filesChecked, Int? executedTests, Int? failedTests)
+record CheckedEvidence(String status, PhaseEvidence phase)
+
+Long elapsedMs(Long start) { return (System.nanoTime() - start) / 1000000 }
+
+CommandResult executeCommand(List<String> arguments, String cwd, String log, Long timeoutMs, Long start, Long budgetMs) {
+    var remaining = budgetMs - elapsedMs(start)
+    if (remaining <= 0) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true) }
+    var deadline = timeoutMs
+    if (remaining < deadline) { deadline = remaining }
+    var argv = new String[arguments.size + 1]
+    argv[0] = "setsid"
+    for (var i = 0; i < arguments.size; i++) { argv[i + 1] = arguments.get(i) }
+    var builder = new ProcessBuilder(argv)
+    builder.directory(new java.io.File(cwd))
+    builder.redirectOutput(new java.io.File(log + ".stdout"))
+    builder.redirectError(new java.io.File(log + ".stderr"))
+    remaining = budgetMs - elapsedMs(start)
+    if (remaining <= 0) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true) }
+    if (remaining < deadline) { deadline = remaining }
+    var commandStart = System.nanoTime()
+    var child = builder.start()
+    var finished = false
+    var cleaned = false
+    try {
+        child.getOutputStream().close()
+        var waitMs = deadline - elapsedMs(commandStart)
+        if (waitMs > 0) { finished = child.waitFor(waitMs, TimeUnit.MILLISECONDS) }
+    } finally {
+        if (!finished || processGroupActive(child.pid())) {
+            var killed = process.run("kill", "-KILL", "--", "-" + child.pid())
+        }
+        if (child.isAlive()) { child.destroyForcibly() }
+        if (!child.waitFor(1000 as Long, TimeUnit.MILLISECONDS)) { throw "Cannot reap command process" }
+        var cleanupStart = System.nanoTime()
+        cleaned = !processGroupActive(child.pid())
+        while (!cleaned && elapsedMs(cleanupStart) < 1000) {
+            Thread.sleep(10 as Long)
+            cleaned = !processGroupActive(child.pid())
+        }
+        if (!cleaned) { throw "Cannot confirm process group cleanup: " + child.pid() }
+    }
+    return CommandResult(child.exitValue(), elapsedMs(commandStart), readRequired(log + ".stdout"), readRequired(log + ".stderr"), log + ".stdout", log + ".stderr", !finished, true, cleaned)
+}
+
+Bool processGroupActive(Long group) {
+    for (var name in Directory("/proc").list()) {
+        if (name.matches("[0-9]+")) {
+            var stat = File("/proc/" + name + "/stat").readText()
+            if (stat != null) {
+                var closing = stat.lastIndexOf(")")
+                if (closing < 0) { throw "Invalid /proc process metadata" }
+                var fields = stat.substring(closing + 2).trim().split("\\s+")
+                if (fields.length < 3) { throw "Invalid /proc process metadata" }
+                if (fields[2] == group.toString() && fields[0] != "Z" && fields[0] != "X") { return true }
+            }
+        }
+    }
+    return false
+}
+
+PhaseEvidence notStarted() { return PhaseEvidence(null, null, null, null, null, null) }
+String commandSummary(CommandResult result) { return "stdout: " + result.stdoutPath + "; stderr: " + result.stderrPath + "; process group cleanup confirmed" }
+
+CheckedEvidence checkEvidence(CommandResult result) {
+    var summary = commandSummary(result)
+    if (!result.started) { return CheckedEvidence("Pending", notStarted()) }
+    if (result.timeout) { return CheckedEvidence("Timeout", PhaseEvidence(result.exitCode, result.durationMs, "check timeout; " + summary, null, null, null)) }
+    try {
+        validateCheckShape(result.stdout)
+        var check = json.decode<CheckOutput>(result.stdout)
+        var errors = 0
+        var diagnostic = ""
+        for (var item in check.diagnostics) {
+            if (item.severity == "ERROR") { errors++ }
+            diagnostic = diagnostic + item.code + ": " + item.message + "; "
+        }
+        var phase = PhaseEvidence(result.exitCode, result.durationMs, diagnostic + summary, check.filesChecked, null, null)
+        if (check.success && result.exitCode == 0 && check.filesChecked > 0 && check.errorCount == 0 && errors == 0) { return CheckedEvidence("passed", phase) }
+        if (!check.success && result.exitCode == 1 && check.filesChecked > 0 && check.errorCount > 0 && errors == check.errorCount) { return CheckedEvidence("CompileError", phase) }
+    } catch (String error) { summary = "Invalid check JSON: " + error + "; " + summary }
+    return CheckedEvidence("TestError", PhaseEvidence(result.exitCode, result.durationMs, "Invalid check evidence; " + summary, null, null, null))
+}
+
+CheckedEvidence parseTestEvidence(CommandResult result) {
+    var summary = commandSummary(result)
+    if (!result.started) { return CheckedEvidence("Pending", notStarted()) }
+    if (result.timeout) { return CheckedEvidence("Timeout", PhaseEvidence(result.exitCode, result.durationMs, "test timeout; " + summary, null, null, null)) }
+    var executed = 0
+    var failures = 0
+    var suites = 0
+    var failedSuites = 0
+    var declaredCases = 0
+    var filteredCases = -1
+    var pending = false
+    var suiteFile = ""
+    var cases = 0
+    var failed = 0
+    var skipped = 0
+    var commandPassed = -1
+    var commandFailed = -1
+    var valid = true
+    for (var raw in result.stdout.split("\n")) {
+        var line = raw.trim()
+        if (line.startsWith("SUITE ")) {
+            if (pending) { valid = false }
+            declaredCases = line.substring(line.lastIndexOf(" (") + 2, line.lastIndexOf(" tests)")).toInt()
+            filteredCases = -1
+            suiteFile = line.substring(6, line.lastIndexOf(" ("))
+            pending = true
+            cases = 0
+            failed = 0
+            skipped = 0
+        } else if (pending && line.startsWith("kof test: tag ")) {
+            var filter = line.substring(line.lastIndexOf("(") + 1, line.length() - 1).split(" of ")
+            filteredCases = filter[0].toInt()
+            if (filter[1].toInt() != declaredCases || filteredCases > declaredCases || filteredCases < 0) { valid = false }
+        } else if (pending && line.startsWith("PASS ")) { cases++
+        } else if (pending && line == "FAIL " + suiteFile) {
+        } else if (pending && line.startsWith("FAIL ")) { cases++; failed++
+        } else if (pending && line.startsWith("SKIP ")) { skipped++
+        } else if (line.matches("[0-9]+ failed of [0-9]+ tests")) {
+            var fields = line.split(" ")
+            if (!pending || fields[0].toInt() != failed || fields[3].toInt() != cases + skipped || (filteredCases < 0 && fields[3].toInt() != declaredCases) || (filteredCases >= 0 && fields[3].toInt() != filteredCases)) { valid = false }
+            executed = executed + cases
+            failures = failures + failed
+            suites++
+            if (failed > 0) { failedSuites++ }
+            pending = false
+        } else if (line.startsWith("exit code: ")) {
+            if (line.substring(11).trim().toInt() != result.exitCode) { valid = false }
+        } else if (line.matches("[0-9]+ passed, [0-9]+ failed.*")) {
+            if (commandPassed >= 0) { valid = false }
+            var fields = line.split(" ")
+            commandPassed = fields[0].toInt()
+            commandFailed = fields[2].toInt()
+        }
+    }
+    if (pending || suites == 0 || executed == 0 || commandPassed + commandFailed != suites || commandFailed != failedSuites || (failures == 0 && (commandFailed != 0 || result.exitCode != 0)) || (failures > 0 && (commandFailed == 0 || result.exitCode != 1))) { valid = false }
+    var phase = PhaseEvidence(result.exitCode, result.durationMs, failures + " failed of " + executed + " executed tests; " + summary, null, executed, failures)
+    if (!valid) { return CheckedEvidence("TestError", PhaseEvidence(result.exitCode, result.durationMs, "Invalid or incomplete test protocol; " + summary, null, executed, failures)) }
+    if (failures > 0) { return CheckedEvidence("Killed", phase) }
+    return CheckedEvidence("Survived", phase)
+}
+
+CheckedEvidence testEvidence(CommandResult result) {
+    try { return parseTestEvidence(result) }
+    catch (String error) { return CheckedEvidence("TestError", PhaseEvidence(result.exitCode, result.durationMs, "Invalid test protocol: " + error + "; " + commandSummary(result), null, null, null)) }
+}

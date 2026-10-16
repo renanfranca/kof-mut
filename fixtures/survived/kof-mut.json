@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sourceRoots": ["src"],
+  "testRoots": ["tests"],
+  "inputs": ["kof.toml", "src", "tests"],
+  "checkCommand": ["kof", "check", "src/math/Calc.kf", "--json"],
+  "testCommand": ["kof", "test", "tests"],
+  "commandTimeoutMs": 10000,
+  "budgetMs": 90000
+}

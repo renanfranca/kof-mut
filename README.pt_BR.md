@@ -4,13 +4,14 @@
 
 KofMut é uma ferramenta de teste de mutação em desenvolvimento para Kof. A lógica de seleção, transformação, execução de processos e relatório pertence ao código Kof, com execução inicial na JVM em Linux.
 
-**Estado de desenvolvimento: marcos M1, M1R e M1P implementados.** Estão disponíveis o lançador de fonte em Kof, a leitura de arquivos e a integração com o frontend oficial. Execuções de mutação, configuração do projeto, sandboxes e relatório JSON versão 1 estão pendentes. O valor `0.1.0` identifica este fonte em desenvolvimento; não significa que o produto planejado esteja concluído.
+**Estado de desenvolvimento: M1, M1R, M1P e o ciclo local do M2 implementados.** `run` executa baseline, mutações isoladas e relatório JSON v1 em projetos sintéticos. Robustez ampliada, concorrência entre execuções e aceitação externa no SiFuture pertencem ao M3. O valor `0.1.0` identifica este fonte em desenvolvimento.
 
 ## Requisitos
 
 - Linux com Bash 4.4 ou posterior e GNU coreutils (`dirname`, `readlink`, `mktemp`, `rm`, `cat`, `sort`, `sha256sum` e `b2sum`), GNU findutils (`find`) e `cmp` do GNU diffutils.
 - Distribuição Linux oficial do **Kof 0.6.4** no `PATH`, incluindo `lib/kof.jar` e seu JDK embutido.
-- Permissão de escrita no checkout para o diretório local `build/cache/`.
+- Permissão de escrita no checkout para `build/cache/` e `.agent/tmp/`, e espaço para cópias descartáveis no diretório temporário do sistema.
+- `setsid` do util-linux, o comando externo `kill` e procfs montado em `/proc`. A validação também usa `ps`, `cp`, `ln`, `env` e `which`.
 
 Kof 0.6.5 e outras versões são rejeitados até que seus contratos de frontend sejam verificados. O lançador oficial do Kof também exige `sed` e `head`. O lançador descobre a instalação por `kof info --json`; ele não baixa nem atualiza Kof.
 
@@ -31,7 +32,7 @@ Na raiz do checkout:
 ./scripts/check
 ```
 
-O comando de versão imprime `KofMut 0.1.0`, lendo `VERSION`. Versão e ajuda retornam código 0. Comandos não suportados, incluindo `run` nesta etapa, retornam 2. Um comando de versão ou ajuda não representa avaliação de qualidade.
+O comando de versão imprime `KofMut 0.1.0`, lendo `VERSION`. Versão e ajuda retornam código 0. Comandos ou argumentos não suportados retornam 2. Um comando de versão ou ajuda não representa avaliação de qualidade.
 
 A ponte Bash fixa o executável Kof por caminho real e obtém `info --json` fresco em cada chamada. Com cache quente, calcula os hashes dos inputs do lançador e do jar instalado inteiro, depois usa `exec` para iniciar `kofmut.launch.RuntimeEntry` compilado. Essa entrada Kof valida a evidência fresca da instalação, os caminhos e a identidade da imagem, remove seu contexto temporário, configura as propriedades da aplicação e chama `Default.Main.main` na mesma JVM. Versão, ajuda e demais comandos usam esse caminho. Argumentos, diretório de trabalho, ambiente, códigos de saída e sinais chegam diretamente à aplicação. Python não é necessário. O script oficial Kof 0.6.4 inicia também uma sondagem curta `java -version` antes da consulta da instalação: são duas JVMs de trabalho mais essa sondagem, e as medições de inicialização incluem as três execuções Java.
 
@@ -45,19 +46,88 @@ Descritores ausentes ou inconsistentes e imagens incompletas acionam preparaçã
 
 A inicialização quente cumpriu a meta M1P: mediana Kof **0.7129 s**, mediana Python **0.6738 s** (5.81% acima do Python, dentro de 10%), em 33 pares alternados sem compilação. Três chamadas com cache vazio levaram 5.05 s, 5.15 s, 5.17 s. Veja dispersão, resultados brutos e condições no [relatório M1P](.agent/validation/kofmut-m1p.md). O orçamento de integração de 90 segundos continua sem comprovação.
 
-## O que M1 comprova
+## Executar uma avaliação
 
-As verificações de comportamento exercitam o lexer e o parser reais do Kof 0.6.4. Elas verificam leitura de arquivo, associação exata de uma expressão `<` ao token do lexer, percurso de funções, métodos, construtores, inicializadores de campos e lambdas, operadores repetidos e aninhados, e exclusão de símbolos em strings, comentários e parâmetros genéricos. As localizações usam linha e coluna começando em 1 e **offsets de String UTF-16 da JVM**, em vez de offsets de bytes UTF-8.
+Na raiz do checkout, com Kof 0.6.4 no PATH:
 
-Diagnósticos do lexer e do parser impedem a geração de candidatos. Formas da AST não suportadas são informadas explicitamente. Este marco comprova a seleção de `<` para `<=`; os demais operadores e o percurso completo estão pendentes no M2. Ele ainda não compila nem executa mutantes e não avalia a qualidade dos testes.
+```bash
+./bin/kof-mut run --project fixtures/detected \
+  --files fixtures/detected/scope.json --report .agent/tmp/detected.json
+# exit 0: uma mutação Killed
 
-`./scripts/check` executa testes Kof nomeados do CLI por `kof test`, depois compila e executa um programa Kof de contrato com `assert` e o frontend oficial no classpath. O `kof test` instalado não aceita `--classpath`, portanto a prova do frontend usa o estilo documentado de programa completo com asserções. Ela não introduz um framework de testes. Os projetos avaliados pelo futuro mutador usarão seus comandos configurados de `kof check --json` e `kof test`.
+./bin/kof-mut run --project fixtures/survived \
+  --files fixtures/survived/scope.json --report .agent/tmp/survived.json
+# exit 1: uma mutação Survived
 
-As verificações do lançador usam cópias descartáveis dos fontes e utilitários Linux usuais: GNU coreutils, `which`, `ps` e `setsid`. Elas cobrem PATH sem Python, preservação de argumentos, invalidação do cache, rejeição da ferramenta, compilação concorrente e recuperação após builds com falha ou interrompidos. O encerramento de grupos de processos nessas verificações comprova a recuperação do bootstrap; os limites de processos das futuras execuções de mutação continuam no M3.
+./bin/kof-mut run --project fixtures/invalid \
+  --files fixtures/invalid/scope.json --report .agent/tmp/invalid.json
+# exit 3: uma mutação CompileError, diagnóstico ARITH001
+```
 
-## Próximos marcos
+`--project`, `--files` e `--report` são obrigatórios e relativos ao cwd do chamador. `--config` é relativo ao projeto, com padrão `kof-mut.json`. `--run-id UUID` é opcional; sem ele, a ferramenta gera um UUID. Flags desconhecidas, argumentos incompletos e entradas inválidas retornam 2.
 
-M2 adiciona o ciclo de mutação, cópias explícitas dos inputs e todas as famílias de operadores planejadas. M3 adiciona limites de processo, encerramento de descendentes, relatórios e aceitação externa. M4 conclui os guias do CLI, operadores e relatório em inglês e português. Veja [o plano de execução](EXECPLAN.md), [a validação do lançador M1R](.agent/validation/kofmut-m1r.md) e [a evidência histórica do M1](.agent/validation/kofmut-v0.1.0.md).
+Cada fixture contém este formato de configuração:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceRoots": ["src"],
+  "testRoots": ["tests"],
+  "inputs": ["kof.toml", "src", "tests"],
+  "checkCommand": ["kof", "check", "src/math/Calc.kf", "--json"],
+  "testCommand": ["kof", "test", "tests"],
+  "commandTimeoutMs": 10000,
+  "budgetMs": 90000
+}
+```
+
+Escolha um destino de relatório fora das raízes de fonte/teste e dos caminhos de inputs copiados explicitamente. Configuração, arquivos de escopo e fontes Kof são protegidos contra sobrescrita pelo relatório.
+
+O escopo é um array JSON explícito, como `["src/math/Calc.kf"]`, sem globs. Os caminhos são normalizados, deduplicados e ordenados. Arquivo ausente, teste, extensão diferente de `.kf`, caminho fora de `sourceRoots`, escape do projeto e link simbólico no caminho selecionado são recusados antes de comandos do projeto.
+
+Declare em `inputs` fontes, imports, testes, manifesto e scripts necessários, incluindo arquivos novos não rastreados. Os comandos precisam verificar e testar o escopo escolhido. `.git`, relatórios e evidências do mutador são excluídos. Links internos de inputs são materializados somente quando o destino também pertence aos inputs; destinos externos e ciclos são recusados. A ferramenta captura os inputs antes da baseline e preserva bytes e permissões dos scripts. Cada variante recebe uma cópia independente desse snapshot. Alterações produzidas pelos comandos não passam para a próxima variante. Os originais e os testes são preservados.
+
+Os comandos usam argv separado, cwd da sandbox, ambiente herdado e stdin fechado. Cada processo começa em um grupo próprio. O prazo é o menor entre `commandTimeoutMs` e o orçamento global restante, medido por relógio monotônico desde a entrada de `run`, incluindo preparação e baseline. Ao vencer, o grupo é encerrado e a ausência de membros ativos é conferida em `/proc`; zombies não são processos ativos. Nenhum comando seguinte começa depois do orçamento. Sandboxes são removidas; stdout e stderr separados ficam por execução em `.agent/tmp/` do checkout da ferramenta. Comandos que abandonem deliberadamente seu grupo de processos não têm garantia de cancelamento nesta versão.
+
+## Operadores e evidência
+
+O lexer e o parser oficiais do Kof 0.6.4 selecionam e reanalisam uma troca por token. Famílias: `boundary` (`< ↔ <=`, `> ↔ >=`), `equality` (`== ↔ !=`), `logical` (`&& ↔ ||`), `boolean` (`true ↔ false`) e `arithmetic` (`+ ↔ -`, `* ↔ /`). Símbolos em comentários, strings, caracteres e delimitadores de genéricos são excluídos. Concatenações reconhecidas por literais, declarações e propagação local inequívoca também são excluídas. Aritmética de tipo incerto é validada pelo compilador.
+
+O percurso cobre funções, métodos, construtores, campos, lambdas, condicionais, laços, switch, try/catch/finally, declarações, chamadas, atribuições, acessos a arrays e retornos. Formas ainda não percorridas, como declarações de `record`, produzem limitações explícitas que impedem `complete`. Linha e coluna começam em 1; offset e comprimento usam índices UTF-16 de String da JVM, não bytes UTF-8. Compilação rejeitada e falta de evidência nunca contam como mutação detectada.
+
+A baseline exige check JSON válido, exit coerente, `success: true`, `filesChecked > 0` e zero erros, além de suítes Kof concluídas com casos executados e zero falhas. `filesChecked` não conta imports. O protocolo de `kof test` é interpretado por suíte e caso, separando filtros e SKIP de casos executados. Zero casos, resumo ausente, saída truncada ou contraditória são inconclusivos. Wrappers precisam preservar esses protocolos de 0.6.4.
+
+| Estado de mutante | Significado |
+| --- | --- |
+| `Killed` | Check válido e testes concluídos com falha reconhecida |
+| `Survived` | Check válido e testes concluídos sem falhas |
+| `CompileError` | Compilador rejeitou a variante com diagnóstico |
+| `Timeout` | Prazo encerrou check ou teste, com fase e limpeza registradas |
+| `TestError` | Evidência insuficiente, inválida ou falha do runner |
+| `Pending` | Avaliação não iniciada ou fase não iniciada por fim do orçamento |
+
+Não há instrumentação de cobertura ou estado `NoCoverage`. Sobreviventes e possíveis equivalentes exigem análise humana; não há exclusão automática nem percentual de aprovação.
+
+## Relatório JSON v1 e saídas
+
+O JSON UTF-8 é publicado por rename atômico e contém `schemaVersion`, `toolVersion`, `kofVersion`, `runId`, `status`, `scope`, `baseline`, `counts`, `mutants`, `limitations`, `startedAt` em UTC e `durationMs`. `baseline` contém `status` (`passed`, `failed`, `error`), `check` e `test`, com `exitCode`, `durationMs`, `summary`, `filesChecked`, `executedTests` e `failedTests`; valores não aplicáveis ou fases não iniciadas usam JSON null.
+
+`counts` contém inteiros não negativos: `candidates`, `executed`, `killed`, `survived`, `compileError`, `timeout`, `testError` e `pending`. Cada mutante contém `id`, `file`, `operator`, `original`, `replacement`, `location` (`line`, `column`, `offset`, `length`), `status`, `phase` (`parse`, `check`, `test`), `durationMs` e `evidence`, incluindo referências aos logs. Candidatos e estados reconciliam; `executed` soma todos os estados exceto `Pending`. O relatório humano imprime o UUID, totais por arquivo e localizações dos sobreviventes.
+
+| Exit | Status e interpretação |
+| --- | --- |
+| `0` | `complete`, pelo menos um candidato, todos `Killed`, sem limitações |
+| `1` | `complete` com sobreviventes |
+| `2` | `error` ou `baseline_failed` |
+| `3` | `incomplete`, `no_scope` ou `no_mutants` |
+
+`CompileError`, `Timeout`, `TestError`, `Pending` ou limitação impedem `complete`. Um relatório anterior nunca é lido como resultado atual; use `--run-id` para conferir a identidade de uma avaliação automatizada. Falha de publicação retorna 2 e deve ser tratada como erro, mesmo se um relatório antigo continuar no destino.
+
+## Validação e próximos marcos
+
+`./scripts/check` preserva os 21 contratos do lançador, executa testes Kof pelo CLI real e compila o programa de asserções do frontend com o jar instalado no classpath. O `kof test` de 0.6.4 não aceita `--classpath`; as provas de frontend usam o estilo oficial de programa completo com `assert`, sem um novo harness de testes.
+
+M3 amplia concorrência e recuperação e mede a aceitação externa no SiFuture dentro dos mesmos 90 segundos. Os resultados sintéticos do M2 não comprovam esse custo. M4 conclui os guias públicos detalhados. Veja [o plano](EXECPLAN.md), [a validação M2](.agent/validation/kofmut-m2.md) e os relatórios históricos [M1R](.agent/validation/kofmut-m1r.md) e [M1P](.agent/validation/kofmut-m1p.md).
 
 ## Licença
 

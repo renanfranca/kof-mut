@@ -1,0 +1,5 @@
+package src.math
+
+class Calc {
+    Int sum(Int a, Int b) { return a + b }
+}

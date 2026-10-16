@@ -1,0 +1,117 @@
+package kofmut
+
+import java.nio.file.Files
+import java.util.UUID
+
+record RunOptions(String project, String config, String files, String report, String runId)
+record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
+
+String readRequired(String path) {
+    var text = File(path).readText()
+    if (text != null) { return text }
+    throw "Cannot read file: " + path
+}
+
+String absolutePath(String path) {
+    return new java.io.File(path).getAbsoluteFile().toPath().normalize().toString()
+}
+
+RunOptions runOptions(String[] arguments) {
+    var values: Map<String, String> = mapOf()
+    var i = 1
+    while (i < arguments.length) {
+        var flag = arguments[i]
+        if (flag != "--project" && flag != "--config" && flag != "--files" && flag != "--report" && flag != "--run-id") { throw "Unknown flag: " + flag }
+        if (i + 1 >= arguments.length || arguments[i + 1].startsWith("--") || arguments[i + 1] == "" || values.containsKey(flag)) { throw "Missing or repeated argument: " + flag }
+        values.put(flag, arguments[i + 1])
+        i = i + 2
+    }
+    var project = values.get("--project")
+    var files = values.get("--files")
+    var report = values.get("--report")
+    if (project == null || files == null || report == null) { throw "run requires --project, --files and --report" }
+    if (project != null && files != null && report != null) {
+        var root = absolutePath(project)
+        var config = values.getOrDefault("--config", "kof-mut.json")
+        if (!new java.io.File(config).isAbsolute()) { config = root + "/" + config }
+        var runId = values.getOrDefault("--run-id", UUID.randomUUID().toString())
+        if (!runId.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) { throw "--run-id must be a UUID" }
+        return RunOptions(root, absolutePath(config), absolutePath(files), absolutePath(report), runId)
+    }
+    throw "Invalid arguments"
+}
+
+String relativeInput(String value) {
+    if (value == "" || new java.io.File(value).isAbsolute()) { throw "Expected relative project path: " + value }
+    var normalized = new java.io.File(value).toPath().normalize().toString()
+    if (normalized == ".." || normalized.startsWith("../")) { throw "Path escapes project: " + value }
+    return normalized
+}
+
+Bool underPath(String value, String root) { return root == "." || value == root || value.startsWith(root + "/") }
+
+void rejectLinkPath(String root, String relative) {
+    if (Files.isSymbolicLink(new java.io.File(root).toPath())) { throw "Symbolic project root" }
+    var current = root
+    for (var part in relative.split("/")) {
+        current = current + "/" + part
+        if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "Symbolic link in selected path: " + relative }
+    }
+}
+
+RunConfig loadConfig(RunOptions options) {
+    if (!File(options.project).isDirectory()) { throw "Project is not a directory" }
+    var text = readRequired(options.config)
+    validateConfigShape(text)
+    var config = json.decode<RunConfig>(text)
+    if (config.schemaVersion != 1 || config.commandTimeoutMs <= 0 || config.budgetMs <= 0 || config.sourceRoots.size == 0 || config.testRoots.size == 0 || config.inputs.size == 0 || config.checkCommand.size == 0 || config.testCommand.size == 0) { throw "Invalid configuration" }
+    for (var path in config.sourceRoots) { relativeInput(path) }
+    for (var path in config.testRoots) { relativeInput(path) }
+    for (var path in config.inputs) { relativeInput(path) }
+    if (config.checkCommand.get(0) == "" || config.testCommand.get(0) == "") { throw "Command executable must not be empty" }
+    return config
+}
+
+List<String> loadScope(RunOptions options, RunConfig config) {
+    var text = readRequired(options.files)
+    validateScopeShape(text)
+    var entries = json.decode<List<String>>(text)
+    var scope: List<String> = listOf()
+    for (var entry in entries) {
+        var path = relativeInput(entry)
+        rejectLinkPath(options.project, entry)
+        rejectLinkPath(options.project, path)
+        if (!path.endsWith(".kf") || !File(options.project + "/" + path).isFile()) { throw "Selected source is not a .kf file: " + entry }
+        var production = false
+        for (var root in config.sourceRoots) { if (underPath(path, relativeInput(root))) { production = true } }
+        for (var root in config.testRoots) { if (underPath(path, relativeInput(root))) { throw "Cannot mutate tests: " + path } }
+        if (!production) { throw "Selected path is outside sourceRoots: " + path }
+        var included = false
+        for (var input in config.inputs) { if (underPath(path, relativeInput(input))) { included = true } }
+        if (!included) { throw "Selected source is missing from inputs: " + path }
+        if (!scope.contains(path)) { scope.add(path) }
+    }
+    scope.sort()
+    return scope
+}
+
+void protectRunOutput(RunOptions options) {
+    var target = new java.io.File(options.report).getCanonicalPath()
+    var root = new java.io.File(options.project).getCanonicalPath()
+    if (target == new java.io.File(options.config).getCanonicalPath() || target == new java.io.File(options.files).getCanonicalPath() || target == root + "/kof.toml" || (underPath(target, root) && target.endsWith(".kf"))) { throw "Report destination overlaps a protected project input" }
+}
+
+Bool reportTargetAllowed(RunOptions options, RunConfig config) {
+    var target = new java.io.File(options.report).getCanonicalPath()
+    var root = new java.io.File(options.project).getCanonicalPath()
+    if (!underPath(target, root)) { return true }
+    if (target == root) { return false }
+    var relative = target.substring(root.length() + 1)
+    for (var input in config.inputs) {
+        var path = relativeInput(input)
+        if (path != "." && underPath(relative, path)) { return false }
+    }
+    for (var source in config.sourceRoots) { if (underPath(relative, relativeInput(source))) { return false } }
+    for (var tests in config.testRoots) { if (underPath(relative, relativeInput(tests))) { return false } }
+    return true
+}

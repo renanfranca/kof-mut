@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+phase="$1"
+mode="${2:-real}"
+if [[ -n "${KOF_MUT_OBSERVATIONS:-}" ]]; then
+    if [[ "$phase" == check ]]; then
+        printf '%s\0' "$@" > "$KOF_MUT_OBSERVATIONS/argv"
+        if IFS= read -r ignored; then printf 'open\n' > "$KOF_MUT_OBSERVATIONS/stdin"; else printf 'closed\n' > "$KOF_MUT_OBSERVATIONS/stdin"; fi
+        printf '%s\n' "$PWD" > "$KOF_MUT_OBSERVATIONS/cwd"
+        index=0
+        while [[ -e "$KOF_MUT_OBSERVATIONS/$index.source" ]]; do ((index+=1)); done
+        cp src/math/Calc.kf "$KOF_MUT_OBSERVATIONS/$index.source"
+        if [[ -e src/math/data.bin ]]; then cp src/math/data.bin "$KOF_MUT_OBSERVATIONS/$index.binary"; fi
+        if [[ -e src/math/alias.txt ]]; then
+            cp src/math/alias.txt "$KOF_MUT_OBSERVATIONS/$index.alias"
+            if [[ -L src/math/alias.txt ]]; then printf 'link\n' > "$KOF_MUT_OBSERVATIONS/$index.kind"; else printf 'file\n' > "$KOF_MUT_OBSERVATIONS/$index.kind"; fi
+        fi
+        if [[ -e state ]]; then printf 'dirty\n' > "$KOF_MUT_OBSERVATIONS/$index.state"; else printf 'clean\n' > "$KOF_MUT_OBSERVATIONS/$index.state"; fi
+        if [[ -e src/math/New.kf ]]; then cp src/math/New.kf "$KOF_MUT_OBSERVATIONS/$index.new"; fi
+    else
+        printf 'written by test command\n' > state
+    fi
+fi
+mutant=false
+if [[ -e src/math/original.txt ]] && ! cmp -s src/math/Calc.kf src/math/original.txt; then mutant=true; fi
+if [[ "$mutant" == true ]]; then
+    if [[ "$mode:$phase" == timeout:test ]]; then
+        : "${KOF_MUT_OBSERVATIONS:?}"
+        (trap '' TERM; printf '%s\n' "$BASHPID" > "$KOF_MUT_OBSERVATIONS/child.pid"; exec sleep 120) &
+        descendant=$!
+        printf '%s\n' "$BASHPID" > "$KOF_MUT_OBSERVATIONS/parent.pid"
+        while [[ ! -s "$KOF_MUT_OBSERVATIONS/child.pid" ]]; do sleep 0.01; done
+        kill -0 "$descendant"
+        printf 'ready\n' > "$KOF_MUT_OBSERVATIONS/ready"
+        wait "$descendant"
+        exit 0
+    fi
+    case "$mode:$phase" in
+        bad-json:check) printf 'not JSON\n'; exit 1 ;;
+        false-exit:check) printf '{"success":true,"filesChecked":1,"errorCount":0,"diagnostics":[]}\n'; exit 1 ;;
+        coerced-json:check) printf '{"success":"true","filesChecked":1.5,"errorCount":0,"diagnostics":[]}\n'; exit 0 ;;
+        missing-summary:test) printf 'SUITE tests/Suite.kf (1 tests)\nFAIL contract: failed\n0 passed, 1 failed\n'; exit 1 ;;
+        truncated:test) printf 'SUITE tests/Suite.kf (1 tests)\nFAIL contract: failed\n1 failed of 1 tests\n'; exit 1 ;;
+        skipped:test) printf 'SUITE tests/Suite.kf (1 tests)\nSKIP contract: setup failed\n0 failed of 1 tests\n1 passed, 0 failed\n'; exit 0 ;;
+        zero:test) printf '0 passed, 0 failed\n'; exit 0 ;;
+        contradiction:test) printf 'SUITE tests/Suite.kf (1 tests)\nPASS contract\n0 failed of 1 tests\n1 passed, 0 failed\n'; exit 1 ;;
+        header-mismatch:test) printf 'SUITE tests/Suite.kf (2 tests)\nFAIL contract: failed\n1 failed of 1 tests\n0 passed, 1 failed\n'; exit 1 ;;
+        runner-error:test) printf 'runner unavailable\n' >&2; exit 127 ;;
+    esac
+fi
+if [[ "$mode" == broken-link ]]; then ln -sf absent generated-link; fi
+if [[ "$phase" == check ]]; then exec kof check src/math/Calc.kf --json; fi
+exec kof test tests

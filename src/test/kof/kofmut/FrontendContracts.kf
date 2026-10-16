@@ -50,9 +50,10 @@ repeatedNestedOperators() {
 
     assert(result.errors.size == 0)
     assert(result.limitations.size == 0)
-    assert(result.sites.size == 2)
+    assert(result.sites.size == 3)
     assert(result.sites.get(0).offset == 45)
     assert(result.sites.get(1).offset == 56)
+    assert(result.sites.get(2).offset == 50)
     println("PASS frontend: repeated nested operators retain distinct token locations")
 }
 
@@ -107,14 +108,31 @@ frontendErrors() {
     println("PASS frontend: lexer and parser errors prevent candidate generation")
 }
 
-unsupportedForms() {
-    var source = "Bool choose(Int a, Int b) { if (a < b) { return true } return false }"
+controlFlowTraversal() {
+    var source = "Int choose(Int n) { var total = n + 1 if (n < 2) { total = total - 1 } else { total = total * 2 } while (total > 4) { total = total / 2 } do { total = total + 1 } while (total <= 0) for (var i = 0; i != 2; i++) { total = total + i } for (var x in listOf(1)) { total = total + x } switch (n) { case 1: total = total - 1 break default: total = total * 1 } try { total = total + 1 } catch (String e) { total = total - 1 } finally { total = total * 1 } return total }"
 
-    var result = scanSource(source, "Unsupported.kf")
+    var result = scanSource(source, "Control.kf")
+
+    assert(result.errors.size == 0)
+    for (var limitation in result.limitations) { println(limitation) }
+    assert(result.limitations.size == 0)
+    var sites = result.sites.sorted((a: MutationSite, b: MutationSite) -> a.offset - b.offset)
+    var expected = listOf("+", "<", "-", "*", ">", "/", "+", "<=", "!=", "+", "+", "-", "*", "+", "-", "*")
+    assert(sites.size == 16)
+    for (var i = 0; i < sites.size; i++) { assert(sites.get(i).original == expected.get(i)) }
+    var condition = scanSource("Bool choose(Int a, Int b) { if (a < b) { return true } return false }", "If.kf")
+    assert(condition.errors.size == 0)
+    assert(condition.limitations.size == 0)
+    assert(condition.sites.size == 3)
+    println("PASS frontend: conditionals, loops, switch, try, assignments and returns are traversed")
+}
+
+unsupportedForms() {
+    var result = scanSource("record Point(Int x)", "Unsupported.kf")
 
     assert(result.errors.size == 0)
     assert(result.limitations.size == 1)
-    assert(result.limitations.get(0).contains("dev.kof.compiler.IfStmt"))
+    assert(result.limitations.get(0).contains("RecordDeclarationNode"))
     assert(result.sites.size == 0)
     println("PASS frontend: unsupported AST forms produce explicit limitations")
 }
@@ -128,7 +146,87 @@ missingSource() {
     println("PASS frontend: missing source files produce errors")
 }
 
+allOperatorDirections() {
+    var source = "Bool comparisons(Int a, Int b) { var x = a < b var y = a <= b var z = a > b var w = a >= b var e = a == b var n = a != b return true && false || true } Int math(Int a, Int b) { return (a + b) - (a * b) / b }"
+
+    var result = scanSource(source, "Operators.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    var sites = result.sites.sorted((a: MutationSite, b: MutationSite) -> a.offset - b.offset)
+    var originals = listOf("<", "<=", ">", ">=", "==", "!=", "true", "&&", "false", "||", "true", "+", "-", "*", "/")
+    var replacements = listOf("<=", "<", ">=", ">", "!=", "==", "false", "||", "true", "&&", "false", "-", "+", "/", "*")
+    assert(sites.size == 15)
+    for (var i = 0; i < sites.size; i++) {
+        assert(sites.get(i).original == originals.get(i))
+        assert(sites.get(i).replacement == replacements.get(i))
+        var site = sites.get(i)
+        assert(source.substring(site.offset, site.offset + site.length) == originals.get(i))
+    }
+    println("PASS frontend: all fourteen operator directions use exact lexer tokens")
+}
+
+knownTextAndCallOperands() {
+    var source = "String label(String prefix) { var a = \"true\" var b = a var c = b + prefix return c + \"!\" } Int one() { return 1 } Int sum() { return one() + one() }"
+
+    var result = scanSource(source, "Text.kf")
+
+    assert(result.errors.size == 0)
+    for (var limitation in result.limitations) { println(limitation) }
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 1)
+    assert(result.sites.get(0).original == "+")
+    assert(result.sites.get(0).offset == 139)
+    var generic = scanSource("Int size(List<List<Int>> xs) { var letter = '<' var text = \"false + < &&\" return 1 + 2 }", "Generic.kf")
+    assert(generic.errors.size == 0)
+    assert(generic.limitations.size == 0)
+    assert(generic.sites.size == 1)
+    assert(generic.sites.get(0).original == "+")
+    println("PASS frontend: known text propagation is excluded and call operands retain exact extents")
+}
+
+compositeExpressionTraversal() {
+    var source = "Int value(Int n) { var a = new Int[1 + n] a[0] = if (n == 0) 1 + 2 else 3 - 1 var b = switch (n) { case 1 -> n * 2 default -> n / 2 } return a[0] + b } class Holder { String text = \"x\" Int numeric = 1 + 2 constructor(String prefix) { var label = prefix + \"!\" } Bool ready() { return false } }"
+
+    var result = scanSource(source, "Composite.kf")
+
+    for (var error in result.errors) { println(error) }
+    assert(result.errors.size == 0)
+    for (var limitation in result.limitations) { println(limitation) }
+    assert(result.limitations.size == 0)
+    var sites = result.sites.sorted((a: MutationSite, b: MutationSite) -> a.offset - b.offset)
+    var expected = listOf("+", "==", "+", "-", "*", "/", "+", "+", "false")
+    assert(sites.size == 9)
+    for (var i = 0; i < sites.size; i++) { assert(sites.get(i).original == expected.get(i)) }
+    println("PASS frontend: array access, allocation and conditional expressions preserve nested candidates")
+}
+
+textScopesAndUnaryOperands() {
+    var fields = scanSource("class Labels { String label = \"x\" String show(Int n) { return this.label + n } }", "Fields.kf")
+    assert(fields.errors.size == 0)
+    assert(fields.limitations.size == 0)
+    assert(fields.sites.size == 0)
+
+    var shadow = scanSource("String label(String text) { for (var text in listOf(1)) { var value = text + 1 } return text + 2 }", "Scopes.kf")
+    assert(shadow.errors.size == 0)
+    assert(shadow.limitations.size == 0)
+    assert(shadow.sites.size == 1)
+    assert(shadow.sites.get(0).offset == 75)
+
+    var unary = scanSource("Int difference(Int a, Int b) { return -a - -b }", "Unary.kf")
+    assert(unary.errors.size == 0)
+    assert(unary.limitations.size == 0)
+    assert(unary.sites.size == 1)
+    assert(unary.sites.get(0).offset == 41)
+    println("PASS frontend: declared text fields, local shadowing and unary operands retain exact selection")
+}
+
 main() {
+    textScopesAndUnaryOperands()
+    compositeExpressionTraversal()
+    knownTextAndCallOperands()
+    controlFlowTraversal()
+    allOperatorDirections()
     binaryTokenLocation()
     memberAndLambdaTraversal()
     fileReading()
