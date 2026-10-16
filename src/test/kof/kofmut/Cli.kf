@@ -1,4 +1,25 @@
 import java.lang.System
+import java.lang.Thread
+import java.nio.file.Files
+
+record Observation(List<String> arguments, String cwd, String environment)
+
+String disposableProject() {
+    Directory(".agent/tmp").createDirectories()
+    var temporary = Files.createTempDirectory(new java.io.File(".agent/tmp").toPath(), "launcher-").toString()
+    var project = new java.io.File(temporary + "/project with spaces").getCanonicalPath()
+    assert(Directory(project).createDirectories())
+    var copied = process.run("/bin/cp", "-a", "bin", "scripts", "src", "VERSION", "kof.toml", project)
+    assert(copied.exitCode == 0)
+    return project
+}
+
+String controlledPath(String project) {
+    assert(Directory(project + "/toolchain").createDirectories())
+    var copied = process.run("/bin/cp", "-a", "src/test/fixtures/controlled-toolchain/kof", project + "/toolchain/kof")
+    assert(copied.exitCode == 0)
+    return project + "/toolchain:" + System.getenv("PATH")
+}
 
 test "source launcher prints the version from VERSION" {
     var expected = File("VERSION").readText()
@@ -19,10 +40,240 @@ test "source launcher prints the version from VERSION" {
 test "unsupported Kof is rejected before using a cached build" {
     var fake = Path("src/test/fixtures/unsupported-toolchain/bin").toAbsolute().path()
     var inherited = System.getenv("PATH")
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
 
-    var result = process.run("env", "PATH=" + fake + ":" + inherited, "./bin/kof-mut", "--version")
+    var result = process.run("env", "PATH=" + fake + ":" + inherited, "KOF_MUT_TEST_KOF=" + kof, "./bin/kof-mut", "--version")
 
     assert(result.exitCode == 2)
     assert(result.stderr.contains("requires Kof/compiler/runtime/stdlib 0.6.4"))
     assert(!result.stdout.contains("KofMut 0.1.0"))
+}
+
+test "source launcher works with no Python executable on PATH" {
+    var root = Path(".").toAbsolute().path()
+    Directory(root + "/.agent/tmp").createDirectories()
+    var temporary = Files.createTempDirectory(new java.io.File(root + "/.agent/tmp").toPath(), "no-python-").toString()
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    for (var tool in listOf("bash", "dirname", "readlink", "sed", "head", "mktemp", "rm")) {
+        var linked = process.run("/bin/ln", "-s", "/usr/bin/" + tool, temporary + "/" + tool)
+        assert(linked.exitCode == 0)
+    }
+    var linkedKof = process.run("/bin/ln", "-s", kof, temporary + "/kof")
+    assert(linkedKof.exitCode == 0)
+
+    try {
+        var result = process.run("/usr/bin/env", "PATH=" + temporary, root + "/bin/kof-mut", "--version")
+
+        if (result.exitCode != 0) { println(result.stderr) }
+        assert(result.exitCode == 0, "launcher must run without Python on PATH")
+        assert(result.stdout.trim() == "KofMut 0.1.0")
+    } finally {
+        var removed = process.run("/bin/rm", "-rf", temporary)
+        assert(removed.exitCode == 0)
+    }
+}
+
+test "launcher preserves argv cwd environment and application exit status" {
+    var project = disposableProject()
+    var caller = project + "/caller"
+    assert(Directory(caller).createDirectories())
+    var copied = process.run("/bin/cp", "src/test/fixtures/LaunchObservation.kf", project + "/src/main/kof/kofmut/Main.kf")
+    assert(copied.exitCode == 0)
+
+    try {
+        var result = process.run("/usr/bin/env", "--chdir=" + caller, "KOF_MUT_TEST_VALUE=env 😀 value", project + "/bin/kof-mut", "", "space value", "ação 😀", "line\nbreak", "$(touch INJECTED);*'\"\\", "--target", "not-a-target", "--deps", "missing-dependency")
+
+        if (result.exitCode != 23) { println(result.stderr) }
+        assert(result.exitCode == 23, "application exit status must be preserved")
+        var observed = json.decode<Observation>(result.stdout)
+        assert(observed.arguments.size() == 9)
+        assert(observed.arguments[0] == "")
+        assert(observed.arguments[1] == "space value")
+        assert(observed.arguments[2] == "ação 😀")
+        assert(observed.arguments[3] == "line\nbreak")
+        assert(observed.arguments[4] == "$(touch INJECTED);*'\"\\")
+        assert(observed.arguments[5] == "--target")
+        assert(observed.arguments[6] == "not-a-target")
+        assert(observed.arguments[7] == "--deps")
+        assert(observed.arguments[8] == "missing-dependency")
+        assert(observed.cwd == caller)
+        assert(observed.environment == "env 😀 value")
+        assert(!File(caller + "/INJECTED").exists())
+    } finally {
+        assert(Directory(project).delete())
+    }
+}
+
+test "failure to prepare the launch handoff returns an explicit error" {
+    var missing = Path(".agent/tmp/missing-handoff-" + System.nanoTime()).toAbsolute().path()
+
+    var result = process.run("/usr/bin/env", "TMPDIR=" + missing, "./bin/kof-mut", "--version")
+
+    assert(result.exitCode == 2, "launch preparation failure must return 2")
+    assert(result.stdout == "")
+    assert(result.stderr.contains("kof-mut: cannot create launch handoff"))
+}
+
+test "cache is reused and invalidated by VERSION and source contents" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+
+    try {
+        var first = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        var second = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        assert(first.exitCode == 0)
+        assert(second.exitCode == 0)
+        assert(File(log).readText() == "build\n", "unchanged input must reuse the compiled application")
+
+        assert(File(project + "/VERSION").writeText("0.1.0-cache-proof\n"))
+        var version = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        assert(version.exitCode == 0)
+        assert(version.stdout == "KofMut 0.1.0-cache-proof\n")
+        assert(File(log).readText() == "build\nbuild\n", "VERSION must invalidate the cache")
+
+        var copied = process.run("/bin/cp", "src/test/fixtures/LaunchObservation.kf", project + "/src/main/kof/kofmut/Main.kf")
+        assert(copied.exitCode == 0)
+        var source = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_VALUE=new source", project + "/bin/kof-mut")
+        assert(source.exitCode == 23)
+        assert(source.stdout.contains("new source"))
+        assert(File(log).readText() == "build\nbuild\nbuild\n", "changed source bytes must invalidate the cache")
+    } finally {
+        assert(Directory(project).delete())
+    }
+}
+
+test "invalid toolchain JSON cannot launch an existing cached application" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+
+    try {
+        var valid = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        assert(valid.exitCode == 0)
+
+        var invalid = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_INFO=invalid", project + "/bin/kof-mut", "--version")
+
+        assert(invalid.exitCode == 2)
+        assert(invalid.stdout == "")
+        assert(invalid.stderr.contains("kof-mut:"))
+        assert(File(log).readText() == "build\n", "invalid toolchain evidence must stop before building or launching")
+    } finally {
+        assert(Directory(project).delete())
+    }
+}
+
+test "toolchain executable remains fixed if its PATH link changes after discovery" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var original = project + "/toolchain/original-kof"
+    var replacement = project + "/toolchain/replacement-kof"
+    var link = project + "/toolchain/kof"
+    assert(process.run("/bin/mv", link, original).exitCode == 0)
+    assert(File(replacement).writeText("#!/bin/sh\necho 'replacement toolchain must not run' >&2\nexit 91\n"))
+    assert(process.run("/bin/chmod", "+x", replacement).exitCode == 0)
+    assert(process.run("/bin/ln", "-s", original, link).exitCode == 0)
+
+    try {
+        var result = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_LINK=" + link, "KOF_MUT_TEST_REPLACEMENT=" + replacement, project + "/bin/kof-mut", "--version")
+
+        if (result.exitCode != 0) { println(result.stderr) }
+        assert(result.exitCode == 0)
+        assert(result.stdout == "KofMut 0.1.0\n")
+        assert(File(log).readText() == "build\n")
+        assert(new java.io.File(link).getCanonicalPath() == replacement)
+    } finally {
+        assert(Directory(project).delete())
+    }
+}
+
+test "compiler failure after emitting classes is rejected and retried" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+
+    try {
+        var failed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_BUILD=fail-after-output", project + "/bin/kof-mut", "--version")
+
+        assert(failed.exitCode == 2)
+        assert(failed.stdout == "")
+        assert(failed.stderr.contains("controlled compilation failure after output"))
+        var retry = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        assert(retry.exitCode == 0)
+        assert(retry.stdout == "KofMut 0.1.0\n")
+        assert(File(log).readText() == "build\nbuild\n", "failed compilation must not publish a usable cache entry")
+    } finally {
+        assert(Directory(project).delete())
+    }
+}
+
+test "concurrent cold launches compile the application exactly once" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var first = process.spawn("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+    var second = process.spawn("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+
+    try {
+        var deadline = System.currentTimeMillis() + 30000
+        while ((first.alive() || second.alive()) && System.currentTimeMillis() < deadline) { Thread.sleep(25) }
+
+        assert(!first.alive() && !second.alive(), "concurrent launches must finish")
+        assert(first.exitCode() == 0)
+        assert(second.exitCode() == 0)
+        assert(first.readLine() == "KofMut 0.1.0")
+        assert(second.readLine() == "KofMut 0.1.0")
+        assert(File(log).readText() == "build\n", "the second process must recheck the cache after acquiring the lock")
+    } finally {
+        if (first.alive()) { first.kill() }
+        if (second.alive()) { second.kill() }
+        assert(Directory(project).delete())
+    }
+}
+
+test "interrupted compilation cannot publish classes and a fresh launch succeeds" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var ready = project + "/compiler-ready"
+    var interrupted = process.spawn("/usr/bin/setsid", "/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_BUILD=interrupt-after-output", "KOF_MUT_TEST_READY=" + ready, project + "/bin/kof-mut", "--version")
+    var group = ""
+
+    try {
+        var deadline = System.currentTimeMillis() + 30000
+        while (!File(ready).exists() && interrupted.alive() && System.currentTimeMillis() < deadline) { Thread.sleep(25) }
+        assert(File(ready).exists(), "controlled compiler must finish emitting classes before interruption")
+        var staging = File(ready).readText()
+        assert(staging != null)
+        if (staging != null) { assert(File(staging.trim() + "/classes/Default/Main.class").isFile()) }
+        var compilerPid = File(ready + ".pid").readText()
+        assert(compilerPid != null)
+        if (compilerPid != null) {
+            var pgid = process.run("/bin/ps", "-o", "pgid=", "-p", compilerPid.trim())
+            assert(pgid.exitCode == 0)
+            group = pgid.stdout.trim()
+        }
+        assert(group != "")
+        assert(process.run("/bin/kill", "-TERM", "--", "-" + group).exitCode == 0)
+        deadline = System.currentTimeMillis() + 10000
+        while (interrupted.alive() && System.currentTimeMillis() < deadline) { Thread.sleep(25) }
+        assert(!interrupted.alive(), "interrupted launcher must terminate")
+        assert(interrupted.exitCode() != 0)
+
+        var retry = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        assert(retry.exitCode == 0)
+        assert(retry.stdout == "KofMut 0.1.0\n")
+        assert(File(log).readText() == "build\nbuild\n", "interrupted output must not be reused as a complete build")
+    } finally {
+        if (group != "") { var killed = process.run("/bin/kill", "-KILL", "--", "-" + group) }
+        if (interrupted.alive()) { interrupted.kill() }
+        assert(Directory(project).delete())
+    }
 }

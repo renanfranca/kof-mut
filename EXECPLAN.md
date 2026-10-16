@@ -2,19 +2,19 @@
 
 ## Purpose and success
 
-Construir o **KofMut**, ferramenta de teste de mutação específica para Kof, com lógica escrita em Kof e execução inicial na JVM em Linux. Seu repositório futuro será `renanfranca/kof-mut`, público, e o checkout local será `/home/renanfranca/projects/kof-mut`.
+Construir o **KofMut**, ferramenta de teste de mutação específica para Kof, com lógica escrita em Kof e execução inicial na JVM em Linux. O repositório é `renanfranca/kof-mut`, e o checkout local é `/home/renanfranca/projects/kof-mut`.
 
 O usuário executará a ferramenta sobre arquivos de produção escolhidos. Ela confirmará a situação original dos testes, criará alterações individuais em cópias temporárias dos arquivos `.kf`, executará o comando de testes do projeto e apresentará quais alterações foram detectadas e quais sobreviveram. O código original e os testes originais permanecerão preservados.
 
 O produto precisa funcionar sem Codex, Katacombs ou SiFuture. Um relatório JSON versionado permitirá integrar os sensores depois. A primeira entrega pública será **fonte utilizável com instruções**, licença GPLv3 e documentação em inglês e português. Não inclui instalador nem publicação de pacote binário.
 
-**Estado deste documento:** plano elaborado em 2026-10-15; M1 implementado e validado localmente em 2026-10-16. M2 a M4 continuam pendentes. O usuário autorizou iniciar o trabalho local e continuar com GPT 6.1 Sol, esforço xhigh. Criação do repositório público, commits e push continuam exigindo instrução explícita que cubra essas ações. Preparar código, testes e documentação antes dessa publicação. Nunca publicar um checkout com pendências como se estivesse validado.
+**Estado deste documento:** plano elaborado em 2026-10-15; M1 e M1R implementados e validados em 2026-10-16. M1R substituiu o lançador Python por Kof. M2 a M4 continuam pendentes. O usuário confirmou GPT 6.1 Sol, esforço xhigh. Novos commits e publicações exigem instrução explícita. Nunca apresentar pendências como validadas.
 
 ## Context and limits
 
 ### Execução autorizada em 2026-10-16
 
-O usuário autorizou iniciar o plano e confirmou continuar com **GPT 6.1 Sol, esforço xhigh**, substituindo a escolha Luna/high do planejamento. Esta é a cópia de execução do plano original. M1 está concluído; M2 é o próximo marco. O diretório estava vazio, e foi inicializado um repositório local na branch `kofmut-frontend`, sem commits ou publicação. Não foram criados worktrees nem subagentes.
+O usuário autorizou iniciar o plano e confirmou continuar com **GPT 6.1 Sol, esforço xhigh**, substituindo a escolha Luna/high do planejamento. Esta é a cópia de execução do plano original. M1 e M1R estão concluídos; o próximo marco é M2. A execução atual encerra no M1R aprovado. O repositório está na branch `kofmut-frontend`, HEAD `adec628b08d1a221801295463ae642856ce502ee`, acompanhando `origin/kofmut-frontend`. Esse commit e a publicação foram observados durante o planejamento do M1R, realizados externamente a esta execução. As alterações do M1R estão locais e sem commit. Não foram criados novos commits, worktrees, subagentes ou publicações.
 
 No início, `kof info --json` confirmou Kof 0.6.4 com JDK 25 embutido. Durante a execução, o executável no PATH mudou externamente para 0.6.5. As provas finais usaram explicitamente o `bin/` da distribuição 0.6.4 no início do PATH; não foi atualizado ou alterado Kof por este trabalho. As fontes locais consultadas estavam em `53efd25fdb8dfec1fbbd989c1f482b2ee38c3ce8`; elas orientaram a pesquisa, e as provas executaram contra o jar 0.6.4. Seu SHA-256 é `137a838d38757e317545474d55ad6a3ad291fb86d263ae77d9197cf705829c62`. A tabela abaixo preserva as observações históricas do planejamento.
 
@@ -59,7 +59,7 @@ O [licenciamento do Kof](/home/renanfranca/projects/kof/docs/distribution/LICENS
 
 Trabalhar no checkout indicado, sem worktrees nem subagentes automáticos. Usar TDD por comportamento, testes Kof e provas do CLI. Não usar implement-approved-plan, controlador de fases, framework de mutação de outra linguagem ou um segundo parser de Kof.
 
-A lógica de seleção, transformação, execução e relatório ficará em Kof. O lançador poderá apenas localizar a distribuição, compilar e iniciar o programa. Usar APIs existentes para arquivos, JSON e processos; interoperabilidade JVM fica nas fronteiras com o frontend e nas necessidades de processo que a stdlib não cubra. Se uma prova revelar que isso exige mover o motor para Java/Python/JS ou modificar Kof, parar nesse marco e registrar o bloqueio; não trocar a linguagem silenciosamente.
+A lógica de seleção, transformação, execução e relatório ficará em Kof. O lançador poderá apenas localizar a distribuição, compilar e iniciar o programa. Usar APIs existentes para arquivos, JSON e processos; interoperabilidade JVM fica nas fronteiras com o frontend, nas necessidades de processo que a stdlib não cubra e nas operações de bytes, hashes, bloqueio e publicação do bootstrap aprovadas no M1R. Se uma prova revelar que isso exige mover o motor para Java/Python/JS ou modificar Kof, parar nesse marco e registrar o bloqueio; não trocar a linguagem silenciosamente.
 
 Não copiar fontes do SiFuture, transcrições, respostas integrais de modelos ou credenciais para o projeto público. Criar fixtures sintéticas pequenas. Não alterar Kof, Katacombs, SiFuture, skills globais ou a memória fora deste plano. Uma demonstração no SiFuture será somente de leitura do checkout original, com trabalho em cópias descartáveis.
 
@@ -69,7 +69,15 @@ Não copiar fontes do SiFuture, transcrições, respostas integrais de modelos o
 
 O caminho real do executável Kof é resolvido uma vez, antes de consultar sua versão, e usado também na compilação. Uma prova descartável trocou o link `kof` depois de `info`: a forma sem fixar o caminho falhou ao compilar com a ferramenta substituta; a forma atual preservou a instalação descoberta e retornou a versão correta com exit 0.
 
-O lançador usa Bash e a biblioteca padrão do Python 3.9 ou posterior para localizar a distribuição por JSON, calcular a chave do cache, serializar a compilação e iniciar a JVM. Essa escolha evita interpretar JSON com ferramentas de texto ou compilar um segundo bootstrap Kof a cada lançamento. A consequência é uma dependência explícita de Python no lançador. Toda análise de fonte e da AST fica em Kof. O classpath usa o jar instalado, sem redistribuí-lo.
+Historicamente, M1 usou Bash e Python 3.9 para localizar a distribuição, calcular o cache, serializar a compilação e iniciar a JVM. M1R substitui essa decisão: essas responsabilidades serão escritas em Kof, com APIs JDK para bytes, SHA-256, bloqueio de arquivo e publicação atômica. A stdlib Kof será usada para JSON e subprocessos. O classpath continua usando o jar instalado, sem redistribuí-lo.
+
+### Decisões aprovadas do M1R
+
+`scripts/bootstrap/Launch.kf` será executado pelo Kof fixado por caminho real. `scripts/launch` será a ponte Bash mínima compartilhada pelos dois pontos de entrada. Ela preservará os argumentos originais fora de `kof run`, pois o CLI 0.6.4 interpreta opções como `--target` mesmo depois do arquivo. O bootstrap recebe apenas raiz, executável fixado, modo e caminho de entrega; escreve `kofmut-launch-v1` seguido do argv Java em campos UTF-8 terminados por NUL. Bash valida a entrega e faz `exec` com os argumentos originais, sem `eval` ou `sh -c`. stdout do bootstrap é encaminhado a stderr.
+
+O cache usará `build/cache/kof-bootstrap-v1/`, separado do cache Python. A chave inclui modo, caminhos e informações da instalação fixada, conteúdo do jar, manifesto, VERSION, fontes e lançadores. Um bloqueio cobre a verificação e a compilação; o build será publicado por movimento atômico de diretório temporário no mesmo filesystem, somente após exit 0 e presença de `Default.Main`. Falha de preparação, compilação ou publicação retorna 2, sem reutilizar saída parcial. O bootstrap é compilado a cada chamada; não haverá um segundo cache para ele neste marco. Medir custo frio e quente sem alterar o orçamento de integração de 90 segundos.
+
+As provas descartáveis contra 0.6.4 confirmaram JSON tipado, `shell.runWith` com cwd/ambiente, `RandomAccessFile`/`FileChannel.lock`, SHA-256 do jar, caminhos canônicos, diretório temporário, `ATOMIC_MOVE` e entrega NUL com Unicode. Usar `java.io.File.toPath()`; sobrecargas de `Paths.get` e `toRealPath` produziram bytecode inválido nessa versão. Essas provas não substituem os testes de aceitação do lançador completo.
 
 A compilação usa `kof build --target jvm --classpath ... --output ...` com uma raiz `[sources] app` declarada no diretório temporário. Na versão instalada, entrada posicional não percorre subpacotes e a classe main do módulo é `Default.Main`, mesmo com os arquivos em `package kofmut`; ambos foram comprovados. O cache considera fontes, VERSION, manifesto, lançador, informações da instalação e conteúdo do jar, com bloqueio e rename da compilação pronta.
 
@@ -172,6 +180,14 @@ Provas: leitura de arquivo, lexer/parser, associação precisa de um operador à
 
 Validação futura: `./bin/kof-mut --version` e `./scripts/check`. A versão exibida deve vir de `VERSION`; os testes precisam executar chamadas reais ao frontend instalado e verificar localização de um operador. Se o acesso necessário ao frontend não funcionar em Kof, registrar a prova mínima e parar antes de M2, sem implementar o núcleo em outra linguagem.
 
+### M1R — Bootstrap em Kof, sem Python
+
+Pré-condição para iniciar M2. Substituir `scripts/launch.py` por `scripts/bootstrap/Launch.kf` e pela ponte mínima `scripts/launch`; atualizar `bin/kof-mut` e `scripts/check`. Preservar seleção e frontend existentes. Remover o arquivo Python após a substituição comprovada. Atualizar README.md e README.pt_BR.md, mantendo identificadores técnicos canônicos.
+
+Expandir os testes Kof do CLI para executar sem Python no PATH; comprovar argumentos vazios, espaços, Unicode, nova linha, metacaracteres, `--target` e `--deps`, cwd e ambiente; invalidação de cache por VERSION e fonte; executável fixado mesmo após troca de link; rejeição de versão e JSON inválidos; falha de compilação mesmo com classes emitidas; concorrência com cache frio sem builds duplicados; interrupção sem cache parcial utilizável e nova tentativa bem-sucedida. Manter os dois comportamentos originais do CLI e as nove provas do frontend.
+
+Validar por `PATH=/home/renanfranca/.local/share/kof/kof-0.6.4-linux-x86_64/bin:$PATH ./scripts/check`, exit 0, e repetir em cópia sem `.git`, `build/` ou logs pessoais, num caminho com espaços e PATH sem Python. Registrar tempos de chamadas fria/quente, prova negativa com versão incompatível e `git diff --check`. Acrescentar `.agent/validation/kofmut-m1r.md` e manifesto de fontes próprio, preservando relatório e manifesto históricos do M1. Nenhuma aceitação pendente pode ser marcada como concluída; se 0.6.4 impedir uma garantia necessária, registrar o bloqueio sem restaurar Python silenciosamente ou alterar Kof.
+
 ### M2 — Primeiro ciclo completo e operadores definidos
 
 Implementar configuração/escopo, baseline, sandboxes, operadores e execução no contrato estabelecido. Separar responsabilidades por comportamento; não criar classes que só encaminhem chamadas. Adicionar fixtures sintéticas de projeto e testes Kof do CLI, mantendo código explicável por nomes e testes, sem comentários que narrem a implementação.
@@ -201,13 +217,26 @@ Se houver autorização explícita para publicação, verificar nome/disponibili
 - [x] Direção, limites, licença, idiomas e contrato de integração documentados.
 - [x] Evidência básica de interoperabilidade e limites do ambiente registrados.
 - [x] M1 — Base, lançador, leitura de arquivo, associação AST/token, percurso requerido e diagnósticos comprovados em Kof 0.6.4; evidências em `.agent/validation/kofmut-v0.1.0.md`.
+- [x] M1R — Bootstrap em Kof, sem Python; 11 testes do CLI e nove provas do frontend verdes, inclusive em cópia limpa com espaços e PATH sem Python; evidências em `.agent/validation/kofmut-m1r.md`.
 - [ ] M2 — Ciclo mínimo, operadores e testes de comportamento.
 - [ ] M3 — Robustez, relatórios e aceitação externa.
 - [ ] M4 — Documentação e entrega revisável; publicação apenas quando autorizada.
 
 ## Validation
 
-M1 foi executado em 2026-10-16. A evidência observada está na seção seguinte. Os critérios de mutação, isolamento, processos e relatório na tabela continuam **previstos** para M2 a M4; não foram marcados como concluídos pela prova do frontend.
+M1 e M1R foram executados em 2026-10-16. As evidências observadas estão nas seções seguintes. Os critérios de mutação, isolamento, processos e relatório na tabela continuam **previstos** para M2 a M4; não foram marcados como concluídos pelas provas do frontend ou do bootstrap.
+
+### Evidência observada do M1R
+
+`scripts/launch.py` foi removido. `scripts/bootstrap/Launch.kf` prepara os modos `app` e `contracts`, e `scripts/launch` faz a entrega `kofmut-launch-v1` e o `exec` final. As cópias usam bytes pela stdlib Kof: a sobrecarga de `Files.copy` produziu falha de geração de bytecode em 0.6.4. A revisão estrutural identificou o risco de ler fontes em momentos diferentes para chave e cópia; agora `SourceSnapshot` conserva os mesmos bytes para ambas. Uma prova separada confirmou o record com `Int[]`, JSON e cópia idêntica por `cmp` contra 0.6.4.
+
+`PATH=/home/renanfranca/.local/share/kof/kof-0.6.4-linux-x86_64/bin:$PATH ./scripts/check` retornou 0: 11 testes do CLI e nove provas do frontend. Foram comprovados: ausência de Python; argumentos exatos, cwd externo, ambiente e exit 23 da fixture; erro de preparação com exit 2; reutilização e invalidação por VERSION/fonte; rejeição de JSON inválido e versão incompatível antes do cache; executável fixado após troca de link; compilador retornando erro após emitir classes; duas chamadas simultâneas com uma compilação; interrupção após classes emitidas e nova compilação bem-sucedida. Os testes de ausência de Python e erro de preparação registraram falhas antes das respectivas correções.
+
+Uma cópia sem `.git`, `build/` ou logs, num caminho com espaços, repetiu `./scripts/check` com exit 0 e os mesmos 20 comportamentos. Preparação e execução usaram PATH restrito a `bash`, `dirname`, `readlink`, `sed`, `head`, `mktemp`, `rm`, `env` e o Kof fixado; `command -v python` e `command -v python3` não encontraram executáveis. As ferramentas auxiliares dos testes foram chamadas por caminhos absolutos, sem Python.
+
+Após preservar o build validado fora da cópia, uma chamada de `--version` com cache frio levou **4,46 s** e a seguinte com cache quente levou **2,64 s**, ambas exit 0, stdout `KofMut 0.1.0` e stderr vazio. São amostras locais de inicialização, não prova do orçamento da futura integração. O bootstrap continua compilando a cada chamada; o orçamento de 90 segundos permanece inalterado. O PATH padrão com Kof 0.6.5 foi rejeitado com exit 2. Não foi declarado novo suporte.
+
+README.md e README.pt_BR.md documentam os mesmos requisitos, protocolo, namespace de cache e limites. `git diff --check` e `bash -n` dos lançadores e fixtures retornaram 0. O relatório e manifesto históricos do M1 foram preservados. O [relatório M1R](.agent/validation/kofmut-m1r.md) e seu [manifesto](.agent/validation/kofmut-m1r.sha256) identificam a árvore atual. M2 continua pendente, começando por função aritmética detectada e fixture sobrevivente. Nenhum sensor foi ativado.
 
 ### Evidência observada do M1
 
@@ -217,7 +246,7 @@ Uma cópia sem `.git`, `build/` ou logs pessoais, num caminho com espaços, exec
 
 O ciclo de TDD registrou ausência do lançador, ausência da API de análise, análise sem candidatos e ausência da API de arquivo como falhas anteriores às implementações correspondentes. Os casos adicionais de erro e associação verificaram guardas já presentes. As expectativas de offsets foram conferidas de forma independente, incluindo offset UTF-16 44 contra byte UTF-8 46 no exemplo com emoji.
 
-O relatório de validação registra os limites: seleção inicial somente de `<` para `<=`, outros operadores e formas de AST ainda pendentes; `run` indisponível; nenhum baseline, mutante executado, JSON, orçamento global ou cancelamento implementado. Não avançar ao plano dos sensores a partir deste marco. A próxima sessão começa em M2 com função aritmética detectada e fixture sobrevivente.
+O relatório histórico de validação registra os limites: seleção inicial somente de `<` para `<=`, outros operadores e formas de AST ainda pendentes; `run` indisponível; nenhum baseline, mutante executado, JSON, orçamento global ou cancelamento implementado. Não avançar ao plano dos sensores a partir deste marco. A continuação atual está registrada no M1R acima; M2 permanece como próximo marco.
 
 | Critério | Contexto, ação e resultado esperado | Evidência futura |
 | --- | --- | --- |

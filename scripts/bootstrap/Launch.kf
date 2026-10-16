@@ -1,0 +1,123 @@
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+
+record Installation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
+record SourceSnapshot(String path, Int[] bytes)
+
+String fileHash(String path) {
+    var file = new java.io.File(path)
+    var bytes = Files.readAllBytes(file.toPath())
+    var digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    return HexFormat.of().formatHex(digest)
+}
+
+List<String> sourcesUnder(String directory) {
+    var result: List<String> = listOf()
+    for (var name in Directory(directory).list()) {
+        var path = directory + "/" + name
+        if (File(path).isDirectory()) {
+            for (var nested in sourcesUnder(path)) { result.add(nested) }
+        } else if (path.endsWith(".kf")) {
+            result.add(path)
+        }
+    }
+    return result
+}
+
+void compileSources(String root, String kof, String jar, List<SourceSnapshot> sources, String temporary) {
+    for (var source in sources) {
+        var relative = "kofmut/Main.kf"
+        var prefix = root + "/src/main/kof/"
+        if (source.path.startsWith(prefix)) { relative = source.path.substring(prefix.length()) }
+        var target = new java.io.File(temporary + "/sources/" + relative)
+        var parent = target.getParentFile()
+        if (!parent.mkdirs() && !parent.isDirectory()) { throw "cannot create source directory" }
+        if (!File(target.toString()).writeBytes(source.bytes)) { throw "cannot copy source bytes" }
+    }
+    if (!File(temporary + "/kof.toml").writeText("[sources]\napp = \"sources\"\n")) { throw "cannot write build manifest" }
+    var command = listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", temporary + "/classes")
+    var result = shell.runWith(command, temporary, mapOf())
+    if (result.exitCode != 0) { throw "Kof compilation failed:\n" + result.stdout + result.stderr }
+    if (!File(temporary + "/classes/Default/Main.class").isFile()) { throw "Kof did not emit the verified entry point Default.Main" }
+}
+
+void publishBuild(String root, String kof, String jar, List<SourceSnapshot> sources, String cache, String build) {
+    if (File(build + "/classes/Default/Main.class").isFile()) { return }
+    var temporaryPath = Files.createTempDirectory(new java.io.File(cache).toPath(), "compile-")
+    var temporary = temporaryPath.toString()
+    try {
+        compileSources(root, kof, jar, sources, temporary)
+        if (File(build).exists() && !Directory(build).delete()) { throw "cannot remove incomplete cache entry" }
+        var published = Files.move(temporaryPath, new java.io.File(build).toPath(), StandardCopyOption.ATOMIC_MOVE)
+    } finally {
+        if (File(temporary).exists() && !Directory(temporary).delete()) { throw "cannot clean compilation directory" }
+    }
+}
+
+void ensureBuild(String root, String kof, String jar, List<SourceSnapshot> sources, String cache, String build) {
+    var lockFile = new RandomAccessFile(cache + "/build.lock", "rw")
+    var channel = lockFile.getChannel()
+    try {
+        var lock = channel.lock()
+        try {
+            publishBuild(root, kof, jar, sources, cache, build)
+        } finally {
+            lock.release()
+        }
+    } finally {
+        channel.close()
+        lockFile.close()
+    }
+}
+
+void prepare(String root, String kof, String mode, String handoff) {
+    if (mode != "app" && mode != "contracts") { throw "unknown launch mode" }
+    var info = process.run(kof, "info", "--json")
+    if (info.exitCode != 0) { throw "kof info --json failed: " + info.stderr }
+    var installation = json.decode<Installation>(info.stdout)
+    if (installation.kof != "0.6.4" || installation.compiler != "0.6.4" || installation.runtime != "0.6.4" || installation.stdlib != "0.6.4") {
+        throw "this build requires Kof/compiler/runtime/stdlib 0.6.4"
+    }
+    if (installation.os != "linux" || !installation.embeddedJdk) {
+        throw "this build requires the Linux distribution with its embedded JDK"
+    }
+    var distribution = new java.io.File(installation.install).getCanonicalPath()
+    var jar = distribution + "/lib/kof.jar"
+    var java = distribution + "/jdk/bin/java"
+    if (!File(jar).isFile() || !File(java).isFile() || !new java.io.File(java).canExecute()) {
+        throw "incomplete Kof distribution: lib/kof.jar or jdk/bin/java missing"
+    }
+    var sources: List<String> = listOf()
+    for (var source in sourcesUnder(root + "/src/main/kof")) {
+        if (mode == "app" || !source.endsWith("/Main.kf")) { sources.add(source) }
+    }
+    if (mode == "contracts") { sources.add(root + "/src/test/kof/kofmut/FrontendContracts.kf") }
+    sources.sort()
+    var snapshots: List<SourceSnapshot> = listOf()
+    for (var source in sources) { snapshots.add(SourceSnapshot(source, File(source).readBytes())) }
+    var inputs = listOf(root + "/scripts/bootstrap/Launch.kf", root + "/scripts/launch", root + "/bin/kof-mut", root + "/scripts/check", root + "/VERSION", root + "/kof.toml", jar)
+    var fingerprint = "kof-bootstrap-v1\0" + mode + "\0" + kof + "\0" + info.stdout + "\0"
+    for (var input in inputs) { fingerprint = fingerprint + input + "\0" + fileHash(input) + "\0" }
+    for (var source in snapshots) { fingerprint = fingerprint + source.path + "\0" + crypto.sha256(json.encode(source.bytes)) + "\0" }
+    var cache = root + "/build/cache/kof-bootstrap-v1"
+    if (!Directory(cache).createDirectories() && !File(cache).isDirectory()) { throw "cannot create compilation cache" }
+    var build = cache + "/" + mode + "-" + crypto.sha256(fingerprint)
+    ensureBuild(root, kof, jar, snapshots, cache, build)
+    var command = listOf(java, "-Dkofmut.root=" + root, "-Dkofmut.kof.version=" + installation.kof, "-cp", build + "/classes:" + jar, "Default.Main")
+    var delivery = "kofmut-launch-v1\0"
+    for (var argument in command) { delivery = delivery + argument + "\0" }
+    if (!File(handoff).writeText(delivery)) { throw "cannot write launch handoff" }
+}
+
+main() {
+    try {
+        if (args.length != 4) { throw "expected root, Kof executable, mode and handoff" }
+        prepare(args[0], args[1], args[2], args[3])
+    } catch (String error) {
+        println("kof-mut: " + error)
+        process.exit(2)
+    }
+}

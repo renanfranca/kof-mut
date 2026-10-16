@@ -1,0 +1,10 @@
+import java.lang.System
+
+record Observation(List<String> arguments, String cwd, String environment)
+
+main() {
+    var arguments: List<String> = listOf()
+    for (var argument in args) { arguments.add(argument) }
+    println(json.encode(Observation(arguments, System.getProperty("user.dir"), System.getenv("KOF_MUT_TEST_VALUE"))))
+    process.exit(23)
+}

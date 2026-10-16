@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+KOF_MUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if ! KOF_MUT_KOF="$(command -v kof)"; then
+    echo 'kof-mut: kof was not found on PATH; install Kof 0.6.4' >&2
+    exit 2
+fi
+KOF_MUT_KOF="$(readlink -f -- "$KOF_MUT_KOF")"
+if ! KOF_MUT_HANDOFF="$(mktemp)"; then
+    echo 'kof-mut: cannot create launch handoff' >&2
+    exit 2
+fi
+trap 'rm -f -- "$KOF_MUT_HANDOFF"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if ! "$KOF_MUT_KOF" run --target jvm "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$1" "$KOF_MUT_HANDOFF" >&2; then
+    exit 2
+fi
+shift
+mapfile -d '' -t KOF_MUT_COMMAND < "$KOF_MUT_HANDOFF"
+if [[ "${#KOF_MUT_COMMAND[@]}" != 7 || "${KOF_MUT_COMMAND[0]}" != kofmut-launch-v1 || ! -x "${KOF_MUT_COMMAND[1]}" || "${KOF_MUT_COMMAND[6]}" != Default.Main ]]; then
+    echo 'kof-mut: invalid launch handoff' >&2
+    exit 2
+fi
+rm -f -- "$KOF_MUT_HANDOFF"
+trap - EXIT INT TERM
+exec "${KOF_MUT_COMMAND[@]:1}" "$@"
