@@ -1,0 +1,9 @@
+[project]
+name = "kof-mut"
+
+[backend]
+target = "jvm"
+
+[sources]
+app = "src/main/kof"
+test = "src/test/kof"

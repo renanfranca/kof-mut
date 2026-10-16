@@ -1,0 +1,25 @@
+package kofmut
+
+import java.lang.System
+
+main() {
+    if (args.length == 1 && args[0] == "--version") {
+        var version = File(System.getProperty("kofmut.root") + "/VERSION").readText()
+        if (version == null) {
+            println("kof-mut: VERSION could not be read")
+            process.exit(2)
+        }
+        if (version != null) {
+            println("KofMut " + version.trim())
+        }
+        return
+    }
+    if (args.length == 0 || (args.length == 1 && (args[0] == "--help" || args[0] == "-h"))) {
+        println("KofMut: mutation testing for Kof")
+        println("Usage: kof-mut --version | --help")
+        println("Mutation runs are not available in this development build.")
+        return
+    }
+    println("kof-mut: unsupported command; use --help")
+    process.exit(2)
+}

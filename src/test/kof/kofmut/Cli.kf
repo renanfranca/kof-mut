@@ -1,0 +1,28 @@
+import java.lang.System
+
+test "source launcher prints the version from VERSION" {
+    var expected = File("VERSION").readText()
+
+    var result = process.run("./bin/kof-mut", "--version")
+
+    if (result.exitCode != 0) {
+        println(result.stdout)
+        println(result.stderr)
+    }
+    assert(result.exitCode == 0, "version command must succeed")
+    assert(expected != null)
+    if (expected != null) {
+        assert(result.stdout.trim() == "KofMut " + expected.trim(), "version must come from VERSION")
+    }
+}
+
+test "unsupported Kof is rejected before using a cached build" {
+    var fake = Path("src/test/fixtures/unsupported-toolchain/bin").toAbsolute().path()
+    var inherited = System.getenv("PATH")
+
+    var result = process.run("env", "PATH=" + fake + ":" + inherited, "./bin/kof-mut", "--version")
+
+    assert(result.exitCode == 2)
+    assert(result.stderr.contains("requires Kof/compiler/runtime/stdlib 0.6.4"))
+    assert(!result.stdout.contains("KofMut 0.1.0"))
+}

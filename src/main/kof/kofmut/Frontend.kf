@@ -1,0 +1,220 @@
+package kofmut
+
+import dev.kof.compiler.AstNode
+import dev.kof.compiler.BinaryExpr
+import dev.kof.compiler.CompilationUnitNode
+import dev.kof.compiler.ClassDeclarationNode
+import dev.kof.compiler.ConstructorDeclarationNode
+import dev.kof.compiler.Diagnostic
+import dev.kof.compiler.DiagnosticCollector
+import dev.kof.compiler.FunctionDeclarationNode
+import dev.kof.compiler.FieldDeclarationNode
+import dev.kof.compiler.IdentifierExpr
+import dev.kof.compiler.LiteralExpr
+import dev.kof.compiler.LambdaExpr
+import dev.kof.compiler.MethodCallExpr
+import dev.kof.compiler.MethodDeclarationNode
+import dev.kof.compiler.ReturnStmt
+import dev.kof.compiler.Token
+import dev.kof.compiler.VarDeclStmt
+import dev.kof.compiler.parser.Lexer
+import dev.kof.compiler.parser.Parser
+
+record MutationSite(String operator, String original, String replacement, Int line, Int column, Int offset, Int length)
+record SourceScan(List<MutationSite> sites, List<String> limitations, List<String> errors)
+record SourceExtent(Int start, Int end)
+
+SourceScan scanFile(String file) {
+    var source = File(file).readText()
+    if (source != null) { return scanSource(source, file) }
+    return SourceScan(listOf(), listOf(), listOf("Cannot read source file: " + file))
+}
+
+SourceScan scanSource(String source, String file) {
+    var diagnostics = new DiagnosticCollector()
+    var tokens = new Lexer(source, file, diagnostics).tokenize()
+    var errors: List<String> = listOf()
+    if (diagnostics.getDiagnostics().size() > 0) {
+        var i = 0
+        while (i < diagnostics.getDiagnostics().size()) {
+            var diagnostic = diagnostics.getDiagnostics().get(i) as Diagnostic
+            errors.add(diagnostic.format())
+            i++
+        }
+        return SourceScan(listOf(), listOf(), errors)
+    }
+    var unit = new Parser(tokens, diagnostics, file).parse()
+    var i = 0
+    while (i < diagnostics.getDiagnostics().size()) {
+        var diagnostic = diagnostics.getDiagnostics().get(i) as Diagnostic
+        errors.add(diagnostic.format())
+        i++
+    }
+    if (errors.size > 0) {
+        return SourceScan(listOf(), listOf(), errors)
+    }
+    var sourceTokens: List<Token> = listOf()
+    i = 0
+    while (i < tokens.size()) {
+        sourceTokens.add(tokens.get(i) as Token)
+        i++
+    }
+    var frontend = SourceFrontend(sourceTokens)
+    frontend.visit(unit)
+    return SourceScan(frontend.sites, frontend.limitations, errors)
+}
+
+class SourceFrontend {
+    List<Token> tokens
+    List<MutationSite> sites = listOf()
+    List<String> limitations = listOf()
+
+    constructor(List<Token> sourceTokens) {
+        tokens = sourceTokens
+    }
+
+    SourceExtent? visit(AstNode node) {
+        if (node == null) { return null }
+        var kind = node.getClass().getName()
+        if (node instanceof CompilationUnitNode) {
+            var unit = node as CompilationUnitNode
+            var i = 0
+            while (i < unit.declarations().size()) {
+                visit(unit.declarations().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof FunctionDeclarationNode) {
+            var function = node as FunctionDeclarationNode
+            var i = 0
+            while (i < function.body().size()) {
+                visit(function.body().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof ClassDeclarationNode) {
+            var declaration = node as ClassDeclarationNode
+            var i = 0
+            while (i < declaration.members().size()) {
+                visit(declaration.members().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof MethodDeclarationNode) {
+            var declaration = node as MethodDeclarationNode
+            var i = 0
+            while (i < declaration.body().size()) {
+                visit(declaration.body().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof ConstructorDeclarationNode) {
+            var declaration = node as ConstructorDeclarationNode
+            var i = 0
+            while (i < declaration.body().size()) {
+                visit(declaration.body().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof FieldDeclarationNode) {
+            return visit((node as FieldDeclarationNode).initializer())
+        }
+        if (node instanceof VarDeclStmt) {
+            return visit((node as VarDeclStmt).initializer())
+        }
+        if (node instanceof LambdaExpr) {
+            var expression = node as LambdaExpr
+            var i = 0
+            while (i < expression.body().size()) {
+                visit(expression.body().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof MethodCallExpr) {
+            var expression = node as MethodCallExpr
+            visit(expression.receiver())
+            var i = 0
+            while (i < expression.arguments().size()) {
+                visit(expression.arguments().get(i) as AstNode)
+                i++
+            }
+            return null
+        }
+        if (node instanceof ReturnStmt) {
+            return visit((node as ReturnStmt).value())
+        }
+        if (node instanceof IdentifierExpr) {
+            var expression = node as IdentifierExpr
+            var token = tokenAt(expression.position().offset())
+            if (token != null) {
+                return SourceExtent(token.offset(), token.offset() + token.length())
+            }
+            limitations.add("Identifier has no matching lexer token")
+            return null
+        }
+        if (node instanceof LiteralExpr) {
+            var expression = node as LiteralExpr
+            var token = tokenBefore(expression.position().offset())
+            if (token != null) {
+                return SourceExtent(token.offset(), token.offset() + token.length())
+            }
+            limitations.add("Literal has no matching lexer token")
+            return null
+        }
+        if (node instanceof BinaryExpr) {
+            var expression = node as BinaryExpr
+            var left = visit(expression.left())
+            var right = visit(expression.right())
+            if (left != null && right != null) {
+                var matches: List<Token> = listOf()
+                var i = 0
+                while (i < tokens.size()) {
+                    var token = tokens.get(i) as Token
+                    if (token.offset() >= left.end && token.offset() < right.start && token.value() == expression.operator()) {
+                        matches.add(token)
+                    }
+                    i++
+                }
+                if (expression.operator() == "<") {
+                    if (matches.size == 1) {
+                        var token = matches.get(0)
+                        sites.add(MutationSite("boundary", "<", "<=", token.line(), token.column(), token.offset(), token.length()))
+                    } else {
+                        limitations.add("Binary operator cannot be associated with exactly one lexer token")
+                    }
+                }
+                return SourceExtent(left.start, right.end)
+            }
+            limitations.add("Unsupported operand extent for binary expression")
+            return null
+        }
+        limitations.add("Unsupported AST node: " + kind)
+        return null
+    }
+
+    Token? tokenAt(Int offset) {
+        var i = 0
+        while (i < tokens.size()) {
+            var token = tokens.get(i) as Token
+            if (token.offset() == offset) { return token }
+            i++
+        }
+        return null
+    }
+
+    Token? tokenBefore(Int offset) {
+        var i = tokens.size() - 1
+        while (i >= 0) {
+            var token = tokens.get(i) as Token
+            if (token.offset() < offset) { return token }
+            i--
+        }
+        return null
+    }
+}

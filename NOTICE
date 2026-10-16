@@ -1,0 +1,12 @@
+KofMut is distributed under the GNU General Public License, version 3 only.
+SPDX-License-Identifier: GPL-3.0-only
+See LICENSE for the full license text.
+
+KofMut uses the official Kof compiler frontend as an external JVM library.
+Kof's compiler is licensed under GNU GPLv3. The compiler jar is resolved
+from the user's installed Kof distribution and is not included here.
+Retain the notices supplied with that distribution.
+
+The official Kof distribution supplies an embedded Eclipse Temurin JDK
+under GPLv2 with the Classpath Exception. KofMut uses that installation
+without copying or redistributing the JDK.

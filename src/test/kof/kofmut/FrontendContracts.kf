@@ -1,0 +1,141 @@
+package kofmut
+
+binaryTokenLocation() {
+    var source = "Bool less(Int a, Int b) { return a < b }"
+
+    var result = scanSource(source, "Example.kf")
+
+    assert(result.limitations.size == 0)
+    assert(result.errors.size == 0)
+    assert(result.sites.size == 1)
+    var site = result.sites.get(0)
+    assert(site.original == "<")
+    assert(site.replacement == "<=")
+    assert(site.offset == 35)
+    assert(site.line == 1)
+    assert(site.column == 36)
+    assert(site.length == 1)
+    println("PASS frontend: binary expression maps to its exact operator token")
+}
+
+memberAndLambdaTraversal() {
+    var source = "class Gauge { Bool ready = 1 < 2 constructor() { var created = 2 < 3 } Bool less(Int a, Int b) { return a < b } } Bool check() { var less = (x: Int) -> x < 3 return less(2) }"
+
+    var result = scanSource(source, "Forms.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 4)
+    assert(result.sites.get(0).offset == 29)
+    assert(result.sites.get(1).offset == 65)
+    assert(result.sites.get(2).offset == 106)
+    assert(result.sites.get(3).offset == 154)
+    println("PASS frontend: fields, constructors, methods and lambdas are traversed")
+}
+
+fileReading() {
+    var result = scanFile("src/test/fixtures/Comparison.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 1)
+    assert(result.sites.get(0).offset == 35)
+    println("PASS frontend: source files are read through Kof IO")
+}
+
+repeatedNestedOperators() {
+    var source = "Bool nested(Int a, Int b, Int c) { return (a < b) && (b < c) }"
+
+    var result = scanSource(source, "Nested.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 2)
+    assert(result.sites.get(0).offset == 45)
+    assert(result.sites.get(1).offset == 56)
+    println("PASS frontend: repeated nested operators retain distinct token locations")
+}
+
+nonExpressionSymbols() {
+    var source = "Bool less(List<Int> xs, Int x) { var text = \"<\" // < ignored\n return x < 2 }"
+
+    var result = scanSource(source, "Symbols.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 1)
+    assert(result.sites.get(0).offset == 71)
+    assert(result.sites.get(0).line == 2)
+    assert(result.sites.get(0).column == 11)
+    println("PASS frontend: comments, strings and generic delimiters are excluded")
+}
+
+unicodeLocations() {
+    var source = "Bool less(Int x) { var text = \"😀\" return x < 2 }\r\n"
+
+    var result = scanSource(source, "Unicode.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 1)
+    var site = result.sites.get(0)
+    assert(site.offset == 44)
+    assert(site.column == 45)
+    assert(site.line == 1)
+    assert(source.substring(site.offset, site.offset + site.length) == "<")
+
+    var multiline = scanSource("Bool less(Int x) {\r\n var text = \"😀\" return x < 2\r\n}", "Multiline.kf")
+    assert(multiline.errors.size == 0)
+    assert(multiline.limitations.size == 0)
+    assert(multiline.sites.size == 1)
+    assert(multiline.sites.get(0).offset == 46)
+    assert(multiline.sites.get(0).line == 2)
+    assert(multiline.sites.get(0).column == 27)
+    println("PASS frontend: Unicode offsets use JVM UTF-16 indices with CRLF input")
+}
+
+frontendErrors() {
+    var lexical = scanSource("Bool broken() { return \"unterminated", "Lexical.kf")
+    assert(lexical.errors.size > 0)
+    assert(lexical.errors.get(0).contains("LEX002"))
+    assert(lexical.sites.size == 0)
+
+    var syntactic = scanSource("Bool less(Int a, Int b) { return a < b", "Syntax.kf")
+    assert(syntactic.errors.size > 0)
+    assert(syntactic.errors.get(0).contains("PARSE"))
+    assert(syntactic.sites.size == 0)
+    println("PASS frontend: lexer and parser errors prevent candidate generation")
+}
+
+unsupportedForms() {
+    var source = "Bool choose(Int a, Int b) { if (a < b) { return true } return false }"
+
+    var result = scanSource(source, "Unsupported.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 1)
+    assert(result.limitations.get(0).contains("dev.kof.compiler.IfStmt"))
+    assert(result.sites.size == 0)
+    println("PASS frontend: unsupported AST forms produce explicit limitations")
+}
+
+missingSource() {
+    var result = scanFile("src/test/fixtures/does-not-exist.kf")
+
+    assert(result.errors.size == 1)
+    assert(result.errors.get(0).contains("Cannot read source file"))
+    assert(result.sites.size == 0)
+    println("PASS frontend: missing source files produce errors")
+}
+
+main() {
+    binaryTokenLocation()
+    memberAndLambdaTraversal()
+    fileReading()
+    repeatedNestedOperators()
+    nonExpressionSymbols()
+    unicodeLocations()
+    frontendErrors()
+    unsupportedForms()
+    missingSource()
+}
