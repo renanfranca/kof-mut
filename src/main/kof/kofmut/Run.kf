@@ -1,9 +1,16 @@
 package kofmut
 
+import java.lang.Exception
 import java.lang.System
+import java.lang.Runtime
+import java.lang.Thread
+import java.lang.Runnable
 import java.time.Instant
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+import java.nio.charset.StandardCharsets
 
 record BaselineEvidence(String status, PhaseEvidence check, PhaseEvidence test)
 record MutantLocation(Int line, Int column, Int offset, Int length)
@@ -24,17 +31,23 @@ class MutationRun {
     BaselineEvidence baseline = BaselineEvidence("error", notStarted(), notStarted())
     String logs = ""
     Bool canPublish = false
+    String reportPath = ""
+    RunResources resources = new RunResources()
 
     constructor(RunOptions input, Long clock, String instant) { options = input; start = clock; startedAt = instant }
 
     Int evaluate() {
         var temporary = ""
+        var hook = new Thread(resources as Runnable)
+        Runtime.getRuntime().addShutdownHook(hook)
         try {
-            canPublish = !underPath(new java.io.File(options.report).getCanonicalPath(), new java.io.File(options.project).getCanonicalPath())
+        try {
+            canPublish = !underPath(options.reportDir, options.project)
             var config = loadConfig(options)
             canPublish = false
             canPublish = reportTargetAllowed(options, config)
             if (!canPublish) { throw "Report destination overlaps inputs" }
+            reserveReport()
             scope = loadScope(options, config)
             status = "no_scope"
             if (scope.size > 0) {
@@ -42,29 +55,32 @@ class MutationRun {
                 var evidenceRoot = System.getProperty("kofmut.root") + "/.agent/tmp"
                 if (!Directory(evidenceRoot).createDirectories()) { throw "Cannot create evidence directory" }
                 logs = Files.createTempDirectory(new java.io.File(evidenceRoot).toPath(), "run-" + options.runId + "-").toString()
-                temporary = Files.createTempDirectory("kofmut-").toString()
+                temporary = resources.reserveSandbox()
                 evaluateSnapshot(config, entries, temporary)
             }
-        } catch (String error) {
+        } catch (Exception error) {
             status = "error"
-            limitations.add(error)
+            limitations.add(error.toString())
         } finally {
-            if (temporary != "" && !removeSandbox(temporary)) { status = "error"; limitations.add("Cannot clean sandbox: " + temporary) }
+            resources.cleanup()
         }
-        return finish()
+        resources.lock.lock()
+        try { resources.requireActive(); return finish() }
+        finally { resources.lock.unlock() }
+        } finally { Runtime.getRuntime().removeShutdownHook(hook) }
     }
 
     void evaluateSnapshot(RunConfig config, List<InputEntry> entries, String temporary) {
         var sandbox = temporary + "/baseline"
-        materializeInputs(entries, sandbox)
-        var checked = checkEvidence(executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs))
+        resources.prepare(entries, sandbox)
+        var checked = checkEvidence(executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs, resources))
         baseline = BaselineEvidence("error", checked.phase, notStarted())
         if (checked.status != "passed") {
             if (checked.status == "Timeout" || checked.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
             baseline = BaselineEvidence("failed", checked.phase, notStarted())
             return
         }
-        var tested = testEvidence(executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs))
+        var tested = testEvidence(executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs, resources))
         baseline = BaselineEvidence("failed", checked.phase, tested.phase)
         if (tested.status != "Survived") {
             if (tested.status == "Timeout" || tested.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
@@ -72,8 +88,11 @@ class MutationRun {
         }
         baseline = BaselineEvidence("passed", checked.phase, tested.phase)
         var analysis = temporary + "/analysis"
-        materializeInputs(entries, analysis)
+        resources.prepare(entries, analysis)
         var candidates: List<MutantResult> = listOf()
+        resources.lock.lock()
+        try {
+        resources.requireActive()
         for (var file in scope) {
             var scan = scanFile(analysis + "/" + file)
             for (var error in scan.errors) { throw "Frontend: " + error }
@@ -84,15 +103,16 @@ class MutationRun {
                 candidates.add(MutantResult(id, file, site.operator, site.original, site.replacement, MutantLocation(site.line, site.column, site.offset, site.length), "Pending", "parse", 0, "Budget exhausted before evaluation"))
             }
         }
+        } finally { resources.lock.unlock() }
         var i = 0
         while (i < candidates.size && elapsedMs(start) < config.budgetMs) {
             var mutant = candidates.get(i)
             var mutantStart = System.nanoTime()
             var variant = temporary + "/variant"
-            materializeInputs(entries, variant)
+            resources.prepare(entries, variant)
             try {
                 evaluateCandidate(mutant, config, variant, i, mutantStart)
-            } finally { if (!removeSandbox(variant)) { throw "Cannot clean variant" } }
+            } finally { resources.removeVariant(variant) }
             i++
         }
         while (i < candidates.size) { mutants.add(candidates.get(i)); i++ }
@@ -103,6 +123,9 @@ class MutationRun {
     }
 
     void evaluateCandidate(MutantResult mutant, RunConfig config, String variant, Int index, Long mutantStart) {
+        resources.lock.lock()
+        try {
+        resources.requireActive()
         var original = readRequired(variant + "/" + mutant.file)
         var location = mutant.location
         if (location.offset < 0 || location.length != mutant.original.length() || location.offset + location.length > original.length() || original.substring(location.offset, location.offset + location.length) != mutant.original) { throw "Mutation token does not match snapshot" }
@@ -115,12 +138,13 @@ class MutationRun {
             discardedCandidates.add(DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, "parse", elapsedMs(mutantStart), validation.evidence + "; log: " + parseLog))
             return
         }
-        var check = checkEvidence(executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs))
+        } finally { resources.lock.unlock() }
+        var check = checkEvidence(executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources))
         var state = check.status
         var phase = "check"
         var evidence = check.phase.summary
         if (state == "passed") {
-            var test = testEvidence(executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs))
+            var test = testEvidence(executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources))
             state = test.status
             phase = "test"
             evidence = test.phase.summary
@@ -136,13 +160,25 @@ class MutationRun {
         }
     }
 
+    void reserveReport() {
+        var digest = MessageDigest.getInstance("SHA-256")
+        digest.update(StandardCharsets.UTF_8.encode(options.project))
+        var identity = HexFormat.of().formatHex(digest.digest())
+        var projectReports = new java.io.File(options.reportDir + "/" + identity)
+        if (!projectReports.mkdirs() && !projectReports.isDirectory()) { throw "Cannot create report directory" }
+        var reserved = Files.createTempDirectory(projectReports.toPath(), options.runId + "-")
+        reportPath = reserved.toString() + "/report.json"
+        println("reportPath=" + json.encode(reportPath))
+        System.out.flush()
+    }
+
     Int finish() {
         if (!canPublish) { throw "Report destination refused: configuration is invalid or destination overlaps inputs; original preserved" }
         var counts = countMutants(mutants)
         var version = readRequired(System.getProperty("kofmut.root") + "/VERSION").trim()
         var report = MutationReport(1, version, "0.6.4", options.runId, status, scope, baseline, counts, mutants, discardedCandidates, limitations, startedAt, elapsedMs(start))
-        var target = new java.io.File(options.report)
-        if (!target.getParentFile().mkdirs() && !target.getParentFile().isDirectory()) { throw "Cannot create report directory" }
+        if (reportPath == "") { reserveReport() }
+        var target = new java.io.File(reportPath)
         var staging = Files.createTempDirectory(target.getParentFile().toPath(), ".kofmut-")
         var temporary = new java.io.File(staging.toString() + "/report.json").toPath()
         try {
@@ -180,7 +216,7 @@ Int runMutation(String[] arguments) {
         protectRunOutput(options)
         return MutationRun(options, start, startedAt).evaluate()
     }
-    catch (String error) { println("kof-mut: " + error); return 2 }
+    catch (Exception error) { println("kof-mut: " + error); return 2 }
 }
 
 List<MutationSite> orderedSites(List<MutationSite> sites) { return sites.sorted((a: MutationSite, b: MutationSite) -> a.offset - b.offset) }

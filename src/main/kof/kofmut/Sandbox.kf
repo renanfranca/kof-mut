@@ -7,7 +7,7 @@ record InputEntry(String path, Int[] bytes, String permissions, Bool directory)
 
 Bool excludedInput(String relative) {
     for (var segment in relative.split("/")) { if (segment == ".git") { return true } }
-    return underPath(relative, ".agent/tmp") || underPath(relative, "build/cache/kof-launch-v2")
+    return underPath(relative, ".kof-mut/reports") || underPath(relative, ".agent/tmp") || underPath(relative, "build/cache/kof-launch-v2")
 }
 
 List<InputEntry> captureInputs(RunOptions options, RunConfig config) {
@@ -21,7 +21,7 @@ List<InputEntry> captureInputs(RunOptions options, RunConfig config) {
 void collectInput(RunOptions options, RunConfig config, String relative, List<InputEntry> entries, List<String> paths, List<String> ancestors) {
     if (paths.contains(relative) || excludedInput(relative)) { return }
     var path = options.project + "/" + relative
-    if (absolutePath(path) == options.report) { return }
+    if (underPath(new java.io.File(path).getCanonicalPath(), options.reportDir)) { return }
     var file = new java.io.File(path)
     var physical = file.getCanonicalPath()
     var root = new java.io.File(options.project).getCanonicalPath()
@@ -31,7 +31,7 @@ void collectInput(RunOptions options, RunConfig config, String relative, List<In
     if (physical != absolutePath(path)) {
         var included = false
         for (var input in config.inputs) { if (underPath(physicalRelative, relativeInput(input))) { included = true } }
-        if (!included || excludedInput(physicalRelative) || physical == options.report) { throw "Input link target is outside inputs: " + relative }
+        if (!included || excludedInput(physicalRelative) || underPath(physical, options.reportDir)) { throw "Input link target is outside inputs: " + relative }
     }
     if (Files.isSymbolicLink(new java.io.File(physical).toPath()) || ancestors.contains(physical)) { throw "Cyclic input link: " + relative }
     if (!file.exists()) { throw "Missing input or unresolved link: " + relative }

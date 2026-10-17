@@ -1,0 +1,8 @@
+package src.math
+
+class Calc {
+    Int clamp(Int x) {
+        if (x < 0) { x = 0 }
+        return x
+    }
+}

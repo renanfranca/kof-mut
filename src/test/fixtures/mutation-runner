@@ -21,6 +21,12 @@ if [[ -n "${KOF_MUT_OBSERVATIONS:-}" ]]; then
         printf 'written by test command\n' > state
     fi
 fi
+if [[ "$mode" == no-reports ]]; then
+    if [[ -e .kof-mut/reports || -e artifacts ]]; then
+        printf 'report namespace leaked into sandbox\n' >&2
+        exit 127
+    fi
+fi
 mutant=false
 if [[ -e src/math/original.txt ]] && ! cmp -s src/math/Calc.kf src/math/original.txt; then mutant=true; fi
 if [[ "$mode:$phase" == counter:check ]] && [[ "${5}" == baseline || "$mutant" == true ]]; then

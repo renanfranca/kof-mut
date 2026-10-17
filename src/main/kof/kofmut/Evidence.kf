@@ -13,7 +13,7 @@ record CheckedEvidence(String status, PhaseEvidence phase)
 
 Long elapsedMs(Long start) { return (System.nanoTime() - start) / 1000000 }
 
-CommandResult executeCommand(List<String> arguments, String cwd, String log, Long timeoutMs, Long start, Long budgetMs) {
+CommandResult executeCommand(List<String> arguments, String cwd, String log, Long timeoutMs, Long start, Long budgetMs, RunResources resources) {
     var remaining = budgetMs - elapsedMs(start)
     if (remaining <= 0) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true) }
     var deadline = timeoutMs
@@ -29,7 +29,7 @@ CommandResult executeCommand(List<String> arguments, String cwd, String log, Lon
     if (remaining <= 0) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true) }
     if (remaining < deadline) { deadline = remaining }
     var commandStart = System.nanoTime()
-    var child = builder.start()
+    var child = resources.startCommand(builder)
     var finished = false
     var cleaned = false
     try {
@@ -37,18 +37,8 @@ CommandResult executeCommand(List<String> arguments, String cwd, String log, Lon
         var waitMs = deadline - elapsedMs(commandStart)
         if (waitMs > 0) { finished = child.waitFor(waitMs, TimeUnit.MILLISECONDS) }
     } finally {
-        if (!finished || processGroupActive(child.pid())) {
-            var killed = process.run("kill", "-KILL", "--", "-" + child.pid())
-        }
-        if (child.isAlive()) { child.destroyForcibly() }
-        if (!child.waitFor(1000 as Long, TimeUnit.MILLISECONDS)) { throw "Cannot reap command process" }
-        var cleanupStart = System.nanoTime()
-        cleaned = !processGroupActive(child.pid())
-        while (!cleaned && elapsedMs(cleanupStart) < 1000) {
-            Thread.sleep(10 as Long)
-            cleaned = !processGroupActive(child.pid())
-        }
-        if (!cleaned) { throw "Cannot confirm process group cleanup: " + child.pid() }
+        resources.releaseCommand()
+        cleaned = true
     }
     return CommandResult(child.exitValue(), elapsedMs(commandStart), readRequired(log + ".stdout"), readRequired(log + ".stderr"), log + ".stdout", log + ".stderr", !finished, true, cleaned)
 }

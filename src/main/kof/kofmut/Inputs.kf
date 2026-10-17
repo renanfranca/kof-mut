@@ -3,7 +3,7 @@ package kofmut
 import java.nio.file.Files
 import java.util.UUID
 
-record RunOptions(String project, String config, String files, String report, String runId)
+record RunOptions(String project, String config, String files, String reportDir, String runId)
 record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
 
 String readRequired(String path) {
@@ -21,22 +21,24 @@ RunOptions runOptions(String[] arguments) {
     var i = 1
     while (i < arguments.length) {
         var flag = arguments[i]
-        if (flag != "--project" && flag != "--config" && flag != "--files" && flag != "--report" && flag != "--run-id") { throw "Unknown flag: " + flag }
+        if (flag == "--report") { throw "--report was removed; use --report-dir DIRECTORY" }
+        if (flag != "--project" && flag != "--config" && flag != "--files" && flag != "--report-dir" && flag != "--run-id") { throw "Unknown flag: " + flag }
         if (i + 1 >= arguments.length || arguments[i + 1].startsWith("--") || arguments[i + 1] == "" || values.containsKey(flag)) { throw "Missing or repeated argument: " + flag }
         values.put(flag, arguments[i + 1])
         i = i + 2
     }
     var project = values.get("--project")
     var files = values.get("--files")
-    var report = values.get("--report")
-    if (project == null || files == null || report == null) { throw "run requires --project, --files and --report" }
-    if (project != null && files != null && report != null) {
-        var root = absolutePath(project)
+    var report = values.get("--report-dir")
+    if (project == null || files == null) { throw "run requires --project and --files" }
+    if (project != null && files != null) {
+        var root = new java.io.File(project).getCanonicalPath()
+        if (report == null) { report = root + "/.kof-mut/reports" }
         var config = values.getOrDefault("--config", "kof-mut.json")
         if (!new java.io.File(config).isAbsolute()) { config = root + "/" + config }
         var runId = values.getOrDefault("--run-id", UUID.randomUUID().toString())
         if (!runId.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) { throw "--run-id must be a UUID" }
-        return RunOptions(root, absolutePath(config), absolutePath(files), absolutePath(report), runId)
+        return RunOptions(root, absolutePath(config), absolutePath(files), new java.io.File(report).getCanonicalPath(), runId)
     }
     throw "Invalid arguments"
 }
@@ -45,6 +47,7 @@ String relativeInput(String value) {
     if (value == "" || new java.io.File(value).isAbsolute()) { throw "Expected relative project path: " + value }
     var normalized = new java.io.File(value).toPath().normalize().toString()
     if (normalized == ".." || normalized.startsWith("../")) { throw "Path escapes project: " + value }
+    if (normalized == "") { return "." }
     return normalized
 }
 
@@ -98,26 +101,29 @@ List<String> loadScope(RunOptions options, RunConfig config) {
     return scope
 }
 
+Bool pathsOverlap(String first, String second) { return underPath(first, second) || underPath(second, first) }
+
 void protectRunOutput(RunOptions options) {
-    var target = new java.io.File(options.report).getCanonicalPath()
-    var root = new java.io.File(options.project).getCanonicalPath()
-    if (target == new java.io.File(options.config).getCanonicalPath() || target == new java.io.File(options.files).getCanonicalPath() || target == root + "/kof.toml" || (underPath(target, root) && target.endsWith(".kf"))) { throw "Report destination overlaps a protected project input" }
+    var target = options.reportDir
+    var root = options.project
+    for (var protectedPath in listOf(options.config, options.files, root + "/kof.toml")) {
+        if (pathsOverlap(target, new java.io.File(protectedPath).getCanonicalPath())) { throw "Report destination overlaps a protected project input" }
+    }
+    if (target == root || (underPath(target, root) && target.endsWith(".kf"))) { throw "Report destination overlaps a protected project input" }
 }
 
 Bool reportTargetAllowed(RunOptions options, RunConfig config) {
-    var target = new java.io.File(options.report).getCanonicalPath()
-    var root = new java.io.File(options.project).getCanonicalPath()
-    if (target == root) { return false }
+    var target = options.reportDir
+    var root = options.project
     for (var input in config.inputs) {
         var path = relativeInput(input)
-        var inputPath = new java.io.File(root + "/" + path).getCanonicalPath()
-        if (path != "." && underPath(target, inputPath)) { return false }
+        if (path != "." && pathsOverlap(target, new java.io.File(root + "/" + path).getCanonicalPath())) { return false }
     }
     for (var source in config.sourceRoots) {
-        if (underPath(target, new java.io.File(root + "/" + relativeInput(source)).getCanonicalPath())) { return false }
+        if (pathsOverlap(target, new java.io.File(root + "/" + relativeInput(source)).getCanonicalPath())) { return false }
     }
     for (var tests in config.testRoots) {
-        if (underPath(target, new java.io.File(root + "/" + relativeInput(tests)).getCanonicalPath())) { return false }
+        if (pathsOverlap(target, new java.io.File(root + "/" + relativeInput(tests)).getCanonicalPath())) { return false }
     }
     return true
 }

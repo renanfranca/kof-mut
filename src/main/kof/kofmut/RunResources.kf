@@ -1,0 +1,87 @@
+package kofmut
+
+import java.lang.Process
+import java.lang.ProcessBuilder
+import java.lang.Runnable
+import java.lang.Runtime
+import java.lang.Exception
+import java.lang.System
+import java.lang.Thread
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+
+class RunResources implements Runnable {
+    ReentrantLock lock = new ReentrantLock()
+    Process? active = null
+    Bool hasActive = false
+    String sandbox = ""
+    Bool cancelled = false
+
+    void requireActive() { if (cancelled) { throw "Execution cancelled" } }
+
+    String reserveSandbox() {
+        lock.lock()
+        try { requireActive(); sandbox = Files.createTempDirectory("kofmut-").toString(); return sandbox }
+        finally { lock.unlock() }
+    }
+
+    void prepare(List<InputEntry> entries, String target) {
+        lock.lock()
+        try { requireActive(); materializeInputs(entries, target) }
+        finally { lock.unlock() }
+    }
+
+    Process startCommand(ProcessBuilder builder) {
+        lock.lock()
+        try {
+            requireActive()
+            var child = builder.start()
+            active = child
+            hasActive = true
+            return child
+        } finally { lock.unlock() }
+    }
+
+    void releaseCommand() {
+        lock.lock()
+        try {
+            var child = active
+            if (child != null && hasActive) {
+                // The lock also covers start/registration, so shutdown cannot miss a new group.
+                if (processGroupActive(child.pid())) { var killed = process.run("kill", "-KILL", "--", "-" + child.pid()) }
+                if (child.isAlive()) { child.destroyForcibly() }
+                if (!child.waitFor(1000 as Long, TimeUnit.MILLISECONDS)) { throw "Cannot reap command process" }
+                if (processGroupActive(child.pid())) { var killed = process.run("kill", "-KILL", "--", "-" + child.pid()) }
+                var cleanupStart = System.nanoTime()
+                while (processGroupActive(child.pid()) && elapsedMs(cleanupStart) < 1000) { Thread.sleep(10 as Long) }
+                if (processGroupActive(child.pid())) { throw "Cannot confirm process group cleanup: " + child.pid() }
+                hasActive = false
+            }
+        } finally { lock.unlock() }
+    }
+
+    void removeVariant(String path) {
+        lock.lock()
+        try { if (!removeSandbox(path)) { throw "Cannot clean variant" } }
+        finally { lock.unlock() }
+    }
+
+    void cleanup() {
+        lock.lock()
+        try {
+            releaseCommand()
+            if (sandbox != "") {
+                if (!removeSandbox(sandbox)) { throw "Cannot clean sandbox: " + sandbox }
+                sandbox = ""
+            }
+        } finally { lock.unlock() }
+    }
+
+    void run() {
+        lock.lock()
+        try { cancelled = true; cleanup() }
+        catch (Exception error) { System.err.println("kof-mut: shutdown cleanup failed: " + error) }
+        finally { lock.unlock() }
+    }
+}

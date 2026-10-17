@@ -4,7 +4,7 @@
 
 KofMut é uma ferramenta de teste de mutação em desenvolvimento para Kof. A lógica de seleção, transformação, execução de processos e relatório pertence ao código Kof, com execução inicial na JVM em Linux.
 
-**Estado de desenvolvimento: M1, M1R, M1P e o ciclo local do M2 implementados.** `run` executa baseline, mutações isoladas e relatório JSON v1 em projetos sintéticos. Robustez ampliada, concorrência entre execuções e aceitação externa no SiFuture pertencem ao M3. O valor `0.1.0` identifica este fonte em desenvolvimento.
+**Estado de desenvolvimento: M1, M1R, M1P, M2 e M3 implementados e validados localmente.** `run` oferece relatórios independentes, concorrência, cancelamento e recuperação no Kof 0.6.4. A aceitação externa mediu uma limitação de orçamento no escopo representativo do SiFuture. M4 conserva os guias públicos detalhados. O valor `0.1.0` identifica este fonte em desenvolvimento.
 
 ## Requisitos
 
@@ -44,7 +44,7 @@ A entrega anterior `kofmut-launch-v1` foi substituída por `kofmut-location-v1`,
 
 Descritores ausentes ou inconsistentes e imagens incompletas acionam preparação automática. Para descartar o novo cache e recuperar após uma interrupção abrupta, execute `rm -rf -- build/cache/kof-launch-v2` na raiz do checkout. Isso também remove diretórios temporários sem uso e força preparação na próxima chamada. O filesystem do cache precisa oferecer bloqueios de arquivo e movimentos atômicos de diretórios. O custo de preparação inicial e a comparação de inicialização quente estão no [relatório de validação M1P](.agent/validation/kofmut-m1p.md); a meta de cache quente não se aplica ao primeiro build.
 
-A inicialização quente cumpriu a meta M1P: mediana Kof **0.7129 s**, mediana Python **0.6738 s** (5.81% acima do Python, dentro de 10%), em 33 pares alternados sem compilação. Três chamadas com cache vazio levaram 5.05 s, 5.15 s, 5.17 s. Veja dispersão, resultados brutos e condições no [relatório M1P](.agent/validation/kofmut-m1p.md). O orçamento de integração de 90 segundos continua sem comprovação.
+A inicialização quente cumpriu a meta M1P: mediana Kof **0.7129 s**, mediana Python **0.6738 s** (5.81% acima do Python, dentro de 10%), em 33 pares alternados sem compilação. Três chamadas com cache vazio levaram 5.05 s, 5.15 s, 5.17 s. Veja dispersão, resultados brutos e condições no [relatório M1P](.agent/validation/kofmut-m1p.md). As medições externas M3 e sua limitação de orçamento estão registradas abaixo.
 
 ## Executar uma avaliação
 
@@ -52,19 +52,31 @@ Na raiz do checkout, com Kof 0.6.4 no PATH:
 
 ```bash
 ./bin/kof-mut run --project fixtures/detected \
-  --files fixtures/detected/scope.json --report .agent/tmp/detected.json
+  --files fixtures/detected/scope.json --report-dir .agent/tmp/reports
 # exit 0: uma mutação Killed
 
 ./bin/kof-mut run --project fixtures/survived \
-  --files fixtures/survived/scope.json --report .agent/tmp/survived.json
+  --files fixtures/survived/scope.json --report-dir .agent/tmp/reports
 # exit 1: uma mutação Survived
 
 ./bin/kof-mut run --project fixtures/invalid \
-  --files fixtures/invalid/scope.json --report .agent/tmp/invalid.json
+  --files fixtures/invalid/scope.json --report-dir .agent/tmp/reports
 # exit 3: no_mutants, um candidato descartado com ARITH001
+
+./bin/kof-mut run --project fixtures/equivalent \
+  --files fixtures/equivalent/scope.json --report-dir .agent/tmp/reports
+# exit 1: uma mutação de limite equivalente sobrevive
 ```
 
-`--project`, `--files` e `--report` são obrigatórios e relativos ao cwd do chamador. `--config` é relativo ao projeto, com padrão `kof-mut.json`. `--run-id UUID` é opcional; sem ele, a ferramenta gera um UUID. Flags desconhecidas, argumentos incompletos e entradas inválidas retornam 2.
+`--project` e `--files` são obrigatórios. `--report-dir` é opcional e usa `<project>/.kof-mut/reports` por padrão. Esses três caminhos são relativos ao cwd do chamador. A flag removida `--report` retorna exit 2 com orientação de migração antes de diretórios de saída ou comandos do projeto. `--config` é relativo ao projeto, com padrão `kof-mut.json`. `--run-id UUID` é opcional; sem ele, a ferramenta gera um UUID. Flags desconhecidas, argumentos incompletos e entradas inválidas retornam 2.
+
+Cada invocação imprime exatamente uma linha de descoberta antes do primeiro comando do projeto:
+
+```text
+reportPath="/raiz/absoluta/<project-id>/<run-id>-<sufixo-único>/report.json"
+```
+
+O valor depois de `reportPath=` é uma string JSON. Use um parser JSON para decodificá-lo, incluindo aspas escapadas, Unicode e caracteres de controle. O identificador do projeto é o SHA-256 hexadecimal completo de seu caminho absoluto canônico, sem depender de Git. Aliases canônicos compartilham o identificador; projetos homônimos em caminhos diferentes recebem identificadores distintos. O filesystem reserva cada diretório de execução exclusivamente, inclusive em chamadas simultâneas com o mesmo UUID. Não existe relatório compartilhado de último resultado. O `report.json` final é escrito temporariamente e movido atomicamente no mesmo filesystem.
 
 Cada fixture contém este formato de configuração:
 
@@ -81,13 +93,15 @@ Cada fixture contém este formato de configuração:
 }
 ```
 
-Escolha um destino de relatório fora das raízes de fonte/teste e dos caminhos de inputs copiados explicitamente. Inputs, configuração, arquivos de escopo, manifesto e fontes Kof são protegidos contra sobrescrita pelo relatório, incluindo aliases canônicos por links simbólicos. Se a configuração não puder ser validada, o relatório de erro só será publicado fora do projeto avaliado. Um destino interno será recusado com exit 2 e explicação no terminal, sem criar diretórios de saída nem iniciar comandos do projeto.
+Na integração planejada dos sensores, `budgetMs: 85000` é o orçamento interno; o limite externo de 90 segundos começa antes da invocação completa do CLI, incluindo a inicialização do lançador. A configuração das fixtures acima não tem limite externo de sensor.
+
+Escolha uma raiz de relatórios fora das raízes de fonte/teste e dos caminhos de inputs copiados explicitamente. A raiz não pode ser igual à raiz do projeto nem sobrepor caminhos protegidos. Inputs, configuração, arquivos de escopo, manifesto e fontes Kof são protegidos contra sobrescrita pelo relatório, incluindo aliases canônicos por links simbólicos. Se a configuração não puder ser validada, o relatório de erro só será publicado fora do projeto avaliado. Um destino interno será recusado com exit 2 e explicação no terminal, sem criar diretórios de saída nem iniciar comandos do projeto.
 
 O escopo é um array JSON explícito, como `["src/math/Calc.kf"]`, sem globs. Os caminhos são normalizados, deduplicados e ordenados. Arquivo ausente, teste, extensão diferente de `.kf`, caminho fora de `sourceRoots`, escape do projeto e link simbólico no caminho selecionado são recusados antes de comandos do projeto.
 
-Declare em `inputs` fontes, imports, testes, manifesto e scripts necessários, incluindo arquivos novos não rastreados. Os comandos precisam verificar e testar o escopo escolhido. `.git`, relatórios e evidências do mutador são excluídos. Links internos de inputs são materializados somente quando o destino também pertence aos inputs; destinos externos e ciclos são recusados. A ferramenta captura os inputs antes da baseline e preserva bytes e permissões dos scripts. Cada variante recebe uma cópia independente desse snapshot. Alterações produzidas pelos comandos não passam para a próxima variante. Os originais e os testes são preservados.
+Declare em `inputs` fontes, imports, testes, manifesto e scripts necessários, incluindo arquivos novos não rastreados. Os comandos precisam verificar e testar o escopo escolhido. `.git`, evidências, o namespace padrão `.kof-mut/reports` e a raiz customizada selecionada dentro do projeto são excluídos, inclusive com `inputs: ["."]`. Relatórios anteriores nesses namespaces nunca entram nos snapshots seguintes. Links internos de inputs são materializados somente quando o destino também pertence aos inputs; destinos externos e ciclos são recusados. A ferramenta captura os inputs antes da baseline e preserva bytes e permissões dos scripts. Cada variante recebe uma cópia independente desse snapshot. Alterações produzidas pelos comandos não passam para a próxima variante. Os originais e os testes são preservados.
 
-Os comandos usam argv separado, cwd da sandbox, ambiente herdado e stdin fechado. Cada processo começa em um grupo próprio. O prazo é o menor entre `commandTimeoutMs` e o orçamento global restante, medido por relógio monotônico desde a entrada de `run`, incluindo preparação e baseline. Ao vencer, o grupo é encerrado e a ausência de membros ativos é conferida em `/proc`; zombies não são processos ativos. Nenhum comando seguinte começa depois do orçamento. Sandboxes são removidas; stdout e stderr separados ficam por execução em `.agent/tmp/` do checkout da ferramenta. Comandos que abandonem deliberadamente seu grupo de processos não têm garantia de cancelamento nesta versão.
+Os comandos usam argv separado, cwd da sandbox, ambiente herdado e stdin fechado. Cada processo começa em um grupo próprio. O prazo é o menor entre `commandTimeoutMs` e o orçamento global restante, medido por relógio monotônico desde a entrada de `run`, incluindo preparação e baseline. Ao vencer, o grupo é encerrado e a ausência de membros ativos é conferida em `/proc`; zombies não são processos ativos. Nenhum comando seguinte começa depois do orçamento. Sandboxes são removidas; stdout e stderr separados ficam por execução em `.agent/tmp/` do checkout da ferramenta. Um shutdown hook da JVM coordena o início e registro dos comandos com o cancelamento. SIGINT e SIGTERM durante comando ativo retornam 130 e 143, limpam o grupo e a sandbox daquela execução e preservam chamadas simultâneas. Interrupção externa não promete relatório parcial. Comandos que abandonem deliberadamente seu grupo de processos não têm garantia de cancelamento nesta versão.
 
 ## Operadores e evidência
 
@@ -125,13 +139,21 @@ O JSON UTF-8 é publicado por rename atômico e contém `schemaVersion`, `toolVe
 | `2` | `error` ou `baseline_failed` |
 | `3` | `incomplete`, `no_scope` ou `no_mutants` |
 
-Descartes esperados permitem `complete/0` com pelo menos um mutante aplicável e todos `Killed`, ou `complete/1` com sobreviventes. Se todos os candidatos forem descartados, o resultado será `no_mutants/3`; descartes não são evidência de qualidade dos testes. `Timeout`, `TestError`, `Pending`, orçamento esgotado ou limitação impedem `complete`. Um relatório anterior nunca é lido como resultado atual; use `--run-id` para conferir a identidade de uma avaliação automatizada. Falha de publicação retorna 2 e deve ser tratada como erro, mesmo se um relatório antigo continuar no destino.
+Descartes esperados permitem `complete/0` com pelo menos um mutante aplicável e todos `Killed`, ou `complete/1` com sobreviventes. Se todos os candidatos forem descartados, o resultado será `no_mutants/3`; descartes não são evidência de qualidade dos testes. `Timeout`, `TestError`, `Pending`, orçamento esgotado ou limitação impedem `complete`. O consumidor deve ler o caminho anunciado pela própria invocação e validar `runId`, versão do schema, escopo, contagens e exit code. O anúncio identifica uma reserva; a conclusão depende do arquivo final e de conteúdo coerente. Falha de publicação retorna 2 sem relatório final utilizável. Relatórios anteriores permanecem intactos; uma chamada posterior reserva outro diretório.
 
 ## Validação e próximos marcos
 
 `./scripts/check` preserva os 21 contratos do lançador, executa testes Kof pelo CLI real e compila o programa de asserções do frontend com o jar instalado no classpath. O `kof test` de 0.6.4 não aceita `--classpath`; as provas de frontend usam o estilo oficial de programa completo com `assert`, sem um novo harness de testes.
 
-M3 amplia concorrência e recuperação e mede a aceitação externa no SiFuture dentro dos mesmos 90 segundos. Os resultados sintéticos do M2 não comprovam esse custo. M4 conclui os guias públicos detalhados. Veja [o plano](EXECPLAN.md), [a validação M2](.agent/validation/kofmut-m2.md) e os relatórios históricos [M1R](.agent/validation/kofmut-m1r.md) e [M1P](.agent/validation/kofmut-m1p.md).
+A validação M3 passou em 21 contratos do lançador, 29 testes do ciclo e 15 grupos frontend, inclusive numa cópia limpa com espaços e PATH sem Python. O SiFuture na revisão `82111142c85f98b970ccd65fbf044e492d017729` executou seus 114 casos canônicos em JVM. Um adaptador temporário de check também detectou erro em fonte importada. O checkout original permaneceu preservado.
+
+| Escopo SiFuture | Segundos externos | Resultado |
+| --- | --- | --- |
+| `Background.kf`, três execuções quentes | 10.082–10.434 | `complete/0`, um `Killed` por execução |
+| `Background.kf`, cache vazio do lançador | 15.242 | `complete/0`, um `Killed` |
+| `Meteor.kf`, três execuções quentes | 85.773–85.777 | `incomplete/3`, orçamento global esgotado |
+
+As medições usam `commandTimeoutMs: 10000`, `budgetMs: 85000` internos e limite externo de 90 segundos desde a invocação completa do CLI. Todas as amostras ficaram abaixo de 90 segundos. O escopo representativo ainda tem candidatos pendentes e uma fase interrompida por prazo; não pode ser avaliado por completo no orçamento planejado dos sensores. Os sensores não foram ativados. M4 conclui os guias públicos detalhados. Veja [o plano](EXECPLAN.md), [evidência M3 e contagens por amostra](.agent/validation/kofmut-m3.md), [a validação M2](.agent/validation/kofmut-m2.md) e os relatórios históricos [M1R](.agent/validation/kofmut-m1r.md) e [M1P](.agent/validation/kofmut-m1p.md).
 
 ## Licença
 

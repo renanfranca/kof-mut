@@ -4,7 +4,7 @@
 
 KofMut is a mutation testing tool being built for Kof. Its selection, transformation, process execution and reporting logic belongs in Kof, initially running on the JVM on Linux.
 
-**Development status: M1, M1R, M1P and the local M2 cycle are implemented.** `run` executes a baseline, isolated mutations and the JSON v1 report on synthetic projects. Broader recovery, concurrent runs and external acceptance on SiFuture belong to M3. The `0.1.0` value identifies this development source.
+**Development status: M1, M1R, M1P, M2 and M3 are implemented and validated locally.** `run` supports independent reports, concurrent runs, cancellation and recovery on Kof 0.6.4. External acceptance measured a budget limitation for the representative SiFuture scope. M4 retains the detailed public guides. The `0.1.0` value identifies this development source.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ The former `kofmut-launch-v1` command delivery has been replaced by `kofmut-loca
 
 Missing or inconsistent descriptors and incomplete images trigger automatic preparation. To discard the new cache and recover after an abrupt interruption, run `rm -rf -- build/cache/kof-launch-v2` from the checkout root. This also removes unused staging directories and forces preparation on the next invocation. The cache filesystem must support file locks and atomic directory moves. The initial preparation cost and warm startup comparison are recorded in the [M1P validation report](.agent/validation/kofmut-m1p.md); the warm startup target does not apply to the first build.
 
-Warm startup met the M1P target: Kof median **0.7129 s**, Python median **0.6738 s** (5.81% above Python, within 10%), across 33 alternating pairs with no compilation. Three empty cache starts took 5.05 s, 5.15 s, 5.17 s. See the [M1P report](.agent/validation/kofmut-m1p.md) for dispersion, raw results and conditions. The 90 second integration budget remains unproven.
+Warm startup met the M1P target: Kof median **0.7129 s**, Python median **0.6738 s** (5.81% above Python, within 10%), across 33 alternating pairs with no compilation. Three empty cache starts took 5.05 s, 5.15 s, 5.17 s. See the [M1P report](.agent/validation/kofmut-m1p.md) for dispersion, raw results and conditions. M3 external measurements and their budget limitation are recorded below.
 
 ## Run an evaluation
 
@@ -52,19 +52,31 @@ From the checkout root, with Kof 0.6.4 on PATH:
 
 ```bash
 ./bin/kof-mut run --project fixtures/detected \
-  --files fixtures/detected/scope.json --report .agent/tmp/detected.json
+  --files fixtures/detected/scope.json --report-dir .agent/tmp/reports
 # exit 0: one Killed mutation
 
 ./bin/kof-mut run --project fixtures/survived \
-  --files fixtures/survived/scope.json --report .agent/tmp/survived.json
+  --files fixtures/survived/scope.json --report-dir .agent/tmp/reports
 # exit 1: one Survived mutation
 
 ./bin/kof-mut run --project fixtures/invalid \
-  --files fixtures/invalid/scope.json --report .agent/tmp/invalid.json
+  --files fixtures/invalid/scope.json --report-dir .agent/tmp/reports
 # exit 3: no_mutants, one discarded candidate with ARITH001
+
+./bin/kof-mut run --project fixtures/equivalent \
+  --files fixtures/equivalent/scope.json --report-dir .agent/tmp/reports
+# exit 1: one equivalent boundary mutation survives
 ```
 
-`--project`, `--files` and `--report` are required and relative to the caller's cwd. `--config` is relative to the project and defaults to `kof-mut.json`. `--run-id UUID` is optional; without it, the tool generates a UUID. Unknown flags, incomplete arguments and invalid inputs return 2.
+`--project` and `--files` are required. `--report-dir` is optional and defaults to `<project>/.kof-mut/reports`. These three paths are relative to the caller's cwd. The removed `--report` flag returns exit 2 with migration guidance before any output directories or project commands. `--config` is relative to the project and defaults to `kof-mut.json`. `--run-id UUID` is optional; without it, the tool generates a UUID. Unknown flags, incomplete arguments and invalid inputs return 2.
+
+Each invocation prints exactly one discovery line before the first project command:
+
+```text
+reportPath="/absolute/reports/<project-id>/<run-id>-<unique-suffix>/report.json"
+```
+
+The value after `reportPath=` is a JSON string, so decode it with a JSON parser, including escaped quotes, Unicode and control characters. The project ID is the full hexadecimal SHA-256 of the project's absolute canonical path, independent of Git. Canonical aliases share an ID; projects with the same name at different paths have different IDs. The filesystem exclusively reserves each execution directory, even for concurrent invocations with the same UUID. There is no shared latest report. The final `report.json` is written temporarily and moved atomically on the same filesystem.
 
 Each fixture contains this configuration shape:
 
@@ -81,13 +93,15 @@ Each fixture contains this configuration shape:
 }
 ```
 
-Choose a report destination outside source/test roots and explicitly copied input paths. Inputs, configuration, scope files, the manifest and Kof sources are protected against report overwrites, including canonical aliases through symbolic links. If configuration cannot be validated, an error report is published only outside the evaluated project. An internal destination is refused with exit 2 and a terminal explanation, without creating output directories or starting project commands.
+For the planned sensors integration, `budgetMs: 85000` is the internal budget; the external 90 second limit starts before the complete CLI invocation, including launcher startup. The fixture configuration above has no external sensor deadline.
+
+Choose a report root outside source/test roots and explicitly copied input paths. The root cannot equal the project root or overlap any protected path. Inputs, configuration, scope files, the manifest and Kof sources are protected against report overwrites, including canonical aliases through symbolic links. If configuration cannot be validated, an error report is published only outside the evaluated project. An internal destination is refused with exit 2 and a terminal explanation, without creating output directories or starting project commands.
 
 Scope is an explicit JSON array such as `["src/math/Calc.kf"]`, without globs. Paths are normalized, deduplicated and sorted. Missing files, tests, extensions other than `.kf`, paths outside `sourceRoots`, project escapes and symbolic links in selected paths are rejected before project commands.
 
-Declare required sources, imports, tests, manifests and scripts in `inputs`, including new untracked files. Commands must check and test the selected scope. `.git`, mutator reports and evidence are excluded. Internal input links are materialized only when their targets also belong to inputs; external targets and cycles are rejected. The tool captures inputs before baseline and preserves bytes and script permissions. Each variant receives an independent copy of that snapshot. Command side effects do not enter the next variant. Originals and tests are preserved.
+Declare required sources, imports, tests, manifests and scripts in `inputs`, including new untracked files. Commands must check and test the selected scope. `.git`, evidence, the default `.kof-mut/reports` namespace and the selected custom report root inside the project are excluded, including with `inputs: ["."]`. Previous reports in these namespaces never enter later snapshots. Internal input links are materialized only when their targets also belong to inputs; external targets and cycles are rejected. The tool captures inputs before baseline and preserves bytes and script permissions. Each variant receives an independent copy of that snapshot. Command side effects do not enter the next variant. Originals and tests are preserved.
 
-Commands use separate argv entries, sandbox cwd, inherited environment and closed stdin. Each process starts in its own group. Its deadline is the smaller of `commandTimeoutMs` and the remaining global budget, measured with a monotonic clock from entry to `run`, including preparation and baseline. On expiry, the group is terminated and `/proc` is checked for active members; zombies are not active processes. No further command starts after the budget. Sandboxes are removed; separate stdout and stderr logs remain per run in the tool checkout's `.agent/tmp/`. Commands that deliberately leave their process group have no cancellation guarantee in this version.
+Commands use separate argv entries, sandbox cwd, inherited environment and closed stdin. Each process starts in its own group. Its deadline is the smaller of `commandTimeoutMs` and the remaining global budget, measured with a monotonic clock from entry to `run`, including preparation and baseline. On expiry, the group is terminated and `/proc` is checked for active members; zombies are not active processes. No further command starts after the budget. Sandboxes are removed; separate stdout and stderr logs remain per run in the tool checkout's `.agent/tmp/`. A JVM shutdown hook coordinates command start and registration with cancellation. SIGINT and SIGTERM during an active command return 130 and 143, clean that execution's group and sandbox, and preserve simultaneous runs. External interruption does not promise a partial report. Commands that deliberately leave their process group have no cancellation guarantee in this version.
 
 ## Operators and evidence
 
@@ -125,13 +139,21 @@ The UTF-8 JSON is published by atomic rename and contains `schemaVersion`, `tool
 | `2` | `error` or `baseline_failed` |
 | `3` | `incomplete`, `no_scope` or `no_mutants` |
 
-Expected discards permit `complete/0` with at least one applicable mutant and all `Killed`, or `complete/1` with survivors. If every candidate is discarded, the result is `no_mutants/3`; discards are not evidence of test quality. `Timeout`, `TestError`, `Pending`, budget exhaustion or a limitation prevents `complete`. A previous report is never read as the current result; use `--run-id` to verify an automated evaluation's identity. Publication failure returns 2 and must be treated as an error even if an old report remains at the destination.
+Expected discards permit `complete/0` with at least one applicable mutant and all `Killed`, or `complete/1` with survivors. If every candidate is discarded, the result is `no_mutants/3`; discards are not evidence of test quality. `Timeout`, `TestError`, `Pending`, budget exhaustion or a limitation prevents `complete`. Consumers must read the path announced by their own invocation and validate `runId`, schema version, scope, counts and exit code. The announcement identifies a reservation; completion requires the final file and consistent contents. Publication failure returns 2 without a usable final report. Previous reports remain intact; a subsequent invocation reserves a fresh directory.
 
 ## Validation and next milestones
 
 `./scripts/check` preserves the 21 launcher contracts, runs Kof tests through the real CLI and compiles the frontend assertion program with the installed jar on its classpath. Kof 0.6.4 `test` does not accept `--classpath`; frontend proofs use the official whole program `assert` style without a new test harness.
 
-M3 expands concurrency and recovery and measures external acceptance on SiFuture within the same 90 seconds. M2 synthetic results do not establish that cost. M4 completes the detailed public guides. See [the plan](EXECPLAN.md), [M2 validation](.agent/validation/kofmut-m2.md) and the historical [M1R](.agent/validation/kofmut-m1r.md) and [M1P](.agent/validation/kofmut-m1p.md) reports.
+M3 validation passed 21 launcher contracts, 29 mutation cycle tests and 15 frontend groups, including a clean copy with spaces and no Python on PATH. SiFuture revision `82111142c85f98b970ccd65fbf044e492d017729` executed its 114 canonical JVM cases. A temporary check adapter also detected an error in an imported source. The original checkout remained intact.
+
+| SiFuture scope | External seconds | Result |
+| --- | --- | --- |
+| `Background.kf`, three warm runs | 10.082–10.434 | `complete/0`, one `Killed` each |
+| `Background.kf`, empty launcher cache | 15.242 | `complete/0`, one `Killed` |
+| `Meteor.kf`, three warm runs | 85.773–85.777 | `incomplete/3`, global budget exhausted |
+
+These measurements use `commandTimeoutMs: 10000`, `budgetMs: 85000` internally and a 90 second external limit from the complete CLI invocation. All samples stayed below 90 seconds. The representative scope still has pending candidates and a timed out phase; it cannot be fully evaluated within the planned sensors budget. Sensors are not activated. M4 completes the detailed public guides. See [the plan](EXECPLAN.md), [M3 evidence and per-sample counts](.agent/validation/kofmut-m3.md), [M2 validation](.agent/validation/kofmut-m2.md) and the historical [M1R](.agent/validation/kofmut-m1r.md) and [M1P](.agent/validation/kofmut-m1p.md) reports.
 
 ## License
 

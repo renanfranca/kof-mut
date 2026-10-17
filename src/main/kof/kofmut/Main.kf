@@ -17,7 +17,7 @@ main() {
     }
     if (args.length == 0 || (args.length == 1 && (args[0] == "--help" || args[0] == "-h"))) {
         println("KofMut: mutation testing for Kof")
-        println("Usage: kof-mut --version | --help | run --project PATH --files JSON --report JSON [--config JSON] [--run-id UUID]")
+        println("Usage: kof-mut --version | --help | run --project PATH --files JSON [--report-dir DIRECTORY] [--config JSON] [--run-id UUID]")
         return
     }
     println("kof-mut: unsupported command; use --help")
