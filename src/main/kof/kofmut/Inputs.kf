@@ -48,7 +48,10 @@ String relativeInput(String value) {
     return normalized
 }
 
-Bool underPath(String value, String root) { return root == "." || value == root || value.startsWith(root + "/") }
+Bool underPath(String value, String root) {
+    if (root == "/") { return value.startsWith("/") }
+    return root == "." || value == root || value.startsWith(root + "/")
+}
 
 void rejectLinkPath(String root, String relative) {
     if (Files.isSymbolicLink(new java.io.File(root).toPath())) { throw "Symbolic project root" }
@@ -104,14 +107,17 @@ void protectRunOutput(RunOptions options) {
 Bool reportTargetAllowed(RunOptions options, RunConfig config) {
     var target = new java.io.File(options.report).getCanonicalPath()
     var root = new java.io.File(options.project).getCanonicalPath()
-    if (!underPath(target, root)) { return true }
     if (target == root) { return false }
-    var relative = target.substring(root.length() + 1)
     for (var input in config.inputs) {
         var path = relativeInput(input)
-        if (path != "." && underPath(relative, path)) { return false }
+        var inputPath = new java.io.File(root + "/" + path).getCanonicalPath()
+        if (path != "." && underPath(target, inputPath)) { return false }
     }
-    for (var source in config.sourceRoots) { if (underPath(relative, relativeInput(source))) { return false } }
-    for (var tests in config.testRoots) { if (underPath(relative, relativeInput(tests))) { return false } }
+    for (var source in config.sourceRoots) {
+        if (underPath(target, new java.io.File(root + "/" + relativeInput(source)).getCanonicalPath())) { return false }
+    }
+    for (var tests in config.testRoots) {
+        if (underPath(target, new java.io.File(root + "/" + relativeInput(tests)).getCanonicalPath())) { return false }
+    }
     return true
 }

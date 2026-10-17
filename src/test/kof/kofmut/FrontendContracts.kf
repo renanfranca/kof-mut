@@ -221,7 +221,24 @@ textScopesAndUnaryOperands() {
     println("PASS frontend: declared text fields, local shadowing and unary operands retain exact selection")
 }
 
+fieldAndLocalResolution() {
+    var numeric = scanSource("class Calc { Int value = 0 Int sum(Int a, Int b) { String value = \"local\" return a + b + this.value } }", "NumericField.kf")
+
+    assert(numeric.errors.size == 0)
+    assert(numeric.limitations.size == 0)
+    assert(numeric.sites.size == 2, "explicit numeric field must ignore a String local")
+    assert(numeric.sites.get(0).original == "+")
+    assert(numeric.sites.get(1).original == "+")
+    var text = scanSource("class Labels { String value = \"x\" String parameter(Int value) { return this.value + value } String local() { Int value = 1 return this.value + value } Int bare(Int value) { return value + 1 } }", "StringField.kf")
+    assert(text.errors.size == 0)
+    assert(text.limitations.size == 0)
+    assert(text.sites.size == 1, "explicit String field must ignore numeric parameters and locals")
+    assert(text.sites.get(0).original == "+")
+    println("PASS frontend: this fields resolve independently of lexical parameters and locals")
+}
+
 main() {
+    fieldAndLocalResolution()
     textScopesAndUnaryOperands()
     compositeExpressionTraversal()
     knownTextAndCallOperands()

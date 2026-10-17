@@ -95,6 +95,7 @@ class SourceFrontend {
     List<MutationSite> sites = listOf()
     List<String> limitations = listOf()
     List<TextBinding> bindings = listOf()
+    List<TextBinding> fieldBindings = listOf()
 
     constructor(List<Token> sourceTokens) {
         tokens = sourceTokens
@@ -132,6 +133,8 @@ class SourceFrontend {
         }
         if (node instanceof ClassDeclarationNode) {
             var declaration = node as ClassDeclarationNode
+            var outerFields = fieldBindings
+            fieldBindings = listOf()
             var bindingStart = bindings.size
             var seed = 0
             while (seed < declaration.members().size()) {
@@ -139,6 +142,7 @@ class SourceFrontend {
                 if (member instanceof FieldDeclarationNode) {
                     var field = member as FieldDeclarationNode
                     bindings.add(TextBinding(field.name(), field.type() == "String"))
+                    fieldBindings.add(TextBinding(field.name(), field.type() == "String"))
                 }
                 seed++
             }
@@ -148,6 +152,7 @@ class SourceFrontend {
                 i++
             }
             trimBindings(bindingStart)
+            fieldBindings = outerFields
             return null
         }
         if (node instanceof MethodDeclarationNode) {
@@ -192,6 +197,7 @@ class SourceFrontend {
             var text = declaration.type() == "String"
             if (extent != null && extent.text) { text = true }
             bindings.add(TextBinding(declaration.name(), text))
+            fieldBindings.add(TextBinding(declaration.name(), text))
             return extent
         }
         if (node instanceof VarDeclStmt) {
@@ -412,7 +418,7 @@ class SourceFrontend {
             var owner = expression.receiver()
             if (owner instanceof IdentifierExpr) {
                 var identifier = owner as IdentifierExpr
-                if (identifier.name() == "this") { text = knownText(expression.fieldName()) }
+                if (identifier.name() == "this") { text = knownFieldText(expression.fieldName()) }
             }
             var field = tokenBefore(expression.position().offset())
             if (receiver != null && field != null) { return SourceExtent(receiver.start, field.offset() + field.length(), text) }
@@ -519,6 +525,16 @@ class SourceFrontend {
         return end
     }
 
+    Bool knownFieldText(String name) {
+        var i = fieldBindings.size - 1
+        while (i >= 0) {
+            var binding = fieldBindings.get(i)
+            if (binding.name == name) { return binding.text }
+            i--
+        }
+        return false
+    }
+
     Bool knownText(String name) {
         var i = bindings.size - 1
         while (i >= 0) {
@@ -591,4 +607,58 @@ String familyFor(String operator) {
     if (operator == "==" || operator == "!=") { return "equality" }
     if (operator == "&&" || operator == "||") { return "logical" }
     return "arithmetic"
+}
+
+
+record VariantValidation(Bool accepted, String evidence)
+
+String frontendDiagnostics(DiagnosticCollector diagnostics) {
+    var evidence = ""
+    var i = 0
+    while (i < diagnostics.getDiagnostics().size()) {
+        var diagnostic = diagnostics.getDiagnostics().get(i) as Diagnostic
+        evidence = evidence + diagnostic.format() + "\n"
+        i++
+    }
+    return evidence
+}
+
+VariantValidation validateVariantTokens(String original, String changed, String file, Int offset, Int length, String before, String after) {
+    var originalDiagnostics = new DiagnosticCollector()
+    var originalTokens = new Lexer(original, file, originalDiagnostics).tokenize()
+    if (originalDiagnostics.getDiagnostics().size() > 0) { throw "Snapshot failed lexing: " + frontendDiagnostics(originalDiagnostics) }
+    var selected = -1
+    var i = 0
+    while (i < originalTokens.size()) {
+        var token = originalTokens.get(i) as Token
+        if (token.offset() == offset && token.length() == length && token.value() == before) { selected = i }
+        i++
+    }
+    if (selected < 0) { throw "Mutation token does not match snapshot lexer token" }
+    var diagnostics = new DiagnosticCollector()
+    var tokens = new Lexer(changed, file, diagnostics).tokenize()
+    if (diagnostics.getDiagnostics().size() > 0) { return VariantValidation(false, frontendDiagnostics(diagnostics)) }
+    var preserved = tokens.size() == originalTokens.size()
+    var shift = after.length() - length
+    i = 0
+    while (preserved && i < originalTokens.size()) {
+        var token = originalTokens.get(i) as Token
+        var modified = tokens.get(i) as Token
+        if (i == selected) {
+            preserved = modified.offset() == offset && modified.length() == after.length() && modified.value() == after && modified.line() == token.line() && modified.column() == token.column()
+        } else {
+            var expectedOffset = token.offset()
+            var expectedColumn = token.column()
+            if (i > selected) {
+                expectedOffset = expectedOffset + shift
+                if (token.line() == (originalTokens.get(selected) as Token).line()) { expectedColumn = expectedColumn + shift }
+            }
+            preserved = modified.type().toString() == token.type().toString() && modified.value() == token.value() && modified.offset() == expectedOffset && modified.length() == token.length() && modified.line() == token.line() && modified.column() == expectedColumn
+        }
+        i++
+    }
+    var unit = new Parser(tokens, diagnostics, file).parse()
+    if (diagnostics.getDiagnostics().size() > 0) { return VariantValidation(false, frontendDiagnostics(diagnostics)) }
+    if (!preserved) { return VariantValidation(false, "Variant changes tokens other than the selected token") }
+    return VariantValidation(true, "")
 }

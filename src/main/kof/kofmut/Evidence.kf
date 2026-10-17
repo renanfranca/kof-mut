@@ -87,7 +87,7 @@ CheckedEvidence checkEvidence(CommandResult result) {
         }
         var phase = PhaseEvidence(result.exitCode, result.durationMs, diagnostic + summary, check.filesChecked, null, null)
         if (check.success && result.exitCode == 0 && check.filesChecked > 0 && check.errorCount == 0 && errors == 0) { return CheckedEvidence("passed", phase) }
-        if (!check.success && result.exitCode == 1 && check.filesChecked > 0 && check.errorCount > 0 && errors == check.errorCount) { return CheckedEvidence("CompileError", phase) }
+        if (!check.success && result.exitCode == 1 && check.filesChecked > 0 && check.errorCount > 0 && errors == check.errorCount) { return CheckedEvidence("rejected", phase) }
     } catch (String error) { summary = "Invalid check JSON: " + error + "; " + summary }
     return CheckedEvidence("TestError", PhaseEvidence(result.exitCode, result.durationMs, "Invalid check evidence; " + summary, null, null, null))
 }

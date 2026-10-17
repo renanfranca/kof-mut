@@ -9,6 +9,12 @@ Bool jsonInteger(Object value) {
     return value.getClass().getName() == "java.lang.Integer" || value.getClass().getName() == "java.lang.Long"
 }
 
+Bool checkIntegerInRange(Object value, Long minimum) {
+    if (!jsonInteger(value)) { return false }
+    var number = value.toString().toLong()
+    return number >= minimum && number <= 2147483647
+}
+
 void requireStrings(List<Object> values) {
     if (values == null) { throw "Expected a JSON string array" }
     for (var value in values) {
@@ -29,7 +35,7 @@ void validateConfigShape(String jsonText) {
 
 void validateCheckShape(String jsonText) {
     var shape = json.decode<CheckShape>(jsonText)
-    if (shape.success == null || shape.success.getClass().getName() != "java.lang.Boolean" || !jsonInteger(shape.filesChecked) || !jsonInteger(shape.errorCount) || shape.diagnostics == null) { throw "Invalid check JSON field types" }
+    if (shape.success == null || shape.success.getClass().getName() != "java.lang.Boolean" || !checkIntegerInRange(shape.filesChecked, 1) || !checkIntegerInRange(shape.errorCount, 0) || shape.diagnostics == null) { throw "Invalid check JSON field types or counter range" }
     for (var diagnostic in shape.diagnostics) {
         if (diagnostic.code == null || diagnostic.message == null || diagnostic.severity == null || diagnostic.code.getClass().getName() != "java.lang.String" || diagnostic.message.getClass().getName() != "java.lang.String" || diagnostic.severity.getClass().getName() != "java.lang.String") { throw "Invalid check diagnostic" }
     }

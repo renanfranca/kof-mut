@@ -1,10 +1,48 @@
 # KofMut M2 validation
 
+## M2 corrections, 2026-10-17
+
+This correction starts from `7dd5ecc4da16f95acbbb2ed1f8cee4135931dbab` on the existing `kofmut-frontend` branch. It closes the four reviewed deviations: publication on invalid configuration, field shadowing during selection, narrowing of check counters, and candidate transformations that change other tokens. All engine changes remain in Kof under `src/main/kof/kofmut/`. No Kof installation, other project, commit, worktree, agent, remote or publication was created or modified.
+
+The approved contract supersedes the original M2 rule that every compiler rejection became `CompileError` and prevented `complete`. Valid lexer/parser rejection, a token stream mismatch, or coherent compiler rejection now records a candidate in `discardedCandidates`. This is separate from `mutants` and its counts. `counts.compileError` remains in JSON v1 and is zero in new executions. At least one applicable mutant, all Killed and no real limitation yields complete/0 even with discards; survivors yield complete/1. All candidates discarded yields no_mutants/3 and provides no evidence of test quality. Invalid evidence, tool failure, timeout, exhausted budget and unsupported original forms still prevent approval.
+
+Kof 0.6.4 was confirmed through its installed `bin/kof info --json`. Local research consulted `training/README.md`, interop, automation, types, I/O and anti-pattern guidance; the official `Lexer`, `Parser`, `Token`, `DiagnosticCollector` and `Diagnostic`; the JVM JSON decoder and `CmdCheck` implementation/tests. In particular, the platform keeps large JSON integers as Long before typed conversion and later uses `Number.intValue()`. The fix validates the original integer against the supported range before that conversion. No second Kof grammar, JSON parser or test runner was implemented.
+
+All commands below use `PATH=/home/renanfranca/.local/share/kof/kof-0.6.4-linux-x86_64/bin:$PATH` from the repository root. Test exit 0 means that the expected CLI exits, including 1/2/3, were asserted. Logs below are relative to `.agent/tmp/m2-corrections/`; per-command Kof stdout/stderr remain in distinct `.agent/tmp/run-<UUID>-*/` directories.
+
+| Acceptance criterion | Command and observed result | Relevant assertion and local evidence |
+| --- | --- | --- |
+| Invalid configuration preserves binary inputs and directories | `kof test src/test/kof/kofmut/Run.kf --tag preservation`: initial exit 1; subsequent full cycle suite exit 0, 18 tests | Initial failure was `invalid config must preserve binary input`, before the JSON extension existed. Tests compare 00 ff 0d 0a by cmp and mode 640, refuse existing directories and nonexistent output parents through a symlink alias, and assert zero project commands. `preservation-red.log`, `preservation-green.log` (175894 ms). A final root-path audit also reproduced the same defect with project `/` and an invalid synthetic config (`root-preservation-red.log`); the prefix rule now recognizes every absolute destination as internal to `/`. The full preservation case passed again after the correction: exit 0, 15931 ms (`root-preservation-green.log`), without starting commands or walking inputs of `/`. |
+| Safe external error report | Same preservation test | Internal reports are refused with terminal explanation and exit 2. A stale external report is replaced with error JSON and UUID `248a229c-2c75-46d4-a802-ae69ac23376b`, with no baseline command. Both malformed JSON and invalid configuration shapes are exercised. |
+| Valid configuration protects canonical destinations | `kof test src/test/kof/kofmut/Run.kf --tag report`: exit 0 | Source, tests, manifest, config, scope and explicit runner input stay byte-identical by cmp and retain permissions through an external symlink alias. No project command or output parent is created on refusal. `report-final.log`. |
+| Explicit fields and lexical locals resolve independently | `./scripts/launch contracts`: initial exit 1, then exit 0, 15 groups; `kof test src/test/kof/kofmut/Run.kf --tag fields`: exit 0 | Initial failure names the numeric field hidden by a String local. Numeric `a + b + this.value` yields exactly Killed/Survived, no discard and complete/1. String fields with numeric parameter/local names remain excluded, with baseline passed and no_mutants/3. `fields-red.log`, `fields-green.log`, `fields-cli-final.log`. |
+| Original JSON counters precede narrowing | `kof test src/test/kof/kofmut/Run.kf --tag counters`: initial exit 1; subsequent full suite exit 0, 20 tests | Baseline and variant inputs include 4294967296, 4294967297, negative values that wrap, zero files, 2147483648, fractions, a string and null. The baseline cannot pass; variants are TestError/check with zero kills and zero discards. filesChecked=2147483647 is accepted. `counters-red.log`, `counters-green.log` (240148 ms). The initial test decoded the original report fields, so absence of discardedCandidates did not mask its failure. |
+| Same-line comment collision | `kof test src/test/kof/kofmut/Run.kf --tag discard-parse`: initial exit 1, final exit 0 | Before the fix the CLI returned error/2 after passed baseline with PARSE025 (`comment-repro.json`, `comment-repro.log`). Afterward, `a*/* comment */b + 1` discards the multiplication with parser diagnostic and evaluates only the plus mutation, Killed and complete/0. `discard-parse-red.log`, `discard-parse-final.log`. |
+| Valid parser result cannot hide changed tokens; lexer rejection also discards | Same final discard-parse command, exit 0 | With braces on later lines, the new // still parses, but the token comparison discards it with the exact fixed message. A multiline comment with a quote on the next line independently yields LEX002. Neither starts check. Explicit source observations show the later plus mutant only, preserve original bytes and use candidate index 1 for its logs. `discard-parse-final.log` (20323 ms). |
+| Coherent check rejection permits continued evaluation | `kof test src/test/kof/kofmut/Run.kf --tag discard-check`: initial exit 1, corrected focused case exit 0; full suite with mixed case exit 0, 22 tests | Initial failure asserts no_mutants rather than the previous incomplete status. `7 * 0 + 1` records ARITH001 in discardedCandidates and then Killed for `+ → -`, with complete/0. Check logs retain indices 0 and 1; every variant matches an explicit independent source. `discard-check-red.log`, `discard-check-green.log`, `run-final.log` (241503 ms). |
+| All rejected candidates give no quality conclusion | Documented invalid fixture: exit 3 | Baseline passed, status no_mutants, all mutant counts zero, mutants empty, one discard/check with ARITH001 and original location. `.agent/tmp/invalid.json`, `invalid.log`, `fixtures.tsv`. |
+| Broken check and contradictory evidence never authorize discard | Full cycle suite: exit 0, 22 tests | Bad JSON, incompatible field types, success with exit 1, errorCount inconsistent with diagnostics, check exit 127 and invalid suite evidence yield TestError, zero kills and zero discards. `run-final.log`; final validation entry point also covers these inputs. |
+| Budget and timeout remain inconclusive after a discard | `kof test src/test/kof/kofmut/Run.kf --tag timeout`: exit 0 | Parent/child readiness and inactive PIDs are asserted. After ARITH001 discard, next mutant times out in test, last mutant is Pending/parse with duration 0, candidates=2, executed=1, timeout=1, pending=1, distinct IDs and no next check. `budget-focused.log` (28297 ms). |
+
+The same report decoder asserts JSON v1, versions, UUID, UTC time, nonnegative durations, presence of the discarded array, candidates equal to mutants length, and reconciliation of executed/pending/state totals. The numeric field scenario explicitly requires no discards. The comment and check cases assert different IDs/log indices after a discard. Existing unsupported-form, imported-error, isolation, source-byte, binary-byte, SKIP/filter, process cleanup and argv tests remain in the cycle suite.
+
+During verification, an expanded preservation assertion initially compared nullable text values and reported inequality even though the report destination had been refused before commands. That test was corrected to use independent byte comparisons with cmp; no production change was based on that fixture mistake. These intermediate failures do not replace the intended reproductions above.
+
+The structural review used the refactor-design rubric on the changed frontend, evidence, path validation and cycle/report boundary. No additional refactor was selected. A subsequent path audit found the concrete `/` project defect; it returned to the behavioral workflow and was corrected under the existing preservation contract. Per-run state is confined to one MutationRun; canonical authorization remains false until proven; frontend validation returns only explicit acceptance or rejection; unexpected exceptions propagate as tool errors. The separate candidate iteration preserves indices when results are split between mutants and discards. Reusing the report record for the local pending candidate queue is a maintainability opportunity, not a demonstrated failure; introducing another model was not justified. Diagnostic strings and compiler tokens remain confined to the versioned evidence/frontend boundary.
+
+The documented fixture commands were rerun with their exact README arguments. `detected` returned 0 with one Killed, `survived` returned 1 with one Survived, and `invalid` returned 3 with one discarded/check and ARITH001. Results are in `fixtures.tsv`, `<fixture>.log` and `.agent/tmp/<fixture>.json`.
+
+The required final entry point `PATH=/home/renanfranca/.local/share/kof/kof-0.6.4-linux-x86_64/bin:$PATH ./scripts/check` returned **0**: **21 launcher cases**, **22 cycle cases**, **15 frontend proof groups**. Reported suite durations were 259816 ms for the launcher and 277920 ms for the cycle. The raw result is in `check-final.log`. The independent full cycle repetition started after the final `/` correction also returned **0**, **22 cases**, 273787 ms (`run-consolidated.log`). `git diff --check`, Bash syntax checks and local documentation links returned 0; EN/PT identifiers and bounds were audited together. `static-checks.log` records those checks. The installed Kof jar retains SHA-256 `137a838d38757e317545474d55ad6a3ad291fb86d263ae77d9197cf705829c62`. There are no remaining failed or inconclusive correction criteria. The corrected source manifest is [kofmut-m2.sha256](kofmut-m2.sha256); its verification log is `manifest-check.log`. No new startup benchmark or external SiFuture measurement is claimed. The historical clean-copy proof below belongs to the original M2 delivery and was not repeated for these corrections. M3 and M4 remain pending, including external acceptance within the unchanged 90 second budget. Recovery and platform limitations below still apply.
+
+## Historical M2 validation, 2026-10-16
+
+The following evidence preserves the original behavior, including CompileError. The correction above supersedes that expectation. Its original manifest is [kofmut-m2-initial.sha256](kofmut-m2-initial.sha256); the current corrected delivery uses [kofmut-m2.sha256](kofmut-m2.sha256).
+
 M2 implements the local mutation cycle on synthetic projects. Base: `b1d8684762ad1d2f94a48d9dcd81270647a6fe52`, branch `kofmut-frontend`. Work is local; no commits, worktrees, subagents, remotes or publications were created. Kof and other projects were not modified.
 
 The supported installation is Kof/compiler/runtime/stdlib **0.6.4**, Linux/JVM with its embedded JDK 25. The installed jar SHA-256 remained `137a838d38757e317545474d55ad6a3ad291fb86d263ae77d9197cf705829c62`. Local Kof documentation, AST records, parser, check command and test harness were consulted; behavior was verified on the installed binary, rather than inferred from the newer source checkout.
 
-## Platform proofs
+### Platform proofs
 
 Before depending on the JVM boundaries, small Kof programs verified ProcessBuilder with String[] argv, cwd, closed stdin, separate output files, waitFor with TimeUnit, process identity and monotonic time. Nested JSON preserved null fields, nullable phases and arrays. POSIX file permission capture and restoration succeeded. The compiler rejected constant `7 / 0` with `ARITH001` and exit 1 in check JSON.
 
@@ -12,7 +50,7 @@ ArrayList argv was rejected at runtime with NoSuchMethodError in 0.6.4; String[]
 
 Local artifacts: `.agent/tmp/m2-probes/platform.log`, `json-shapes.log`, `Zero.kf.txt`, plus the real CLI test reports and command stdout/stderr in unique `.agent/tmp/run-<UUID>-*/` directories. Raw logs are intentionally excluded from Git.
 
-## Behavioral evidence
+### Behavioral evidence
 
 The public observation point is `bin/kof-mut run`, its exit, JSON v1, human output and files observed by synthetic command wrappers. Valid commands invoke the installed Kof compiler and named test runner. Malformed protocol cases are synthetic evidence inputs, not an alternative test runner. Frontend assertions execute the real lexer/parser on their installed classpath.
 
@@ -35,13 +73,13 @@ The public observation point is `bin/kof-mut run`, its exit, JSON v1, human outp
 
 Observed focused and intermediate runs are saved under `.agent/tmp/m2-probes/`: `first-red.log`, `invalid-red.log`, `operators-red.log`, `control-red.log`, `text-red.log`, `evidence-red.log`, `timeout-red.log`, `links-red.log`, `report-focused-red.log`, `process-red.log`, with corresponding green results. Red failures came before the associated behavior; fixture mistakes in independently counted offsets and dangling link removal were corrected separately from production behavior.
 
-## Assertion and structural review
+### Assertion and structural review
 
 Two intentionally incorrect implementations were exercised only in disposable copies. Mapping every completed test result to Killed made the survivor contract fail (exit 1 from the test runner). Reusing a variant with its previous mutation and state made the isolation contract fail, observing two Killed where the explicit contract requires one Killed and one Survived. Logs: `.agent/tmp/m2-probes/audit-false-kill.log` and `audit-cumulative.log`. This tests the assertions against plausible wrong implementations, beyond observing a green suite.
 
 The structural review classified three design risks: early report publication before cleanup, a materialized copy appearing authoritative despite an existing byte snapshot, and duplicated global/per-file counting rules. Evaluation now returns to one cleanup boundary before publication; analysis and each variant are materialized from captured memory bytes, with transformations reading the fresh variant; one count function supplies both report views. The per-run object remains scoped to one invocation. Explicit frontend traversal and protocol status strings were retained within their versioned boundary; no forwarding classes or test-only production seams were introduced.
 
-## Final verification
+### Final verification
 
 Observed final results:
 
@@ -54,7 +92,7 @@ Observed final results:
 
 The startup performance measurements in the historical M1P report were not re-established as a new M2 benchmark. The 21 launcher contracts, including its direct cached path and absence of Python, are preserved. M2 claims local synthetic acceptance, not SiFuture acceptance.
 
-## Limits and recovery
+### Limits and recovery
 
 Only Kof 0.6.4 on Linux/JVM is supported. Unknown AST forms remain explicit limitations; records are an exercised example. No coverage, equivalent mutation inference, incremental selection or parallel mutant execution is provided. Process groups cover inherited group members; deliberately detached processes have no cancellation guarantee in this milestone. Command output that fails the supported evidence protocol remains inconclusive.
 

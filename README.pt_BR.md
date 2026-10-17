@@ -61,7 +61,7 @@ Na raiz do checkout, com Kof 0.6.4 no PATH:
 
 ./bin/kof-mut run --project fixtures/invalid \
   --files fixtures/invalid/scope.json --report .agent/tmp/invalid.json
-# exit 3: uma mutação CompileError, diagnóstico ARITH001
+# exit 3: no_mutants, um candidato descartado com ARITH001
 ```
 
 `--project`, `--files` e `--report` são obrigatórios e relativos ao cwd do chamador. `--config` é relativo ao projeto, com padrão `kof-mut.json`. `--run-id UUID` é opcional; sem ele, a ferramenta gera um UUID. Flags desconhecidas, argumentos incompletos e entradas inválidas retornam 2.
@@ -81,7 +81,7 @@ Cada fixture contém este formato de configuração:
 }
 ```
 
-Escolha um destino de relatório fora das raízes de fonte/teste e dos caminhos de inputs copiados explicitamente. Configuração, arquivos de escopo e fontes Kof são protegidos contra sobrescrita pelo relatório.
+Escolha um destino de relatório fora das raízes de fonte/teste e dos caminhos de inputs copiados explicitamente. Inputs, configuração, arquivos de escopo, manifesto e fontes Kof são protegidos contra sobrescrita pelo relatório, incluindo aliases canônicos por links simbólicos. Se a configuração não puder ser validada, o relatório de erro só será publicado fora do projeto avaliado. Um destino interno será recusado com exit 2 e explicação no terminal, sem criar diretórios de saída nem iniciar comandos do projeto.
 
 O escopo é um array JSON explícito, como `["src/math/Calc.kf"]`, sem globs. Os caminhos são normalizados, deduplicados e ordenados. Arquivo ausente, teste, extensão diferente de `.kf`, caminho fora de `sourceRoots`, escape do projeto e link simbólico no caminho selecionado são recusados antes de comandos do projeto.
 
@@ -91,37 +91,41 @@ Os comandos usam argv separado, cwd da sandbox, ambiente herdado e stdin fechado
 
 ## Operadores e evidência
 
-O lexer e o parser oficiais do Kof 0.6.4 selecionam e reanalisam uma troca por token. Famílias: `boundary` (`< ↔ <=`, `> ↔ >=`), `equality` (`== ↔ !=`), `logical` (`&& ↔ ||`), `boolean` (`true ↔ false`) e `arithmetic` (`+ ↔ -`, `* ↔ /`). Símbolos em comentários, strings, caracteres e delimitadores de genéricos são excluídos. Concatenações reconhecidas por literais, declarações e propagação local inequívoca também são excluídas. Aritmética de tipo incerto é validada pelo compilador.
+O lexer e o parser oficiais do Kof 0.6.4 selecionam e reanalisam uma troca por token. Famílias: `boundary` (`< ↔ <=`, `> ↔ >=`), `equality` (`== ↔ !=`), `logical` (`&& ↔ ||`), `boolean` (`true ↔ false`) e `arithmetic` (`+ ↔ -`, `* ↔ /`). Símbolos em comentários, strings, caracteres e delimitadores de genéricos são excluídos. Concatenações reconhecidas por literais, declarações e propagação local inequívoca também são excluídas. Aritmética de tipo incerto é validada pelo compilador. `this.campo` resolve o campo da classe independentemente de parâmetros e variáveis locais com o mesmo nome; identificadores sem `this` respeitam o escopo lexical.
 
 O percurso cobre funções, métodos, construtores, campos, lambdas, condicionais, laços, switch, try/catch/finally, declarações, chamadas, atribuições, acessos a arrays e retornos. Formas ainda não percorridas, como declarações de `record`, produzem limitações explícitas que impedem `complete`. Linha e coluna começam em 1; offset e comprimento usam índices UTF-16 de String da JVM, não bytes UTF-8. Compilação rejeitada e falta de evidência nunca contam como mutação detectada.
 
-A baseline exige check JSON válido, exit coerente, `success: true`, `filesChecked > 0` e zero erros, além de suítes Kof concluídas com casos executados e zero falhas. `filesChecked` não conta imports. O protocolo de `kof test` é interpretado por suíte e caso, separando filtros e SKIP de casos executados. Zero casos, resumo ausente, saída truncada ou contraditória são inconclusivos. Wrappers precisam preservar esses protocolos de 0.6.4.
+Os contadores do check devem ser inteiros JSON originais antes da conversão tipada: `filesChecked` entre 1 e 2147483647 e `errorCount` entre 0 e 2147483647. Valores fracionários, negativos, fora da faixa ou de tipo incompatível invalidam a evidência. A baseline exige check JSON válido, exit coerente, `success: true` e zero erros, além de suítes Kof concluídas com casos executados e zero falhas. `filesChecked` não conta imports. O protocolo de `kof test` é interpretado por suíte e caso, separando filtros e SKIP de casos executados. Zero casos, resumo ausente, saída truncada ou contraditória são inconclusivos. Wrappers precisam preservar esses protocolos de 0.6.4.
 
 | Estado de mutante | Significado |
 | --- | --- |
 | `Killed` | Check válido e testes concluídos com falha reconhecida |
 | `Survived` | Check válido e testes concluídos sem falhas |
-| `CompileError` | Compilador rejeitou a variante com diagnóstico |
+| `CompileError` | Estado legado; novas execuções registram rejeições coerentes do compilador em `discardedCandidates` |
 | `Timeout` | Prazo encerrou check ou teste, com fase e limpeza registradas |
 | `TestError` | Evidência insuficiente, inválida ou falha do runner |
 | `Pending` | Avaliação não iniciada ou fase não iniciada por fim do orçamento |
+
+Para cada candidato independente, a ferramenta confere o token original, aplica uma substituição, compara os tokens originais e modificados com o lexer oficial (considerando diferenças de comprimento UTF-16) e reanalisa com o parser oficial. Somente um candidato que preserve os demais tokens e passe pela reanálise chega ao check; somente um check aprovado chega aos testes. Rejeição do lexer/parser, alteração indevida de tokens e rejeição coerente do check são registradas como candidatos descartados, com diagnósticos do Kof e referências aos logs. Quando só a comparação de tokens falha, a mensagem fixa é `Variant changes tokens other than the selected token`. Divergência do snapshot, exceções inesperadas e falhas de infraestrutura continuam sendo erros da ferramenta. Evidência de check inválida ou contraditória continua como `TestError` e nunca autoriza descarte.
 
 Não há instrumentação de cobertura ou estado `NoCoverage`. Sobreviventes e possíveis equivalentes exigem análise humana; não há exclusão automática nem percentual de aprovação.
 
 ## Relatório JSON v1 e saídas
 
-O JSON UTF-8 é publicado por rename atômico e contém `schemaVersion`, `toolVersion`, `kofVersion`, `runId`, `status`, `scope`, `baseline`, `counts`, `mutants`, `limitations`, `startedAt` em UTC e `durationMs`. `baseline` contém `status` (`passed`, `failed`, `error`), `check` e `test`, com `exitCode`, `durationMs`, `summary`, `filesChecked`, `executedTests` e `failedTests`; valores não aplicáveis ou fases não iniciadas usam JSON null.
+O JSON UTF-8 é publicado por rename atômico e contém `schemaVersion`, `toolVersion`, `kofVersion`, `runId`, `status`, `scope`, `baseline`, `counts`, `mutants`, `discardedCandidates`, `limitations`, `startedAt` em UTC e `durationMs`. `baseline` contém `status` (`passed`, `failed`, `error`), `check` e `test`, com `exitCode`, `durationMs`, `summary`, `filesChecked`, `executedTests` e `failedTests`; valores não aplicáveis ou fases não iniciadas usam JSON null.
 
-`counts` contém inteiros não negativos: `candidates`, `executed`, `killed`, `survived`, `compileError`, `timeout`, `testError` e `pending`. Cada mutante contém `id`, `file`, `operator`, `original`, `replacement`, `location` (`line`, `column`, `offset`, `length`), `status`, `phase` (`parse`, `check`, `test`), `durationMs` e `evidence`, incluindo referências aos logs. Candidatos e estados reconciliam; `executed` soma todos os estados exceto `Pending`. O relatório humano imprime o UUID, totais por arquivo e localizações dos sobreviventes.
+`counts` contém inteiros não negativos: `candidates`, `executed`, `killed`, `survived`, `compileError`, `timeout`, `testError` e `pending`. Cada mutante contém `id`, `file`, `operator`, `original`, `replacement`, `location` (`line`, `column`, `offset`, `length`), `status`, `phase` (`parse`, `check`, `test`), `durationMs` e `evidence`, incluindo referências aos logs. `counts.candidates` equivale a `mutants.length`; `executed` soma todos os estados dos mutantes exceto `Pending`. `counts.compileError` permanece por compatibilidade e vale zero em novas execuções. O relatório humano imprime o UUID, totais por arquivo, localizações dos sobreviventes e candidatos descartados.
+
+`discardedCandidates` é um array separado (vazio quando não há descartes) com `id`, `file`, `operator`, `original`, `replacement`, `location`, `phase` (`parse` ou `check`), `durationMs` e `evidence`, nos mesmos formatos dos mutantes. Os descartes preservam os IDs originais dos candidatos e logs distintos e não entram nas contagens dos mutantes. O contrato anterior do M2 emitia `CompileError` e impedia `complete`; a correção aprovada substitui esse comportamento mantendo o schema JSON na versão 1.
 
 | Exit | Status e interpretação |
 | --- | --- |
-| `0` | `complete`, pelo menos um candidato, todos `Killed`, sem limitações |
+| `0` | `complete`, pelo menos um mutante aplicável, todos `Killed`, sem limitações |
 | `1` | `complete` com sobreviventes |
 | `2` | `error` ou `baseline_failed` |
 | `3` | `incomplete`, `no_scope` ou `no_mutants` |
 
-`CompileError`, `Timeout`, `TestError`, `Pending` ou limitação impedem `complete`. Um relatório anterior nunca é lido como resultado atual; use `--run-id` para conferir a identidade de uma avaliação automatizada. Falha de publicação retorna 2 e deve ser tratada como erro, mesmo se um relatório antigo continuar no destino.
+Descartes esperados permitem `complete/0` com pelo menos um mutante aplicável e todos `Killed`, ou `complete/1` com sobreviventes. Se todos os candidatos forem descartados, o resultado será `no_mutants/3`; descartes não são evidência de qualidade dos testes. `Timeout`, `TestError`, `Pending`, orçamento esgotado ou limitação impedem `complete`. Um relatório anterior nunca é lido como resultado atual; use `--run-id` para conferir a identidade de uma avaliação automatizada. Falha de publicação retorna 2 e deve ser tratada como erro, mesmo se um relatório antigo continuar no destino.
 
 ## Validação e próximos marcos
 
