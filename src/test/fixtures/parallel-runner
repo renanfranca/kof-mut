@@ -45,6 +45,7 @@ blocked=false
 if [[ "$candidate" == baseline && "$mode" == "baseline-$phase" ]]; then blocked=true; fi
 if [[ "$candidate" != baseline && "$mode" == "$phase" ]]; then blocked=true; fi
 if [[ "$candidate" == 0 && "$mode" == individual && "$phase" == test ]]; then blocked=true; fi
+if [[ "$candidate-$phase" == 5-test && "$mode" == cleanup-mixed ]]; then blocked=true; fi
 if [[ "$candidate" != baseline && "$mode" == mixed && "$candidate-$phase" == 0-check ]]; then blocked=true; fi
 if [[ "$blocked" == true ]]; then
     (printf '%s\n' "$BASHPID" > "$event/child"; exec sleep 120) &
@@ -58,7 +59,7 @@ if [[ "$blocked" == true ]]; then
 fi
 if [[ "$phase" == check ]]; then
     if [[ "$candidate" == baseline && "$mode" == invalid-check ]]; then printf 'invalid baseline JSON\n'; exit 1; fi
-    if [[ "$candidate" != baseline && ( "$mode" == all-discard || ( ( "$mode" == mixed || "$mode" == survivor ) && "$candidate" == 0 ) ) ]]; then
+    if [[ "$candidate" != baseline && ( "$mode" == all-discard || ( ( "$mode" == mixed || "$mode" == survivor || "$mode" == cleanup-mixed ) && "$candidate" == 0 ) ) ]]; then
         printf '{"success":false,"filesChecked":1,"errorCount":1,"diagnostics":[{"code":"SYNTHETIC","severity":"ERROR","message":"fixture rejection"}]}\n'
         exit 1
     fi
@@ -69,7 +70,7 @@ if [[ "$candidate" == baseline && "$mode" == zero ]]; then printf 'SUITE tests/S
 if [[ "$candidate" == baseline && "$mode" == red ]]; then printf 'SUITE tests/Suite.kf (1 tests)\nFAIL fixture: red baseline\n1 failed of 1 tests\n0 passed, 1 failed\n'; exit 1; fi
 if [[ "$candidate" != baseline && "$mode" == mixed && "$candidate" == 3 ]]; then printf 'invalid test evidence\n'; exit 1; fi
 printf 'SUITE tests/Suite.kf (1 tests)\n'
-if [[ "$candidate" == baseline || ( ( "$mode" == mixed || "$mode" == survivor ) && "$candidate" == 2 ) ]]; then
+if [[ "$candidate" == baseline || ( ( "$mode" == mixed || "$mode" == survivor || "$mode" == cleanup-mixed ) && "$candidate" == 2 ) ]]; then
     printf 'PASS fixture\n0 failed of 1 tests\n1 passed, 0 failed\n'
 else
     printf 'FAIL fixture: changed result\n1 failed of 1 tests\n0 passed, 1 failed\n'

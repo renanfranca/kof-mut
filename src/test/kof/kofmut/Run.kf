@@ -26,6 +26,11 @@ RunReport readRun(String path) {
         assert(report.counts.candidates == report.mutants.size)
         assert(report.counts.executed + report.counts.pending == report.counts.candidates)
         assert(report.counts.executed == report.counts.killed + report.counts.survived + report.counts.compileError + report.counts.timeout + report.counts.testError)
+        assert(report.counts.killed == report.mutants.filter((m: RunMutant) -> m.status == "Killed").size)
+        assert(report.counts.survived == report.mutants.filter((m: RunMutant) -> m.status == "Survived").size)
+        assert(report.counts.timeout == report.mutants.filter((m: RunMutant) -> m.status == "Timeout").size)
+        assert(report.counts.testError == report.mutants.filter((m: RunMutant) -> m.status == "TestError").size)
+        assert(report.counts.pending == report.mutants.filter((m: RunMutant) -> m.status == "Pending").size)
         return report
     }
     throw "missing report"
@@ -1229,6 +1234,63 @@ void stopParallel(Process child, String log) {
     }
 }
 
+RunReport cleanupReport(String log, String name) {
+    var evidence = ".agent/tmp/m3p-preservation/reports"
+    assert(Directory(evidence).createDirectories())
+    var path = reportPath(reportText(log + "/stdout"))
+    assert(File(evidence + "/" + name + ".json").writeText(reportText(path)))
+    assert(File(evidence + "/" + name + ".stdout").writeText(reportText(log + "/stdout")))
+    return readRun(path)
+}
+
+void assertParallelCandidates(RunReport report) {
+    assert(report.mutants.size + report.discardedCandidates.size == 6, "every selected candidate must appear exactly once, including on error")
+    var sources = parallelSources()
+    for (var i = 0; i < 6; i++) {
+        var offset = sources.get(i + 1).indexOf("false")
+        var expectedId = "src/math/Calc.kf:" + offset + ":false"
+        var occurrences = 0
+        for (var mutant in report.mutants) {
+            if (mutant.id == expectedId) {
+                occurrences++
+                assert(mutant.file == "src/math/Calc.kf" && mutant.operator == "boolean")
+                assert(mutant.original == "true" && mutant.replacement == "false")
+                assert(mutant.location.offset == offset && mutant.location.length == 4)
+                assert(mutant.location.line == 2 && mutant.location.column == offset - sources.get(0).indexOf("\n"))
+                assert(mutant.durationMs >= 0)
+            }
+        }
+        for (var discarded in report.discardedCandidates) {
+            if (discarded.id == expectedId) {
+                occurrences++
+                assert(discarded.file == "src/math/Calc.kf" && discarded.operator == "boolean")
+                assert(discarded.original == "true" && discarded.replacement == "false")
+                assert(discarded.location.offset == offset && discarded.location.length == 4)
+                assert(discarded.location.line == 2 && discarded.location.column == offset - sources.get(0).indexOf("\n"))
+                assert(discarded.durationMs >= 0)
+            }
+        }
+        assert(occurrences == 1, "candidate missing or duplicated: " + expectedId)
+    }
+    for (var i = 1; i < report.mutants.size; i++) { assert(report.mutants.get(i - 1).location.offset < report.mutants.get(i).location.offset) }
+}
+
+String ineffectiveSignals(String root) {
+    assert(Directory(root + "/tools").createDirectories())
+    assert(File(root + "/tools/kill").writeText("#!/usr/bin/env bash\nexit 0\n"))
+    assert(process.run("chmod", "+x", root + "/tools/kill").exitCode == 0)
+    return root + "/tools:" + System.getenv("PATH")
+}
+
+void assertCompletedLog(String evidence, Int index, String phase, String expected) {
+    var start = evidence.indexOf("stdout: ")
+    var end = evidence.indexOf("; stderr: ")
+    assert(start >= 0 && end > start, "completed evidence must reference its command logs")
+    var path = evidence.substring(start + 8, end)
+    assert(path.endsWith("/" + index + "-" + phase + ".stdout"))
+    assert(reportText(path).contains(expected), "referenced log must retain the completed command evidence")
+}
+
 test "configured parallelism reaches its limit with independent variants and replaces each free slot immediately", "parallel" {
     var root = runProjectCopy()
     var sources = parallelSources()
@@ -1562,26 +1624,157 @@ test "parallel admission requires valid baseline evidence and preserves no scope
 test "persistent cleanup failure shares one deadline across concurrent callers and cannot approve", "parallel" {
     var root = runProjectCopy()
     prepareParallel(root, "4", "test", 20000, 2500)
-    assert(Directory(root + "/tools").createDirectories())
-    assert(File(root + "/tools/kill").writeText("#!/usr/bin/env bash\nexit 0\n"))
-    assert(process.run("chmod", "+x", root + "/tools/kill").exitCode == 0)
     var log = root + "/failed-cleanup"
-    var child = startRunPath(root, log, root + "/artifacts", root + "/tools:" + System.getenv("PATH"))
+    var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
     var events: List<String> = listOf()
     try {
         for (var i = 0; i < 4; i++) { events.add(readyEvent(log, i, "test")) }
 
         assert(child.waitFor(6500 as Long, TimeUnit.MILLISECONDS), "cleanup retries restarted the shared deadline")
 
-        assert(child.exitValue() == 2)
-        var report = readRun(reportPath(reportText(log + "/stdout")))
-        assert(report.status == "error" && report.durationMs < 5500)
-        assert(report.limitations.size > 0)
+        assert(child.exitValue() == 2, reportText(log + "/stdout") + reportText(log + "/stderr"))
+        var report = cleanupReport(log, "four-active")
+        assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 2500 && report.durationMs < 5500)
+        assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+        assert(json.encode(report.limitations).contains("Cancellation failed:"), "retain cancellation diagnostics alongside task failures")
         assert(!reportText(log + "/stdout").contains(": complete"))
         for (var event in events) { assert(activePid(reportText(event + "/child")), "the ineffective signal fixture must leave a real cleanup failure") }
+        assertParallelCandidates(report)
+        assert(report.mutants.size == 6 && report.discardedCandidates.size == 0)
+        assert(report.counts.executed == 4 && report.counts.testError == 4 && report.counts.pending == 2)
+        assert(report.counts.killed == 0 && report.counts.survived == 0 && report.counts.timeout == 0)
+        for (var i = 0; i < 6; i++) {
+            var mutant = report.mutants.get(i)
+            if (i < 4) {
+                assert(mutant.status == "TestError" && mutant.phase == "test")
+                assert(mutant.evidence.contains("Cannot confirm process group cleanup"))
+            } else {
+                assert(mutant.status == "Pending" && mutant.phase == "parse" && mutant.durationMs == 0)
+                assert(mutant.evidence.contains("error"), "unstarted candidates need explicit error interruption evidence")
+                assert(!File(log + "/ready-" + i + "-test").exists())
+            }
+        }
+        assert(Directory(log + "/events").list().size == 10, "queued candidates must not start any command")
     } finally {
         stopParallel(child, log)
         for (var event in events) { assert(!activePid(reportText(event + "/child")), "fixture residual must be terminated by the test") }
+        assertParallelStopped(log)
+        assert(Directory(".agent/tmp/m3p-preservation/observations").createDirectories())
+        assert(process.run("cp", "-a", log, ".agent/tmp/m3p-preservation/observations/").exitCode == 0)
         assert(Directory(root).delete())
     }
+}
+
+test "cleanup failure preserves five completed kills while the first candidate is still blocked", "parallel" {
+    var root = runProjectCopy()
+    prepareParallel(root, "4", "individual", 20000, 5000)
+    var log = root + "/completed-kills"
+    var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
+    try {
+        var event = readyEvent(log, 0, "test")
+        for (var i = 1; i < 6; i++) { waitFinished(log, "" + i, "test") }
+        readyEvent(log, 0, "test")
+        assert(!File(reportPath(reportText(log + "/stdout"))).exists(), "completed commands must precede timeout and publication")
+
+        assert(child.waitFor(8500 as Long, TimeUnit.MILLISECONDS), "cleanup restarted its shared deadline")
+
+        assert(child.exitValue() == 2)
+        var report = cleanupReport(log, "five-kills")
+        assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+        assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+        assert(!reportText(log + "/stdout").contains(": complete"))
+        assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
+        assertParallelCandidates(report)
+        assert(report.mutants.size == 6 && report.discardedCandidates.size == 0)
+        assert(report.counts.executed == 6 && report.counts.killed == 5 && report.counts.testError == 1 && report.counts.pending == 0)
+        assert(report.counts.survived == 0 && report.counts.timeout == 0)
+        for (var i = 0; i < 6; i++) {
+            var mutant = report.mutants.get(i)
+            var expected = "Killed"
+            if (i == 0) { expected = "TestError" }
+            assert(mutant.status == expected && mutant.phase == "test")
+            if (i == 0) { assert(mutant.evidence.contains("Cannot confirm process group cleanup")) }
+            else {
+                assert(mutant.evidence.contains("1 failed of 1 executed tests") && mutant.durationMs > 0)
+                assertCompletedLog(mutant.evidence, i, "test", "FAIL fixture: changed result")
+            }
+        }
+    } finally {
+        stopParallel(child, log)
+        assertParallelStopped(log)
+        assert(Directory(root).delete())
+    }
+}
+
+test "cleanup failure preserves a prior discard survivor and kills with original identities and permits recovery", "parallel" {
+    var root = runProjectCopy()
+    try {
+        prepareParallel(root, "4", "none", 10000, 30000)
+        var seedLog = root + "/seed"
+        var seed = startRun(root, seedLog, root + "/artifacts")
+        try { assert(seed.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && seed.exitValue() == 0) }
+        finally { stopParallel(seed, seedLog) }
+        var previous = reportPath(reportText(seedLog + "/stdout"))
+        var previousBytes = reportText(previous)
+        var reference = readRun(previous)
+        prepareParallel(root, "4", "cleanup-mixed", 20000, 5000)
+        var log = root + "/completed-mixed"
+        var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
+        try {
+            var event = readyEvent(log, 5, "test")
+            waitFinished(log, "0", "check")
+            for (var i = 1; i < 5; i++) { waitFinished(log, "" + i, "test") }
+            readyEvent(log, 5, "test")
+            assert(!File(reportPath(reportText(log + "/stdout"))).exists(), "prior results must finish before the cleanup failure")
+
+            assert(child.waitFor(8500 as Long, TimeUnit.MILLISECONDS), "cleanup restarted its shared deadline")
+
+            assert(child.exitValue() == 2)
+            var report = cleanupReport(log, "discard-survivor")
+            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+            assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+            assert(!reportText(log + "/stdout").contains(": complete"))
+            assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
+            assertParallelCandidates(report)
+            assert(report.discardedCandidates.size == 1 && report.mutants.size == 5)
+            assert(report.counts.executed == 5 && report.counts.killed == 3 && report.counts.survived == 1 && report.counts.testError == 1 && report.counts.pending == 0)
+            assert(report.counts.timeout == 0)
+            var discarded = report.discardedCandidates.get(0)
+            assert(discarded.id == reference.mutants.get(0).id && discarded.phase == "check")
+            assert(discarded.evidence.contains("SYNTHETIC") && discarded.evidence.contains("/0-check.stdout"))
+            assertCompletedLog(discarded.evidence, 0, "check", "fixture rejection")
+            for (var i = 0; i < 5; i++) {
+                var mutant = report.mutants.get(i)
+                var expected = "Killed"
+                if (i == 1) { expected = "Survived" }
+                if (i == 4) { expected = "TestError" }
+                assert(mutant.id == reference.mutants.get(i + 1).id)
+                assert(json.encode(mutant.location) == json.encode(reference.mutants.get(i + 1).location))
+                assert(mutant.status == expected && mutant.phase == "test")
+                if (i == 4) { assert(mutant.evidence.contains("Cannot confirm process group cleanup")) }
+                else {
+                    assert(mutant.evidence.contains("/" + (i + 1) + "-test.stdout"))
+                    var failures = "1 failed of 1 executed tests"
+                    if (i == 1) { failures = "0 failed of 1 executed tests" }
+                    assert(mutant.evidence.contains(failures))
+                    var expectedLog = "FAIL fixture: changed result"
+                    if (i == 1) { expectedLog = "PASS fixture" }
+                    assert(mutant.durationMs > 0)
+                    assertCompletedLog(mutant.evidence, i + 1, "test", expectedLog)
+                }
+            }
+            assert(reportText(previous) == previousBytes)
+        } finally { stopParallel(child, log); assertParallelStopped(log) }
+        prepareParallel(root, "4", "none", 10000, 30000)
+        var recoveredLog = root + "/recovered"
+        var recovered = startRun(root, recoveredLog, root + "/artifacts")
+        try {
+            assert(recovered.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && recovered.exitValue() == 0)
+            var report = readRun(reportPath(reportText(recoveredLog + "/stdout")))
+            assert(report.status == "complete" && report.counts.killed == 6)
+            assertParallelCandidates(report)
+            assert(reportText(previous) == previousBytes)
+            assertParallelStopped(recoveredLog)
+        } finally { stopParallel(recovered, recoveredLog) }
+    } finally { assert(Directory(root).delete()) }
 }

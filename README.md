@@ -108,7 +108,7 @@ Declare required sources, imports, tests, manifests and scripts in `inputs`, inc
 
 Commands use separate argv entries, sandbox cwd, inherited environment and closed stdin. Each process starts in its own group. Its deadline is the smaller of `commandTimeoutMs` and the remaining global budget, measured with a monotonic clock from entry to `run`, including preparation and baseline. On expiry, the group is terminated and `/proc` is checked for active members; zombies are not active processes. No further command starts after the budget. Sandboxes are removed; separate stdout and stderr logs remain per run in the tool checkout's `.agent/tmp/`. A JVM shutdown hook coordinates command start and registration with cancellation. SIGINT and SIGTERM during an active command return 130 and 143, clean that execution's group and sandbox, and preserve simultaneous runs. External interruption does not promise a partial report. Commands that deliberately leave their process group have no cancellation guarantee in this version.
 
-With concurrent mutants, global expiry closes admission and interrupts all active groups. Interrupted phases are `Timeout`; phases still waiting to start are `Pending` with duration zero. Cancellation signals every owned group before waiting, with a shared cleanup deadline of two seconds. Tasks are joined before sandbox removal and publication. An unexpected task or cleanup failure returns `error/2` when a report can be published; publication failure returns 2 without a usable final report.
+With concurrent mutants, global expiry closes admission and interrupts all active groups. Interrupted phases are `Timeout`; phases still waiting to start are `Pending` with duration zero. Cancellation signals every owned group before waiting, with a shared cleanup deadline of two seconds. Tasks are joined before sandbox removal and publication. An unexpected task or cleanup failure closes admission and returns `error/2` when a report can be published. Every selected candidate appears exactly once in `mutants` or `discardedCandidates`, including when cancellation also fails. Completed results retain their states, IDs, phases and log references. Candidates never started are `Pending/parse` with duration zero and an interruption reason in `evidence`. Cleanup diagnostics remain explicit; publication follows task collection and the cleanup attempt. Publication failure returns 2 without a usable final report.
 
 ## Operators and evidence
 
@@ -125,7 +125,7 @@ Check counters must be original JSON integers before typed conversion: `filesChe
 | `CompileError` | Legacy status; new runs record coherent compiler rejections in `discardedCandidates` |
 | `Timeout` | Deadline terminated check or test, with phase and cleanup recorded |
 | `TestError` | Insufficient or invalid evidence, or runner failure |
-| `Pending` | Evaluation or a remaining phase did not start because the budget ended |
+| `Pending` | Evaluation or a remaining phase did not start because the budget ended or execution stopped on error; the reason is recorded in `evidence` |
 
 For each independent candidate, the tool confirms the original token, applies one replacement, compares the original and modified token streams with the official lexer (accounting for UTF-16 length changes), and reparses with the official parser. Only a candidate that preserves every other token and parses successfully reaches check; only an approved check reaches tests. Lexer/parser rejection, unintended token changes and coherent check rejection are recorded as discarded candidates, with Kof diagnostics and log references. A token comparison failure without a diagnostic uses the fixed message `Variant changes tokens other than the selected token`. Snapshot divergence, unexpected exceptions and infrastructure failures remain tool errors. Invalid or contradictory check evidence remains `TestError` and never authorizes discard.
 
@@ -152,7 +152,9 @@ Expected discards permit `complete/0` with at least one applicable mutant and al
 
 `./scripts/check` preserves the 21 launcher contracts, runs Kof tests through the real CLI and compiles the frontend assertion program with the installed jar on its classpath. Kof 0.6.4 `test` does not accept `--classpath`; frontend proofs use the official whole program `assert` style without a new test harness.
 
-M3P validation passed 21 launcher contracts, 39 mutation cycle tests and 15 frontend groups, including a clean copy with spaces and no Python on PATH. SiFuture revision `82111142c85f98b970ccd65fbf044e492d017729` retained all 114 canonical JVM cases. A temporary check adapter detected an error in an imported source. Original content and permissions remained intact.
+The M3P.3 result preservation correction passed 21 launcher contracts, 41 mutation cycle tests and 15 frontend groups in both the checkout and a clean copy with spaces and no Python on PATH. All 49 validation inputs match by SHA-256. Regression reports retain every selected candidate when cancellation also fails, including prior kills, a coherent discard and a survivor.
+
+Historical M3P validation at `438c775` passed 21 launcher contracts, 39 mutation cycle tests and 15 frontend groups, including a clean copy with spaces and no Python on PATH. The measurements below describe that revision and do not establish performance of the result preservation correction. SiFuture revision `82111142c85f98b970ccd65fbf044e492d017729` retained all 114 canonical JVM cases. A temporary check adapter detected an error in an imported source. Original content and permissions remained intact.
 
 | SiFuture scope | maxParallelMutants | External seconds | Result |
 | --- | --- | --- | --- |

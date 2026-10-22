@@ -137,18 +137,27 @@ class MutationRun {
             var result = completed.receive()
             results.put(result.index, result)
             running--
-            if (result.failure != "") { failure = result.failure; resources.stopCommands(false) }
+            if (result.failure != "") {
+                failure = failure + result.failure + "; "
+                try { resources.stopCommands(false) }
+                catch (Exception error) { failure = failure + "Cancellation failed: " + error.toString() + "; " }
+            }
         }
-        resources.joinTasks()
+        try { resources.joinTasks() }
+        catch (Exception error) { failure = failure + "Task collection failed: " + error.toString() + "; " }
         for (var i = 0; i < candidates.size; i++) {
+            var pending = candidates.get(i)
+            if (failure != "") {
+                pending = MutantResult(pending.id, pending.file, pending.operator, pending.original, pending.replacement, pending.location, "Pending", "parse", 0, "Evaluation not started: interrupted by error; " + failure)
+            }
             var result = results.get(i)
-            if (result == null) { mutants.add(candidates.get(i)) }
+            if (result == null) { mutants.add(pending) }
             else {
                 var mutant = result.mutant
                 var discarded = result.discarded
                 if (mutant != null) { mutants.add(mutant) }
                 if (discarded != null) { discardedCandidates.add(discarded) }
-                if (mutant == null && discarded == null) { mutants.add(candidates.get(i)) }
+                if (mutant == null && discarded == null) { mutants.add(pending) }
             }
         }
         if (failure != "") { throw failure }
