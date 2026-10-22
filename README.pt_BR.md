@@ -4,11 +4,11 @@
 
 KofMut é uma ferramenta de teste de mutação em desenvolvimento para Kof. A lógica de seleção, transformação, execução de processos e relatório pertence ao código Kof, com execução inicial na JVM em Linux.
 
-**Estado de desenvolvimento: M1, M1R, M1P, M2 e M3 implementados e validados localmente.** `run` oferece relatórios independentes, concorrência, cancelamento e recuperação no Kof 0.6.4. A aceitação externa mediu uma limitação de orçamento no escopo representativo do SiFuture. M4 conserva os guias públicos detalhados. O valor `0.1.0` identifica este fonte em desenvolvimento.
+**Estado de desenvolvimento: M1, M1R, M1P, M2, M3 e o executor limitado do M3P implementados e validados localmente.** `run` oferece relatórios independentes, chamadas concorrentes, avaliação opcional de até quatro mutantes, cancelamento e recuperação no Kof 0.6.4. A aceitação de desempenho para o escopo representativo do SiFuture permanece pendente. M4 conserva os guias públicos detalhados. O valor `0.1.0` identifica este fonte em desenvolvimento.
 
 ## Requisitos
 
-- Linux com Bash 4.4 ou posterior e GNU coreutils (`dirname`, `readlink`, `mktemp`, `rm`, `cat`, `sort`, `sha256sum` e `b2sum`), GNU findutils (`find`) e `cmp` do GNU diffutils.
+- Linux com Bash 4.4 ou posterior e GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum` e `b2sum`), GNU findutils (`find`) e `cmp` do GNU diffutils.
 - Distribuição Linux oficial do **Kof 0.6.4** no `PATH`, incluindo `lib/kof.jar` e seu JDK embutido.
 - Permissão de escrita no checkout para `build/cache/` e `.agent/tmp/`, e espaço para cópias descartáveis no diretório temporário do sistema.
 - `setsid` do util-linux, o comando externo `kill` e procfs montado em `/proc`. A validação também usa `ps`, `cp`, `ln`, `env` e `which`.
@@ -89,9 +89,14 @@ Cada fixture contém este formato de configuração:
   "checkCommand": ["kof", "check", "src/math/Calc.kf", "--json"],
   "testCommand": ["kof", "test", "tests"],
   "commandTimeoutMs": 10000,
-  "budgetMs": 90000
+  "budgetMs": 90000,
+  "maxParallelMutants": 1
 }
 ```
+
+`maxParallelMutants` é opcional. Ausência do campo, JSON `null` ou `1` usa avaliação serial. Os inteiros JSON originais `2`, `3` e `4` habilitam essa quantidade de avaliações simultâneas de mutantes. Outros valores, incluindo `1.0`, `1e0`, strings e inteiros fora da faixa, retornam exit 2 antes de comandos do projeto. Configuração e relatório mantêm `schemaVersion: 1`; o limite efetivo aparece no relatório humano. Não há nova flag do CLI nem novo campo no relatório JSON.
+
+Uma execução completa de check e testes da baseline precisa passar antes dos mutantes. Cada avaliação usa sua própria cópia do snapshot e seus próprios logs. Uma vaga livre recebe o próximo candidato imediatamente. Candidatos e descartes mantêm a ordem de seleção no relatório final; a ordem de início e conclusão dos processos pode variar. Mais avaliações simultâneas aumentam o uso de CPU e memória. Use `maxParallelMutants: 1` quando os comandos dependerem de recursos externos compartilhados, como banco de dados, porta fixa ou arquivos fora da sandbox. As cópias independentes das fontes não isolam esses recursos.
 
 Na integração planejada dos sensores, `budgetMs: 85000` é o orçamento interno; o limite externo de 90 segundos começa antes da invocação completa do CLI, incluindo a inicialização do lançador. A configuração das fixtures acima não tem limite externo de sensor.
 
@@ -102,6 +107,8 @@ O escopo é um array JSON explícito, como `["src/math/Calc.kf"]`, sem globs. Os
 Declare em `inputs` fontes, imports, testes, manifesto e scripts necessários, incluindo arquivos novos não rastreados. Os comandos precisam verificar e testar o escopo escolhido. `.git`, evidências, o namespace padrão `.kof-mut/reports` e a raiz customizada selecionada dentro do projeto são excluídos, inclusive com `inputs: ["."]`. Relatórios anteriores nesses namespaces nunca entram nos snapshots seguintes. Links internos de inputs são materializados somente quando o destino também pertence aos inputs; destinos externos e ciclos são recusados. A ferramenta captura os inputs antes da baseline e preserva bytes e permissões dos scripts. Cada variante recebe uma cópia independente desse snapshot. Alterações produzidas pelos comandos não passam para a próxima variante. Os originais e os testes são preservados.
 
 Os comandos usam argv separado, cwd da sandbox, ambiente herdado e stdin fechado. Cada processo começa em um grupo próprio. O prazo é o menor entre `commandTimeoutMs` e o orçamento global restante, medido por relógio monotônico desde a entrada de `run`, incluindo preparação e baseline. Ao vencer, o grupo é encerrado e a ausência de membros ativos é conferida em `/proc`; zombies não são processos ativos. Nenhum comando seguinte começa depois do orçamento. Sandboxes são removidas; stdout e stderr separados ficam por execução em `.agent/tmp/` do checkout da ferramenta. Um shutdown hook da JVM coordena o início e registro dos comandos com o cancelamento. SIGINT e SIGTERM durante comando ativo retornam 130 e 143, limpam o grupo e a sandbox daquela execução e preservam chamadas simultâneas. Interrupção externa não promete relatório parcial. Comandos que abandonem deliberadamente seu grupo de processos não têm garantia de cancelamento nesta versão.
+
+Com mutantes concorrentes, o fim do orçamento global fecha a admissão e interrompe todos os grupos ativos. Fases interrompidas ficam `Timeout`; fases que ainda aguardam início ficam `Pending`, com duração zero. O cancelamento sinaliza todos os grupos da execução antes de esperar, com prazo compartilhado de limpeza de dois segundos. As tarefas são recolhidas antes de remover a sandbox e publicar. Falha inesperada de tarefa ou limpeza retorna `error/2` quando o relatório puder ser publicado; falha de publicação retorna 2 sem relatório final utilizável.
 
 ## Operadores e evidência
 
@@ -145,15 +152,20 @@ Descartes esperados permitem `complete/0` com pelo menos um mutante aplicável e
 
 `./scripts/check` preserva os 21 contratos do lançador, executa testes Kof pelo CLI real e compila o programa de asserções do frontend com o jar instalado no classpath. O `kof test` de 0.6.4 não aceita `--classpath`; as provas de frontend usam o estilo oficial de programa completo com `assert`, sem um novo harness de testes.
 
-A validação M3 passou em 21 contratos do lançador, 29 testes do ciclo e 15 grupos frontend, inclusive numa cópia limpa com espaços e PATH sem Python. O SiFuture na revisão `82111142c85f98b970ccd65fbf044e492d017729` executou seus 114 casos canônicos em JVM. Um adaptador temporário de check também detectou erro em fonte importada. O checkout original permaneceu preservado.
+A validação M3P passou em 21 contratos do lançador, 39 testes do ciclo e 15 grupos frontend, inclusive numa cópia limpa com espaços e PATH sem Python. O SiFuture na revisão `82111142c85f98b970ccd65fbf044e492d017729` manteve seus 114 casos canônicos em JVM. Um adaptador temporário de check detectou erro em fonte importada. Conteúdo e permissões do original permaneceram intactos.
 
-| Escopo SiFuture | Segundos externos | Resultado |
-| --- | --- | --- |
-| `Background.kf`, três execuções quentes | 10.082–10.434 | `complete/0`, um `Killed` por execução |
-| `Background.kf`, cache vazio do lançador | 15.242 | `complete/0`, um `Killed` |
-| `Meteor.kf`, três execuções quentes | 85.773–85.777 | `incomplete/3`, orçamento global esgotado |
+| Escopo SiFuture | maxParallelMutants | Segundos externos | Resultado |
+| --- | --- | --- | --- |
+| `Meteor.kf`, três execuções quentes | 1 | 85.740–85.793 | `incomplete/3`, 16–17 candidatos concluídos |
+| `Meteor.kf`, três execuções quentes | 4 | 85.749–85.834 | `incomplete/3`, 36 concluídos, quatro `Timeout`, um `Pending` |
+| `Meteor.kf`, cache vazio do lançador | 4 | 90.365 | Prazo externo atingido, exit 143, sem JSON final |
+| `Background.kf` | 1 | 10.987 | `complete/0`, um `Killed` |
+| `Background.kf` | 4 | 10.688 | `complete/0`, um `Killed` |
+| `Background.kf` + `Meteor.kf` | 4 | 85.826 | `incomplete/3`, 35 concluídos, quatro `Timeout`, três `Pending` |
 
-As medições usam `commandTimeoutMs: 10000`, `budgetMs: 85000` internos e limite externo de 90 segundos desde a invocação completa do CLI. Todas as amostras ficaram abaixo de 90 segundos. O escopo representativo ainda tem candidatos pendentes e uma fase interrompida por prazo; não pode ser avaliado por completo no orçamento planejado dos sensores. Os sensores não foram ativados. M4 conclui os guias públicos detalhados. Veja [o plano](EXECPLAN.md), [evidência M3 e contagens por amostra](.agent/validation/kofmut-m3.md), [a validação M2](.agent/validation/kofmut-m2.md) e os relatórios históricos [M1R](.agent/validation/kofmut-m1r.md) e [M1P](.agent/validation/kofmut-m1p.md).
+As medições mantêm `commandTimeoutMs: 10000`, `budgetMs: 85000` internos e prazo externo de 90 segundos desde antes da invocação completa do CLI. O tempo frio inclui o encerramento após esse prazo. Cada relatório publicado de Meteor reconcilia 41 candidatos; o relatório conjunto reconcilia 42. Candidatos concluídos são `Killed` ou `Survived`. A execução fria interrompida não tem relatório final, portanto sua reconciliação de candidatos não está disponível. Execuções seriais interrompidas não são usadas para calcular um fator de aceleração.
+
+A aceitação de desempenho permanece pendente para Meteor e o escopo conjunto. Meteor paralelo quente chega a 2.24–2.31 GiB na soma amostrada de RSS, comparado a 0.68–0.70 GiB serial. RSS inclui páginas compartilhadas e não representa memória física exclusiva exata. Os comandos completos custam mais por candidato quando concorrentes; a causa interna específica não foi analisada por perfil. Sensores permanecem sem ativação e M4 conserva os guias públicos detalhados. Veja [o plano](EXECPLAN.md), [evidência M3P, método CPU/RSS e contagens por amostra](.agent/validation/kofmut-m3p.md), [medições históricas M3](.agent/validation/kofmut-m3.md), [validação M2](.agent/validation/kofmut-m2.md), [M1R](.agent/validation/kofmut-m1r.md) e [M1P](.agent/validation/kofmut-m1p.md).
 
 ## Licença
 

@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.util.UUID
 
 record RunOptions(String project, String config, String files, String reportDir, String runId)
-record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
+record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs, Object maxParallelMutants)
 
 String readRequired(String path) {
     var text = File(path).readText()

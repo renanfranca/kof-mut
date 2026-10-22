@@ -18,6 +18,7 @@ record MutantResult(String id, String file, String operator, String original, St
 record DiscardedCandidate(String id, String file, String operator, String original, String replacement, MutantLocation location, String phase, Long durationMs, String evidence)
 record MutationCounts(Int candidates, Int executed, Int killed, Int survived, Int compileError, Int timeout, Int testError, Int pending)
 record MutationReport(Int schemaVersion, String toolVersion, String kofVersion, String runId, String status, List<String> scope, BaselineEvidence baseline, MutationCounts counts, List<MutantResult> mutants, List<DiscardedCandidate> discardedCandidates, List<String> limitations, String startedAt, Long durationMs)
+record CandidateEvaluation(Int index, MutantResult? mutant, DiscardedCandidate? discarded, String failure)
 
 class MutationRun {
     RunOptions options
@@ -32,6 +33,7 @@ class MutationRun {
     String logs = ""
     Bool canPublish = false
     String reportPath = ""
+    Int maxParallelMutants = 1
     RunResources resources = new RunResources()
 
     constructor(RunOptions input, Long clock, String instant) { options = input; start = clock; startedAt = instant }
@@ -44,6 +46,8 @@ class MutationRun {
         try {
             canPublish = !underPath(options.reportDir, options.project)
             var config = loadConfig(options)
+            var configuredLimit = config.maxParallelMutants
+            if (configuredLimit != null) { maxParallelMutants = configuredLimit.toString().toInt() }
             canPublish = false
             canPublish = reportTargetAllowed(options, config)
             if (!canPublish) { throw "Report destination overlaps inputs" }
@@ -62,7 +66,8 @@ class MutationRun {
             status = "error"
             limitations.add(error.toString())
         } finally {
-            resources.cleanup()
+            try { resources.cleanup() }
+            catch (Exception error) { status = "error"; limitations.add("Cleanup failed: " + error.toString()) }
         }
         resources.lock.lock()
         try { resources.requireActive(); return finish() }
@@ -100,29 +105,68 @@ class MutationRun {
             var ordered = orderedSites(scan.sites)
             for (var site in ordered) {
                 var id = file + ":" + site.offset + ":" + site.replacement
-                candidates.add(MutantResult(id, file, site.operator, site.original, site.replacement, MutantLocation(site.line, site.column, site.offset, site.length), "Pending", "parse", 0, "Budget exhausted before evaluation"))
+                candidates.add(MutantResult(id, file, site.operator, site.original, site.replacement, MutantLocation(site.line, site.column, site.offset, site.length), "Pending", "parse", 0, "Evaluation not started"))
             }
         }
         } finally { resources.lock.unlock() }
-        var i = 0
-        while (i < candidates.size && elapsedMs(start) < config.budgetMs) {
-            var mutant = candidates.get(i)
-            var mutantStart = System.nanoTime()
-            var variant = temporary + "/variant"
-            resources.prepare(entries, variant)
-            try {
-                evaluateCandidate(mutant, config, variant, i, mutantStart)
-            } finally { resources.removeVariant(variant) }
-            i++
-        }
-        while (i < candidates.size) { mutants.add(candidates.get(i)); i++ }
+        evaluateCandidates(candidates, config, entries, temporary)
         status = "complete"
         if (mutants.size == 0) { status = "no_mutants" }
         if (limitations.size > 0 || elapsedMs(start) >= config.budgetMs) { status = "incomplete" }
         for (var mutant in mutants) { if (mutant.status != "Killed" && mutant.status != "Survived") { status = "incomplete" } }
     }
 
-    void evaluateCandidate(MutantResult mutant, RunConfig config, String variant, Int index, Long mutantStart) {
+    void evaluateCandidates(List<MutantResult> candidates, RunConfig config, List<InputEntry> entries, String temporary) {
+        var completed: Channel<CandidateEvaluation> = channel<CandidateEvaluation>()
+        var results: Map<Int, CandidateEvaluation> = mapOf()
+        var next = 0
+        var running = 0
+        var failure = ""
+        while (next < candidates.size || running > 0) {
+            while (failure == "" && next < candidates.size && running < maxParallelMutants && elapsedMs(start) < config.budgetMs) {
+                resources.lock.lock()
+                try {
+                    resources.requireActive()
+                    var task = launchCandidate(this, candidates.get(next), config, entries, temporary + "/variant-" + next, next, completed)
+                    resources.tasks.add(task)
+                } finally { resources.lock.unlock() }
+                next++
+                running++
+            }
+            if (running == 0) { break }
+            var result = completed.receive()
+            results.put(result.index, result)
+            running--
+            if (result.failure != "") { failure = result.failure; resources.stopCommands(false) }
+        }
+        resources.joinTasks()
+        for (var i = 0; i < candidates.size; i++) {
+            var result = results.get(i)
+            if (result == null) { mutants.add(candidates.get(i)) }
+            else {
+                var mutant = result.mutant
+                var discarded = result.discarded
+                if (mutant != null) { mutants.add(mutant) }
+                if (discarded != null) { discardedCandidates.add(discarded) }
+                if (mutant == null && discarded == null) { mutants.add(candidates.get(i)) }
+            }
+        }
+        if (failure != "") { throw failure }
+    }
+
+    CandidateEvaluation evaluateTask(MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
+        var result = CandidateEvaluation(index, null, null, "Candidate did not finish")
+        var mutantStart = System.nanoTime()
+        try {
+            resources.prepare(entries, variant)
+            try { result = evaluateCandidate(mutant, config, variant, index, mutantStart) }
+            finally { resources.removeVariant(variant) }
+        } catch (Exception error) { result = candidateFailure(mutant, index, "parse", mutantStart, error.toString()) }
+        completed.send(result)
+        return result
+    }
+
+    CandidateEvaluation evaluateCandidate(MutantResult mutant, RunConfig config, String variant, Int index, Long mutantStart) {
         resources.lock.lock()
         try {
         resources.requireActive()
@@ -135,28 +179,31 @@ class MutationRun {
         var parseLog = logs + "/" + index + "-parse.log"
         if (!validation.accepted) {
             if (!File(parseLog).writeText(validation.evidence + "\n")) { throw "Cannot write frontend evidence" }
-            discardedCandidates.add(DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, "parse", elapsedMs(mutantStart), validation.evidence + "; log: " + parseLog))
-            return
+            return CandidateEvaluation(index, null, DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, "parse", elapsedMs(mutantStart), validation.evidence + "; log: " + parseLog), "")
         }
         } finally { resources.lock.unlock() }
-        var check = checkEvidence(executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources))
+        var check = CheckedEvidence("Pending", notStarted())
+        try { check = checkEvidence(executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources)) }
+        catch (Exception error) { return candidateFailure(mutant, index, "check", mutantStart, error.toString()) }
         var state = check.status
         var phase = "check"
         var evidence = check.phase.summary
         if (state == "passed") {
-            var test = testEvidence(executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources))
+            var test = CheckedEvidence("Pending", notStarted())
+            try { test = testEvidence(executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources)) }
+            catch (Exception error) { return candidateFailure(mutant, index, "test", mutantStart, error.toString()) }
             state = test.status
             phase = "test"
             evidence = test.phase.summary
         }
         var duration = elapsedMs(mutantStart)
         if (state == "Pending") { duration = 0 }
-        var summary = "Not started: budget exhausted"
+        var summary = "Not started: execution stopped"
         if (evidence != null) { summary = evidence }
         if (state == "rejected") {
-            discardedCandidates.add(DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, phase, duration, summary))
+            return CandidateEvaluation(index, null, DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, phase, duration, summary), "")
         } else {
-            mutants.add(MutantResult(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, state, phase, duration, summary))
+            return CandidateEvaluation(index, MutantResult(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, state, phase, duration, summary), null, "")
         }
     }
 
@@ -186,6 +233,7 @@ class MutationRun {
             var published = Files.move(temporary, target.toPath(), StandardCopyOption.ATOMIC_MOVE)
         } finally { Directory(staging.toString()).delete() }
         println("KofMut " + options.runId + ": " + status)
+        println("maxParallelMutants=" + maxParallelMutants)
         println("candidates=" + counts.candidates + " killed=" + counts.killed + " survived=" + counts.survived + " compileError=" + counts.compileError + " timeout=" + counts.timeout + " testError=" + counts.testError + " pending=" + counts.pending)
         for (var file in scope) {
             var selected: List<MutantResult> = listOf()
@@ -206,6 +254,20 @@ class MutationRun {
         if (counts.survived > 0) { return 1 }
         return 0
     }
+}
+
+// Kof 0.6.4 requires spawn outside try/finally and an explicit receiver.
+Handle<Int> launchCandidate(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
+    return spawn dispatchCandidate(execution, mutant, config, entries, variant, index, completed)
+}
+
+Int dispatchCandidate(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
+    var result = execution.evaluateTask(mutant, config, entries, variant, index, completed)
+    return result.index
+}
+
+CandidateEvaluation candidateFailure(MutantResult mutant, Int index, String phase, Long start, String failure) {
+    return CandidateEvaluation(index, MutantResult(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, "TestError", phase, elapsedMs(start), failure), null, failure)
 }
 
 Int runMutation(String[] arguments) {

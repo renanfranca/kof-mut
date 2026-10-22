@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+phase="$1"
+mode="$2"
+: "${KOF_MUT_OBSERVATIONS:?}"
+log="$KOF_MUT_OBSERVATIONS"
+candidate=baseline
+if ! cmp -s src/math/Calc.kf src/math/original.txt; then
+    candidate=unknown
+    for index in 0 1 2 3 4 5; do
+        if cmp -s src/math/Calc.kf "src/math/expected-$index.txt"; then candidate="$index"; break; fi
+    done
+    [[ "$candidate" != unknown ]] || { printf 'unexpected variant\n' >&2; exit 127; }
+fi
+mkdir -p "$log/events"
+event="$log/events/$BASHPID"
+mkdir "$event"
+printf '%s\n' "$candidate" > "$event/candidate"
+printf '%s\n' "$phase" > "$event/phase"
+printf '%s\n' "$PWD" > "$event/cwd"
+printf '%s\n' "$BASHPID" > "$event/pid"
+cp src/math/Calc.kf "$event/source"
+cp tests/Suite.kf "$event/test"
+cp src/math/data.bin "$event/binary"
+stat -c '%a' src/math/data.bin > "$event/mode"
+if [[ -e state ]]; then printf dirty > "$event/state"; else printf clean > "$event/state"; fi
+if [[ "$phase" == test ]]; then printf 'changed by %s\n' "$candidate" > state; fi
+while ! mkdir "$log/counter-lock" 2>/dev/null; do sleep 0.005; done
+count=0; maximum=0
+if [[ -e "$log/count" ]]; then read -r count < "$log/count"; read -r maximum < "$log/maximum"; fi
+count=$((count+1))
+if ((count>maximum)); then maximum="$count"; fi
+printf '%s\n' "$count" > "$log/count"
+printf '%s\n' "$maximum" > "$log/maximum"
+rmdir "$log/counter-lock"
+finish() {
+    while ! mkdir "$log/counter-lock" 2>/dev/null; do sleep 0.005; done
+    read -r count < "$log/count"
+    printf '%s\n' "$((count-1))" > "$log/count"
+    rmdir "$log/counter-lock"
+    printf finished > "$event/finished"
+}
+trap finish EXIT
+blocked=false
+if [[ "$candidate" == baseline && "$mode" == "baseline-$phase" ]]; then blocked=true; fi
+if [[ "$candidate" != baseline && "$mode" == "$phase" ]]; then blocked=true; fi
+if [[ "$candidate" == 0 && "$mode" == individual && "$phase" == test ]]; then blocked=true; fi
+if [[ "$candidate" != baseline && "$mode" == mixed && "$candidate-$phase" == 0-check ]]; then blocked=true; fi
+if [[ "$blocked" == true ]]; then
+    (printf '%s\n' "$BASHPID" > "$event/child"; exec sleep 120) &
+    descendant=$!
+    while [[ ! -s "$event/child" ]]; do sleep 0.005; done
+    kill -0 "$descendant"
+    printf '%s\n' "$event" > "$log/ready-$candidate-$phase"
+    while [[ ! -e "$log/release" && ! -e "$log/release-$candidate-$phase" ]]; do sleep 0.01; done
+    kill -KILL "$descendant"
+    wait "$descendant" 2>/dev/null || true
+fi
+if [[ "$phase" == check ]]; then
+    if [[ "$candidate" == baseline && "$mode" == invalid-check ]]; then printf 'invalid baseline JSON\n'; exit 1; fi
+    if [[ "$candidate" != baseline && ( "$mode" == all-discard || ( ( "$mode" == mixed || "$mode" == survivor ) && "$candidate" == 0 ) ) ]]; then
+        printf '{"success":false,"filesChecked":1,"errorCount":1,"diagnostics":[{"code":"SYNTHETIC","severity":"ERROR","message":"fixture rejection"}]}\n'
+        exit 1
+    fi
+    printf '{"success":true,"filesChecked":1,"errorCount":0,"diagnostics":[]}\n'
+    exit 0
+fi
+if [[ "$candidate" == baseline && "$mode" == zero ]]; then printf 'SUITE tests/Suite.kf (0 tests)\n0 failed of 0 tests\n1 passed, 0 failed\n'; exit 0; fi
+if [[ "$candidate" == baseline && "$mode" == red ]]; then printf 'SUITE tests/Suite.kf (1 tests)\nFAIL fixture: red baseline\n1 failed of 1 tests\n0 passed, 1 failed\n'; exit 1; fi
+if [[ "$candidate" != baseline && "$mode" == mixed && "$candidate" == 3 ]]; then printf 'invalid test evidence\n'; exit 1; fi
+printf 'SUITE tests/Suite.kf (1 tests)\n'
+if [[ "$candidate" == baseline || ( ( "$mode" == mixed || "$mode" == survivor ) && "$candidate" == 2 ) ]]; then
+    printf 'PASS fixture\n0 failed of 1 tests\n1 passed, 0 failed\n'
+else
+    printf 'FAIL fixture: changed result\n1 failed of 1 tests\n0 passed, 1 failed\n'
+    exit 1
+fi

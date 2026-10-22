@@ -3,7 +3,6 @@ package kofmut
 import java.lang.Process
 import java.lang.ProcessBuilder
 import java.lang.Runnable
-import java.lang.Runtime
 import java.lang.Exception
 import java.lang.System
 import java.lang.Thread
@@ -11,12 +10,17 @@ import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 
+record CommandStart(Process? child, Long clock, Long timeoutMs)
+
 class RunResources implements Runnable {
     ReentrantLock lock = new ReentrantLock()
-    Process? active = null
-    Bool hasActive = false
+    List<Process> active = listOf()
+    List<Handle<Int>> tasks = listOf()
+    List<Long> timedOutGroups = listOf()
     String sandbox = ""
     Bool cancelled = false
+    Bool admissionClosed = false
+    Long stopClock = 0
 
     void requireActive() { if (cancelled) { throw "Execution cancelled" } }
 
@@ -32,33 +36,90 @@ class RunResources implements Runnable {
         finally { lock.unlock() }
     }
 
-    Process startCommand(ProcessBuilder builder) {
+    CommandStart startCommand(ProcessBuilder builder, Long timeoutMs, Long start, Long budgetMs) {
         lock.lock()
         try {
             requireActive()
+            var clock = System.nanoTime()
+            var remaining = budgetMs - elapsedMs(start)
+            if (admissionClosed || remaining <= 0) {
+                stopCommands(remaining <= 0)
+                return CommandStart(null, clock, 0)
+            }
+            var deadline = timeoutMs
+            if (remaining < deadline) { deadline = remaining }
             var child = builder.start()
-            active = child
-            hasActive = true
-            return child
+            active.add(child)
+            return CommandStart(child, clock, deadline)
         } finally { lock.unlock() }
     }
 
-    void releaseCommand() {
+    void terminateGroups(List<Process> groups, Long cleanupStart) {
+        // Signal every group before waiting; all waits share this two second deadline.
+        for (var child in groups) {
+            var killed = process.run("kill", "-KILL", "--", "-" + child.pid())
+            if (child.isAlive()) { child.destroyForcibly() }
+        }
+        for (var child in groups) {
+            var remaining = 2000 - elapsedMs(cleanupStart)
+            if (remaining > 0) { child.waitFor(remaining, TimeUnit.MILLISECONDS) }
+        }
+        var pending = true
+        while (pending && elapsedMs(cleanupStart) < 2000) {
+            pending = false
+            for (var child in groups) { if (child.isAlive() || processGroupActive(child.pid())) { pending = true } }
+            if (pending) { Thread.sleep(10 as Long) }
+        }
+        for (var child in groups) {
+            if (child.isAlive() || processGroupActive(child.pid())) { throw "Cannot confirm process group cleanup: " + child.pid() }
+        }
+        for (var child in groups) {
+            for (var i = 0; i < active.size; i++) { if (active.get(i).pid() == child.pid()) { active.remove(i); break } }
+        }
+    }
+
+    void stopCommands(Bool globalTimeout) {
         lock.lock()
         try {
-            var child = active
-            if (child != null && hasActive) {
-                // The lock also covers start/registration, so shutdown cannot miss a new group.
-                if (processGroupActive(child.pid())) { var killed = process.run("kill", "-KILL", "--", "-" + child.pid()) }
-                if (child.isAlive()) { child.destroyForcibly() }
-                if (!child.waitFor(1000 as Long, TimeUnit.MILLISECONDS)) { throw "Cannot reap command process" }
-                if (processGroupActive(child.pid())) { var killed = process.run("kill", "-KILL", "--", "-" + child.pid()) }
+            if (!admissionClosed) { stopClock = System.nanoTime(); admissionClosed = true }
+            var groups: List<Process> = listOf()
+            for (var child in active) {
+                groups.add(child)
+                if (globalTimeout && child.isAlive() && !timedOutGroups.contains(child.pid())) { timedOutGroups.add(child.pid()) }
+            }
+            terminateGroups(groups, stopClock)
+        } finally { lock.unlock() }
+    }
+
+    void releaseCommand(Process child, Long start, Long budgetMs) {
+        lock.lock()
+        try {
+            if (admissionClosed || elapsedMs(start) >= budgetMs) { stopCommands(elapsedMs(start) >= budgetMs) }
+            else if (active.contains(child)) {
                 var cleanupStart = System.nanoTime()
-                while (processGroupActive(child.pid()) && elapsedMs(cleanupStart) < 1000) { Thread.sleep(10 as Long) }
-                if (processGroupActive(child.pid())) { throw "Cannot confirm process group cleanup: " + child.pid() }
-                hasActive = false
+                try { terminateGroups(listOf(child), cleanupStart) }
+                catch (Exception error) { stopClock = cleanupStart; admissionClosed = true; throw error.toString() }
             }
         } finally { lock.unlock() }
+    }
+
+    Bool commandInterrupted(Process child) {
+        lock.lock()
+        try { return timedOutGroups.contains(child.pid()) }
+        finally { lock.unlock() }
+    }
+
+    void joinTasks() {
+        var registered: List<Handle<Int>> = listOf()
+        lock.lock()
+        try { for (var task in tasks) { registered.add(task) } }
+        finally { lock.unlock() }
+        var failure = ""
+        for (var task in registered) {
+            try { var result = await task }
+            catch (Exception error) { failure = failure + error.toString() + "; " }
+        }
+        if (failure != "") { throw failure }
     }
 
     void removeVariant(String path) {
@@ -68,20 +129,24 @@ class RunResources implements Runnable {
     }
 
     void cleanup() {
+        var failure = ""
+        try { stopCommands(false) } catch (Exception error) { failure = error.toString() }
+        try { joinTasks() } catch (Exception error) { failure = failure + "; " + error.toString() }
         lock.lock()
         try {
-            releaseCommand()
             if (sandbox != "") {
                 if (!removeSandbox(sandbox)) { throw "Cannot clean sandbox: " + sandbox }
                 sandbox = ""
             }
         } finally { lock.unlock() }
+        if (failure != "") { throw failure }
     }
 
     void run() {
         lock.lock()
-        try { cancelled = true; cleanup() }
-        catch (Exception error) { System.err.println("kof-mut: shutdown cleanup failed: " + error) }
+        try { cancelled = true }
         finally { lock.unlock() }
+        try { cleanup() }
+        catch (Exception error) { System.err.println("kof-mut: shutdown cleanup failed: " + error) }
     }
 }
