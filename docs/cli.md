@@ -1,0 +1,131 @@
+[English](cli.md) | [Português](cli.pt_BR.md) | [KofMut](../README.md)
+
+# CLI guide
+
+Use the [requirements and four runnable examples](../README.md#requirements) first. This guide is the reference for invocation, project configuration, isolation and recovery. For result vocabulary read [operators](operators.md); for integration use [JSON v1](report-format.md).
+
+## Commands and paths
+
+From the KofMut checkout:
+
+```bash
+./bin/kof-mut --version
+./bin/kof-mut --help
+./bin/kof-mut run --project "my project" --files "my project/scope.json" \
+  --config kof-mut.json --report-dir "mutation reports" \
+  --run-id d7df680d-2304-43a3-9741-4b0ebd61686e
+```
+
+The last command illustrates paths for your own configured project. The ready to run [fixtures](../README.md#run-an-evaluation) return 0, 1, 3 and 1 for `detected`, `survived`, `invalid` and `equivalent` respectively. Capture the exit of each invocation even when it is nonzero; with `set -e`, put `run` in a conditional when you need to inspect its result.
+
+| Command or option | Contract |
+| --- | --- |
+| `--version` | Print `KofMut <VERSION>` and return 0; current source is `0.1.0` |
+| No arguments, `--help` or `-h` | Print usage and return 0; not an evaluation |
+| `run` | Evaluate explicit production scope using the project's configured commands |
+| `--project PATH` | Required; project root, resolved canonically from caller cwd |
+| `--files JSON` | Required; scope JSON file, resolved from caller cwd |
+| `--config JSON` | Optional; default `kof-mut.json`, relative to project unless absolute |
+| `--report-dir DIRECTORY` | Optional; default `<project>/.kof-mut/reports`, otherwise relative to caller cwd |
+| `--run-id UUID` | Optional; UUID string in `8-4-4-4-12` hexadecimal form; generated when omitted |
+
+Flags take separate arguments. Unknown commands or flags, repeated flags, missing values, empty values and invalid inputs return 2. `run --help` is not a supported command. Quote paths containing spaces. Scope paths themselves are relative to the project, regardless of caller cwd. The whole selected file is evaluated, not only changed lines; KofMut does not use Git to choose files.
+
+## Migrate from `--report`
+
+The former `--report FILE` option has been removed. It returns 2 with `--report was removed; use --report-dir DIRECTORY` before creating report directories or running project commands.
+
+Use `--report-dir DIRECTORY` for a report root, then decode the current invocation's `reportPath=` JSON string. Do not replace it with a hardcoded `DIRECTORY/report.json`: each run reserves its own subdirectory. A filename previously supplied to `--report` is not a report root to reuse blindly. See [discovery and publication](report-format.md#discover-the-current-report).
+
+## Configure a project
+
+The `fixtures/detected/kof-mut.json` layout is a concrete starting point, with the optional parallel limit shown explicitly:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceRoots": ["src"],
+  "testRoots": ["tests"],
+  "inputs": ["kof.toml", "src", "tests"],
+  "checkCommand": ["kof", "check", "src/math/Calc.kf", "--json"],
+  "testCommand": ["kof", "test", "tests"],
+  "commandTimeoutMs": 10000,
+  "budgetMs": 90000,
+  "maxParallelMutants": 1
+}
+```
+
+Adapt paths and commands to your project. There are no implied defaults for required configuration fields.
+
+| Field | Type and meaning |
+| --- | --- |
+| `schemaVersion` | Required original JSON integer `1` |
+| `sourceRoots` | Required nonempty array of relative production directory paths |
+| `testRoots` | Required nonempty array of relative test directory paths; files under them cannot be selected |
+| `inputs` | Required nonempty array of relative file/directory paths to copy, including everything commands need |
+| `checkCommand` | Required nonempty string array, executable followed by separate argv entries; must emit the official `kof check --json` protocol |
+| `testCommand` | Required nonempty string array; must emit the supported named `kof test` suite protocol |
+| `commandTimeoutMs` | Required original JSON integer, `1..9223372036854775807`; timeout for each command |
+| `budgetMs` | Required original JSON integer, `0..9223372036854775807`; zero removes the global mutation budget |
+| `maxParallelMutants` | Optional original JSON integer `1..4`; omitted or JSON `null` means `1` |
+
+Numbers must retain integer form before typed decoding. Decimals (including `0.0` and `1.0`), exponentials such as `1e0`, strings, booleans, overflowing integers and incompatible types are invalid. Missing/null `budgetMs`, negative budgets and missing/null/nonpositive `commandTimeoutMs` return 2 before project commands or changes to inputs. The optional null exception applies only to `maxParallelMutants`. Configuration and report both remain `schemaVersion: 1`.
+
+Commands run as argv with sandbox cwd, inherited environment and closed stdin. KofMut does not insert a target or join arguments into a shell command. Declare every script and dependency needed inside the copy in `inputs`, including new untracked sources and imports. Commands must check and test the selected scope. The JVM is KofMut's runtime; the evaluated project uses the target selected by its own commands.
+
+Exit 0 alone is insufficient evidence. Baseline check needs valid/coherent JSON, `success: true`, zero errors and exit 0; baseline tests need completed suites, executed cases and zero failures. Check counters must be original integers: `filesChecked` in `1..2147483647` and `errorCount` in `0..2147483647`; `filesChecked` counts entry files, not imports. A coherent rejection has `success: false`, exit 1 and a positive error count matching ERROR diagnostics. Wrappers must preserve these protocols. Zero tests, SKIP without executed cases, missing summaries, truncation and contradictory output never approve a baseline or kill a mutant. See [baseline fields and states](report-format.md#baseline-and-phase-evidence).
+
+## Select scope and inputs
+
+A scope file such as `fixtures/detected/scope.json` contains:
+
+```json
+["src/math/Calc.kf"]
+```
+
+Entries have no globs. Paths are normalized, deduplicated and sorted. Every entry must exist, end in `.kf`, be under `sourceRoots`, outside `testRoots` and included in `inputs`. Absolute paths, project escapes, selected symbolic links or links in selected path components are rejected before project commands. An empty array produces `no_scope/3` without baseline commands or quality approval.
+
+Input capture preserves bytes, relative paths and script permissions before baseline. Internal input links are materialized only when their targets also belong to inputs; external targets and cycles are rejected. `.git`, `.agent/tmp`, `build/cache/kof-launch-v2`, default `.kof-mut/reports` and the chosen custom report root inside the project are excluded, including with `inputs: ["."]`. Earlier reports do not enter later snapshots.
+
+Choose a report root outside production/test roots and explicit inputs. It cannot equal the project root or overlap protected sources, tests, manifest, config or scope, including canonical aliases through links. With `inputs: ["."]`, a safe internal report namespace is excluded from the copy. If config cannot be validated, only an external safe destination can receive an error report; an internal destination returns 2 with a terminal explanation and no created report directories or project commands.
+
+## Evaluation and isolation
+
+One complete baseline check and test precedes candidate selection. A failed or invalid baseline blocks mutant commands. Every candidate starts from an independent copy of the same captured input snapshot; a previous command's source changes or side effects inside its copy cannot enter the next variant. Tests are copied and never mutated. Sandboxes are removed before final publication.
+
+Copies isolate files, not external resources. Commands inherit credentials and environment like any local invocation. Databases, fixed ports and paths outside the sandbox remain shared when the project commands use them. Use `maxParallelMutants: 1` for such dependencies.
+
+With limits `2`, `3` or `4`, baseline still runs once. A free slot immediately receives the next candidate. Final mutants and discards preserve selection order within each array; command start/completion order can vary. Parallel evaluation consumes more CPU and memory. The effective limit appears as `maxParallelMutants=N` in human output; JSON v1 has no parallel limit field.
+
+## Timeouts and cancellation
+
+For `budgetMs > 0`, the global monotonic budget starts at entry to `run` and includes preparation, baseline and mutant work. It does not include launcher startup before application entry. Each command receives the smaller of `commandTimeoutMs` and the remaining global budget. On expiry, admission closes and active groups are interrupted; no later command starts. Interrupted phases become `Timeout`; work whose next phase never started becomes `Pending` with duration zero.
+
+For `budgetMs: 0`, there is no global budget. Every baseline/mutant command still has its positive individual timeout. A command timeout with confirmed cleanup allows remaining candidates to continue; that run is inconclusive. Zero does not mean infinite command time or quality approval.
+
+Each command starts with `setsid` in its own process group. Cleanup signals owned groups and checks `/proc` for active members; zombies are not active. Cancellation signals all groups before waiting with a shared cleanup deadline of two seconds, joins tasks, then removes sandboxes. An unexpected task or cleanup failure closes admission and produces `error/2` when publishable. Completed states, IDs and evidence are retained, and unstarted candidates become `Pending/parse` with the error reason. Cleanup failure remains explicit; it is not confirmed termination.
+
+SIGINT/SIGTERM during an active command return 130/143 and clean that invocation's groups/sandbox while preserving concurrent invocations. External interruption does not promise a partial report. Commands that deliberately leave their process group have no cancellation guarantee in this version.
+
+## Reports and logs
+
+The [report reference](report-format.md#discover-the-current-report) defines exclusive reservation, canonical project identity, current `reportPath`, atomic publication and validation. Publication failure returns 2 without a usable final report. Never fall back to a previous report.
+
+Separate stdout/stderr command logs remain under the KofMut checkout's `.agent/tmp/run-<runId>-<unique-suffix>/`. They are referenced in baseline `summary` and mutant/discard `evidence`. Parse rejection can add `<index>-parse.log`; command logs use `baseline-check`, `baseline-test`, `<index>-check` and `<index>-test` prefixes with `.stdout`/`.stderr`. Indices retain original selection positions after discards. These paths are local evidence, not a portable embedded log archive. Preserve referenced logs when moving reports for review.
+
+## Launcher and cache
+
+The Bash bridge pins the real Kof executable and queries fresh `kof info --json` on every invocation. It locates the installed jar and embedded Java without downloads or upgrades. Kof 0.6.4 is required for version, help and evaluation alike. The compiled Kof `kofmut.launch.RuntimeEntry` validates fresh installation evidence and starts the application in the same JVM, preserving argv, cwd, environment, exit and signals. Python is not part of this path.
+
+On cache miss, `scripts/bootstrap/Launch.kf` runs through `kof run`, validates captured inputs and compiles them with `kof build --target jvm --classpath`. A lock and second cache check serialize preparation; only a complete successful image is published by atomic directory move. The application, entry point and generated JSON runtime compile together. Failed preparation returns 2 without falling back to an older image.
+
+`build/cache/kof-launch-v2/locations/` holds installation descriptors; `images/` holds compiled programs. SHA-256 identity covers mode, checkout, pinned executable/content, fresh JSON, launchers, VERSION, manifest and relevant sources in deterministic NUL separated fields; the final identity incorporates the entire jar's BLAKE2b 512 bit hash from GNU `b2sum`. Generated classes have SHA-256 checksums. Timestamps do not establish validity. Evaluated project changes do not rebuild KofMut. The internal NUL protocol is `kofmut-location-v1`; older Python/`kof-bootstrap-v1` cache entries are ignored.
+
+Missing/inconsistent descriptors or incomplete images trigger preparation. To recover from an interrupted cache, run from the checkout root after active invocations finish:
+
+```bash
+rm -rf -- build/cache/kof-launch-v2
+./bin/kof-mut --version
+```
+
+This discards compiled images and staging directories; the next invocation rebuilds. The cache filesystem must support locks and atomic directory moves. The official Kof launcher also probes `java -version` before the installation query: warm startup has two working JVMs plus this probe. Historical startup costs and conditions belong to [M1P evidence](../.agent/validation/kofmut-m1p.md), not a promise for the first build or for evaluated projects. See [validation status](../README.md#validation-and-next-milestones) for the deferred performance target and future sensors.
