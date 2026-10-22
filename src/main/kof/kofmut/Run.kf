@@ -112,7 +112,7 @@ class MutationRun {
         evaluateCandidates(candidates, config, entries, temporary)
         status = "complete"
         if (mutants.size == 0) { status = "no_mutants" }
-        if (limitations.size > 0 || elapsedMs(start) >= config.budgetMs) { status = "incomplete" }
+        if (limitations.size > 0 || budgetExpired(start, config.budgetMs)) { status = "incomplete" }
         for (var mutant in mutants) { if (mutant.status != "Killed" && mutant.status != "Survived") { status = "incomplete" } }
     }
 
@@ -123,7 +123,7 @@ class MutationRun {
         var running = 0
         var failure = ""
         while (next < candidates.size || running > 0) {
-            while (failure == "" && next < candidates.size && running < maxParallelMutants && elapsedMs(start) < config.budgetMs) {
+            while (failure == "" && next < candidates.size && running < maxParallelMutants && !budgetExpired(start, config.budgetMs)) {
                 resources.lock.lock()
                 try {
                     resources.requireActive()

@@ -70,7 +70,7 @@ RunConfig loadConfig(RunOptions options) {
     var text = readRequired(options.config)
     validateConfigShape(text)
     var config = json.decode<RunConfig>(text)
-    if (config.schemaVersion != 1 || config.commandTimeoutMs <= 0 || config.budgetMs <= 0 || config.sourceRoots.size == 0 || config.testRoots.size == 0 || config.inputs.size == 0 || config.checkCommand.size == 0 || config.testCommand.size == 0) { throw "Invalid configuration" }
+    if (config.schemaVersion != 1 || config.commandTimeoutMs <= 0 || config.budgetMs < 0 || config.sourceRoots.size == 0 || config.testRoots.size == 0 || config.inputs.size == 0 || config.checkCommand.size == 0 || config.testCommand.size == 0) { throw "Invalid configuration" }
     for (var path in config.sourceRoots) { relativeInput(path) }
     for (var path in config.testRoots) { relativeInput(path) }
     for (var path in config.inputs) { relativeInput(path) }

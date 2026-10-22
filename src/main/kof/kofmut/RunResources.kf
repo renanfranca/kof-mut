@@ -41,9 +41,10 @@ class RunResources implements Runnable {
         try {
             requireActive()
             var clock = System.nanoTime()
-            var remaining = budgetMs - elapsedMs(start)
+            var remaining = timeoutMs
+            if (budgetMs > 0) { remaining = budgetMs - elapsedMs(start) }
             if (admissionClosed || remaining <= 0) {
-                stopCommands(remaining <= 0)
+                stopCommands(budgetMs > 0 && remaining <= 0)
                 return CommandStart(null, clock, 0)
             }
             var deadline = timeoutMs
@@ -94,7 +95,7 @@ class RunResources implements Runnable {
     void releaseCommand(Process child, Long start, Long budgetMs) {
         lock.lock()
         try {
-            if (admissionClosed || elapsedMs(start) >= budgetMs) { stopCommands(elapsedMs(start) >= budgetMs) }
+            if (admissionClosed || budgetExpired(start, budgetMs)) { stopCommands(budgetExpired(start, budgetMs)) }
             else if (active.contains(child)) {
                 var cleanupStart = System.nanoTime()
                 try { terminateGroups(listOf(child), cleanupStart) }

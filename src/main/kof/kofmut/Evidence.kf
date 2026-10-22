@@ -12,6 +12,7 @@ record PhaseEvidence(Int? exitCode, Long? durationMs, String? summary, Int? file
 record CheckedEvidence(String status, PhaseEvidence phase)
 
 Long elapsedMs(Long start) { return (System.nanoTime() - start) / 1000000 }
+Bool budgetExpired(Long start, Long budgetMs) { return budgetMs > 0 && elapsedMs(start) >= budgetMs }
 
 CommandResult executeCommand(List<String> arguments, String cwd, String log, Long timeoutMs, Long start, Long budgetMs, RunResources resources) {
     var argv = new String[arguments.size + 1]

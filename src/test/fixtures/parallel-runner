@@ -44,7 +44,7 @@ trap finish EXIT
 blocked=false
 if [[ "$candidate" == baseline && "$mode" == "baseline-$phase" ]]; then blocked=true; fi
 if [[ "$candidate" != baseline && "$mode" == "$phase" ]]; then blocked=true; fi
-if [[ "$candidate" == 0 && "$mode" == individual && "$phase" == test ]]; then blocked=true; fi
+if [[ "$candidate" == 0 && ( ( "$mode" == individual && "$phase" == test ) || "$mode" == "individual-$phase" ) ]]; then blocked=true; fi
 if [[ "$candidate-$phase" == 5-test && "$mode" == cleanup-mixed ]]; then blocked=true; fi
 if [[ "$candidate" != baseline && "$mode" == mixed && "$candidate-$phase" == 0-check ]]; then blocked=true; fi
 if [[ "$blocked" == true ]]; then
