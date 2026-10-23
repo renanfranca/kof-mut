@@ -5,6 +5,15 @@ import java.lang.System
 
 record LaunchInstallation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
 
+void invokeApplication(String[] arguments) {
+    var signature = new Class[1]
+    signature[0] = Class.forName("[Ljava.lang.String;")
+    var method = Class.forName("Default.Main").getMethod("main", signature)
+    var invocation = new Object[1]
+    invocation[0] = arguments
+    var invoked = method.invoke(null, invocation)
+}
+
 String launchText(String path) {
     var text = File(path).readText()
     if (text != null) { return text }
@@ -40,6 +49,10 @@ class RuntimeEntry {
             if (parts[6] != key || image != root + "/build/cache/kof-launch-v2/images/" + key || launchText(image + "/identity") != identity || System.getProperty("java.class.path") != image + "/classes:" + jar) { throw "compiled image identity mismatch" }
             var previousRoot = System.setProperty("kofmut.root", root)
             var previousVersion = System.setProperty("kofmut.kof.version", installation.kof)
+            System.setProperty("kofmut.kof", kof)
+            System.setProperty("kofmut.java", java)
+            System.setProperty("kofmut.jar", jar)
+            System.setProperty("kofmut.image", image)
         } catch (String error) {
             System.err.println("kof-mut: " + error)
             valid = false
@@ -49,11 +62,7 @@ class RuntimeEntry {
         if (!valid) { process.exit(2) }
         var applicationArgs = new String[arguments.length - 5]
         for (var i = 0; i < applicationArgs.length; i++) { applicationArgs[i] = arguments[i + 5] }
-        var signature = new Class[1]
-        signature[0] = Class.forName("[Ljava.lang.String;")
-        var method = Class.forName("Default.Main").getMethod("main", signature)
-        var invocation = new Object[1]
-        invocation[0] = applicationArgs
-        var invoked = method.invoke(null, invocation)
+        if (mode == "install") { InstallEntry.main(applicationArgs); return }
+        invokeApplication(applicationArgs)
     }
 }

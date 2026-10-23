@@ -51,12 +51,13 @@ class MutationRun {
             canPublish = false
             canPublish = reportTargetAllowed(options, config)
             if (!canPublish) { throw "Report destination overlaps inputs" }
+            protectInstalledLogs(options, config)
             reserveReport()
             scope = loadScope(options, config)
             status = "no_scope"
             if (scope.size > 0) {
                 var entries = captureInputs(options, config)
-                var evidenceRoot = System.getProperty("kofmut.root") + "/.agent/tmp"
+                var evidenceRoot = System.getProperty("kofmut.logs", System.getProperty("kofmut.root") + "/.agent/tmp")
                 if (!Directory(evidenceRoot).createDirectories()) { throw "Cannot create evidence directory" }
                 logs = Files.createTempDirectory(new java.io.File(evidenceRoot).toPath(), "run-" + options.runId + "-").toString()
                 temporary = resources.reserveSandbox()

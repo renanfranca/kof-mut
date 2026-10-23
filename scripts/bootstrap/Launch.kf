@@ -86,7 +86,7 @@ void publishImage(String root, String kof, String jar, List<SourceSnapshot> sour
 }
 
 void prepare(String root, String kof, String mode, String context) {
-    if (mode != "app" && mode != "contracts") { throw "unknown launch mode" }
+    if (mode != "app" && mode != "contracts" && mode != "install") { throw "unknown launch mode" }
     var raw = requiredText(context + "/info.json")
     var installation = json.decode<Installation>(raw)
     if (installation.kof != "0.6.4" || installation.compiler != "0.6.4" || installation.runtime != "0.6.4" || installation.stdlib != "0.6.4") { throw "this build requires Kof/compiler/runtime/stdlib 0.6.4" }

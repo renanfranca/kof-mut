@@ -1,0 +1,614 @@
+import java.lang.System
+import java.lang.Process
+import java.lang.Thread
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+
+record InstallJourney(String base, String checkout, String prefix, String toolchain, String kof)
+record InstallConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
+record InstallObservation(List<String> arguments, String cwd, String environment)
+record InstallKofInfo(String install)
+
+String installText(String path) {
+    var text = File(path).readText()
+    assert(text != null, "missing " + path)
+    if (text != null) { return text }
+    throw "missing " + path
+}
+
+Process startInstallCommand(List<String> command, String log) {
+    var argv = new String[command.size]
+    for (var i = 0; i < command.size; i++) { argv[i] = command.get(i) }
+    var builder = new java.lang.ProcessBuilder(argv)
+    builder.redirectOutput(new java.io.File(log + ".stdout"))
+    builder.redirectError(new java.io.File(log + ".stderr"))
+    var child = builder.start()
+    child.getOutputStream().close()
+    return child
+}
+
+void installReady(String path, Process child) {
+    var start = System.nanoTime()
+    while (!File(path).exists() && child.isAlive() && (System.nanoTime() - start) / 1000000 < 30000) { Thread.sleep(20 as Long) }
+    assert(File(path).exists(), "readiness missing: " + path)
+}
+
+Process startInstalledEvaluation(InstallJourney journey, String label) {
+    return startInstalledEvaluationPath(journey, label, System.getenv("PATH"))
+}
+
+Process startInstalledEvaluationPath(InstallJourney journey, String label, String path) {
+    var project = journey.base + "/" + label
+    var copied = process.run("cp", "-a", "fixtures/detected", project)
+    assert(copied.exitCode == 0)
+    var runner = journey.base + "/" + label + "-runner"
+    var copiedRunner = process.run("cp", "-a", "src/test/fixtures/m3-runner", runner)
+    assert(copiedRunner.exitCode == 0)
+    assert(File(project + "/src/math/original.txt").writeText(installText(project + "/src/math/Calc.kf")))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), 120000, 0))))
+    var log = project + "/observations"
+    assert(Directory(log).createDirectories())
+    var stream = process.run("ln", "-s", "run.stdout", log + "/stdout")
+    assert(stream.exitCode == 0)
+    return startInstallCommand(listOf("/usr/bin/env", "PATH=" + path, "KOF_MUT_OBSERVATIONS=" + log, journey.prefix + "/bin/kof-mut", "run", "--project", project, "--files", project + "/scope.json"), log + "/run")
+}
+
+Bool installProcessGroupActive(String group) {
+    var observed = process.run("/bin/ps", "--no-headers", "-o", "stat=", "--sid", group)
+    for (var line in observed.stdout.split("\n")) { if (line.trim() != "" && !line.trim().startsWith("Z")) { return true } }
+    return false
+}
+
+InstallJourney installJourney() {
+    Directory(".agent/tmp/install").createDirectories()
+    var temporary = Files.createTempDirectory(new java.io.File(".agent/tmp/install").toPath(), "journey-").toString()
+    var base = new java.io.File(temporary).getCanonicalPath()
+    var checkout = base + "/checkout with spaces"
+    assert(Directory(checkout).createDirectories())
+    var copy = process.run("/bin/cp", "-a", "bin", "scripts", "src", "docs", "README.md", "README.pt_BR.md", "LICENSE", "NOTICE", "VERSION", "kof.toml", checkout)
+    assert(copy.exitCode == 0, "copy checkout: " + copy.stderr)
+    if (File("install.sh").exists()) { var script = process.run("/bin/cp", "-a", "install.sh", checkout); assert(script.exitCode == 0) }
+    var toolchain = base + "/external toolchain"
+    assert(Directory(toolchain).createDirectories())
+    var tool = process.run("/bin/cp", "-a", "src/test/fixtures/controlled-toolchain/kof", toolchain + "/kof")
+    assert(tool.exitCode == 0)
+    var located = process.run("/usr/bin/which", "kof")
+    return InstallJourney(base, checkout, base + "/user prefix", toolchain, located.stdout.trim())
+}
+
+List<String> installEnvironment(InstallJourney journey) {
+    return listOf("/usr/bin/env", "PATH=" + journey.toolchain + ":" + System.getenv("PATH"), "KOF_MUT_TEST_KOF=" + journey.kof, "KOF_MUT_TEST_LOG=" + journey.base + "/builds.log")
+}
+
+test "installed commands and evaluation survive removal of the checkout without compilation", "install" {
+    var journey = installJourney()
+    var copied = process.run("/bin/cp", "-a", "fixtures/detected", journey.base + "/evaluated project")
+    assert(copied.exitCode == 0, "copy evaluated fixture: " + copied.stderr)
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh")
+    command.add("--prefix"); command.add(journey.prefix)
+
+    var installed = shell.runWith(command, journey.base, mapOf())
+
+    assert(installed.exitCode == 0, "installer exit=" + installed.exitCode + ": " + installed.stdout + installed.stderr)
+    assert(Directory(journey.checkout).delete(), "remove checkout")
+    var executable = journey.prefix + "/bin/kof-mut"
+    var version = shell.runWith(listOf(executable, "--version"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    var help = shell.runWith(listOf(executable, "--help"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    // Project commands deliberately retain their own inherited Kof selection.
+    var run = shell.runWith(listOf(executable, "run", "--project", journey.base + "/evaluated project", "--files", journey.base + "/evaluated project/scope.json"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+
+    assert(version.exitCode == 0, "version: " + version.stdout + version.stderr)
+    assert(version.stdout == "KofMut 0.1.0\n")
+    assert(help.exitCode == 0, "help: " + help.stdout + help.stderr)
+    assert(help.stdout.contains("uninstall"))
+    assert(run.exitCode == 0, "run: " + run.stdout + run.stderr)
+    assert(run.stdout.contains("Killed"))
+    assert(File(journey.base + "/builds.log").readText() == "build\n")
+    assert(File(journey.prefix + "/state/kof-mut").isDirectory())
+}
+
+test "uninstall removes owned files after checkout removal and preserves user files and logs", "uninstall" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    assert(File(journey.prefix + "/share/kof-mut/current/unknown.txt").writeText("keep unknown"))
+    assert(Directory(journey.prefix + "/share/kof-mut/current/unknown-empty-directory").createDirectories())
+    assert(Directory(journey.prefix + "/state/kof-mut/logs").createDirectories())
+    assert(File(journey.prefix + "/state/kof-mut/logs/user.log").writeText("keep logs"))
+    assert(File(journey.base + "/report.json").writeText("keep report"))
+    assert(Directory(journey.checkout).delete())
+
+    var removed = process.run(journey.prefix + "/bin/kof-mut", "uninstall")
+
+    assert(removed.exitCode == 0, removed.stdout + removed.stderr)
+    assert(!File(journey.prefix + "/bin/kof-mut").exists())
+    assert(!Files.isSymbolicLink(new java.io.File(journey.prefix + "/bin/kof-mut").toPath()))
+    assert(!Files.isSymbolicLink(new java.io.File(journey.prefix + "/share/kof-mut/current").toPath()))
+    var releases = Directory(journey.prefix + "/share/kof-mut/releases").list()
+    assert(releases.size == 1, "unknown file must preserve its parent")
+    assert(File(journey.prefix + "/share/kof-mut/releases/" + releases.get(0) + "/unknown.txt").readText() == "keep unknown")
+    assert(File(journey.prefix + "/share/kof-mut/releases/" + releases.get(0) + "/unknown-empty-directory").isDirectory())
+    assert(!File(journey.prefix + "/share/kof-mut/releases/" + releases.get(0) + "/VERSION").exists())
+    assert(File(journey.prefix + "/state/kof-mut/logs/user.log").readText() == "keep logs")
+    assert(File(journey.base + "/report.json").readText() == "keep report")
+    assert(File(journey.kof).isFile())
+}
+
+test "failed preparation preserves A and activation of B preserves an active A evaluation", "update" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var executable = journey.prefix + "/bin/kof-mut"
+    var releaseA = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    var project = journey.base + "/evaluation"
+    var copy = process.run("cp", "-a", "fixtures/detected", project)
+    assert(copy.exitCode == 0)
+    var runner = journey.base + "/runner"
+    var copiedRunner = process.run("cp", "-a", "src/test/fixtures/m3-runner", runner)
+    assert(copiedRunner.exitCode == 0)
+    assert(File(project + "/src/math/original.txt").writeText(installText(project + "/src/math/Calc.kf")))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), 120000, 0))))
+    var log = journey.base + "/active"
+    assert(Directory(log).createDirectories())
+    // m3-runner observes the exact discovery stream before starting its barrier.
+    var streamLink = process.run("ln", "-s", "run.stdout", log + "/stdout")
+    assert(streamLink.exitCode == 0)
+    var running = startInstallCommand(listOf("/usr/bin/env", "KOF_MUT_OBSERVATIONS=" + log, executable, "run", "--project", project, "--files", project + "/scope.json"), log + "/run")
+    try {
+        installReady(log + "/ready", running)
+        assert(running.isAlive())
+        var inventory = process.run("find", journey.prefix, "-type", "f", "-exec", "sha256sum", "{}", ";").stdout
+        var busy = process.run(executable, "uninstall")
+        assert(busy.exitCode == 2)
+        assert(busy.stderr.contains("active"))
+        assert(process.run("find", journey.prefix, "-type", "f", "-exec", "sha256sum", "{}", ";").stdout == inventory)
+        assert(File(journey.checkout + "/VERSION").writeText("0.1.0-B\n"))
+        var ready = journey.base + "/build-ready"
+        var blocked = installEnvironment(journey)
+        blocked.add("KOF_MUT_TEST_BUILD=block-after-output"); blocked.add("KOF_MUT_TEST_READY=" + ready); blocked.add("KOF_MUT_TEST_FINISH=fail")
+        blocked.add(journey.checkout + "/install.sh"); blocked.add("--prefix"); blocked.add(journey.prefix)
+        var updating = startInstallCommand(blocked, journey.base + "/update")
+        try {
+            installReady(ready, updating)
+            assert(updating.isAlive())
+            assert(File(installText(ready).trim() + "/classes/Default/Main.class").isFile())
+            var stillA = process.run(executable, "--version")
+            assert(stillA.exitCode == 0 && stillA.stdout == "KofMut 0.1.0\n")
+            assert(File(ready + ".continue").writeText("fail now"))
+            assert(updating.waitFor(30000 as Long, TimeUnit.MILLISECONDS))
+            assert(updating.exitValue() == 2)
+            assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == releaseA)
+        } finally { if (updating.isAlive()) { updating.destroyForcibly() } }
+        var retry = shell.runWith(command, journey.base, mapOf())
+        assert(retry.exitCode == 0, retry.stdout + retry.stderr)
+        var nowB = process.run(executable, "--version")
+        assert(nowB.exitCode == 0 && nowB.stdout == "KofMut 0.1.0-B\n")
+        assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() != releaseA)
+        assert(installText(releaseA + "/VERSION") == "0.1.0\n")
+        assert(running.isAlive(), "A must stay active through B publication")
+        assert(File(log + "/release").writeText("continue"))
+        assert(running.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(running.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
+        var reportFile = ""
+        for (var line in installText(log + "/run.stdout").split("\n")) { if (line.startsWith("reportPath=")) { reportFile = json.decode<String>(line.substring(11)) } }
+        assert(installText(reportFile).contains("\"toolVersion\":\"0.1.0\""), "A must finish against A's VERSION")
+    } finally {
+        if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+    }
+}
+
+test "INT and TERM stop installer children before and after emission and permit recovery", "update" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var independent = startInstalledEvaluation(journey, "independent")
+    var log = journey.base + "/independent/observations"
+    try {
+        installReady(log + "/ready", independent)
+        for (var stage in listOf("before", "after")) {
+            for (var signal in listOf("INT", "TERM")) {
+                var previous = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+                var version = "0.1.0-" + stage + "-" + signal
+                assert(File(journey.checkout + "/VERSION").writeText(version + "\n"))
+                var ready = journey.base + "/" + stage + "-" + signal
+                var blocked = installEnvironment(journey)
+                blocked.add("KOF_MUT_TEST_BUILD=block-" + stage + "-output"); blocked.add("KOF_MUT_TEST_READY=" + ready)
+                blocked.add("/usr/bin/setsid"); blocked.add(journey.checkout + "/install.sh"); blocked.add("--prefix"); blocked.add(journey.prefix)
+                var updating = startInstallCommand(blocked, ready + "-process")
+                var group = ""
+                try {
+                    installReady(ready, updating)
+                    var compiler = installText(ready + ".pid").trim()
+                    var observed = process.run("/bin/ps", "-o", "pgid=", "-p", compiler)
+                    assert(observed.exitCode == 0)
+                    group = observed.stdout.trim()
+                    assert(installProcessGroupActive(group))
+                    assert(File(installText(ready).trim() + "/classes/Default/Main.class").isFile() == (stage == "after"))
+                    var interrupted = process.run("kill", "-" + signal, "" + updating.pid())
+                    assert(interrupted.exitCode == 0)
+                    assert(updating.waitFor(5000 as Long, TimeUnit.MILLISECONDS), "installer did not terminate")
+                    var expected = 130
+                    if (signal == "TERM") { expected = 143 }
+                    assert(updating.exitValue() == expected)
+                    assert(!installProcessGroupActive(group), "installer children remain active after interruption")
+                    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == previous)
+                    assert(independent.isAlive(), "an independent evaluation must survive installer signals")
+                } finally {
+                    if (group != "" && installProcessGroupActive(group)) { var killed = process.run("kill", "-KILL", "--", "-" + group) }
+                    if (updating.isAlive()) { updating.destroyForcibly(); updating.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+                }
+                var retry = shell.runWith(command, journey.base, mapOf())
+                assert(retry.exitCode == 0, retry.stdout + retry.stderr)
+                var recovered = process.run(journey.prefix + "/bin/kof-mut", "--version")
+                assert(recovered.exitCode == 0 && recovered.stdout == "KofMut " + version + "\n")
+            }
+        }
+        assert(File(log + "/release").writeText("continue"))
+        assert(independent.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(independent.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
+    } finally { if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
+}
+
+test "damaged entry fails explicitly and reinstall repairs without replacing the old image", "update" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var executable = journey.prefix + "/bin/kof-mut"
+    var original = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    var damaged = original + "/classes/kofmut/launch/InstalledEntry.class"
+    assert(File(damaged).writeText("damaged class"))
+
+    var refused = process.run(executable, "--version")
+
+    assert(refused.exitCode == 2, "damaged installed image must return 2: " + refused.stderr)
+    assert(refused.stderr.contains("invalid installed image"))
+    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == original)
+    var repaired = shell.runWith(command, journey.base, mapOf())
+    assert(repaired.exitCode == 0, repaired.stdout + repaired.stderr)
+    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() != original)
+    assert(installText(damaged) == "damaged class")
+    var version = process.run(executable, "--version")
+    assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0\n")
+    var healthy = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    var repeated = shell.runWith(command, journey.base, mapOf())
+    assert(repeated.exitCode == 0, repeated.stdout + repeated.stderr)
+    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == healthy, "a repaired healthy image must also be idempotent")
+    assert(installText(journey.base + "/builds.log") == "build\n", "repair must reuse the valid checkout compilation")
+    var uninstalled = process.run(executable, "uninstall")
+    assert(uninstalled.exitCode == 0, uninstalled.stdout + uninstalled.stderr)
+    assert(installText(damaged) == "damaged class", "modified managed files must be preserved")
+}
+
+test "invalid management inputs and ownership never authorize replacement or removal", "install" {
+    var journey = installJourney()
+    assert(Directory(journey.prefix + "/bin").createDirectories())
+    assert(File(journey.prefix + "/bin/kof-mut").writeText("foreign command"))
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var collision = shell.runWith(command, journey.base, mapOf())
+    assert(collision.exitCode == 2)
+    assert(installText(journey.prefix + "/bin/kof-mut") == "foreign command")
+    assert(!File(journey.prefix + "/state/kof-mut/owner.json").exists())
+    assert(File(journey.prefix + "/bin/kof-mut").delete())
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var active = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    for (var value in listOf("", journey.checkout, journey.base, journey.base + "/invalid:prefix", "--help")) {
+        var invalid = installEnvironment(journey)
+        invalid.add(journey.checkout + "/install.sh"); invalid.add("--prefix"); invalid.add(value)
+        var refused = shell.runWith(invalid, journey.base, mapOf())
+        assert(refused.exitCode == 2, "invalid prefix accepted: " + value)
+        assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == active)
+    }
+    assert(!File(journey.base + "/invalid:prefix").exists())
+    assert(!File(journey.base + "/--help").exists())
+    var receiptPath = journey.prefix + "/state/kof-mut/owner.json"
+    var receipt = installText(receiptPath)
+    assert(File(receiptPath).writeText("{}"))
+    var version = process.run(journey.prefix + "/bin/kof-mut", "--version")
+    var uninstall = process.run(journey.prefix + "/bin/kof-mut", "uninstall")
+    var reinstall = shell.runWith(command, journey.base, mapOf())
+    assert(version.exitCode == 2 && uninstall.exitCode == 2 && reinstall.exitCode == 2)
+    assert(installText(receiptPath) == "{}")
+    assert(installText(active + "/VERSION") == "0.1.0\n")
+    assert(File(receiptPath).writeText(receipt))
+    var removedLink = Files.deleteIfExists(new java.io.File(journey.prefix + "/bin/kof-mut").toPath())
+    assert(removedLink)
+    assert(File(journey.prefix + "/bin/kof-mut").writeText("another foreign command"))
+    var foreignUninstall = process.run(active + "/launch.sh", "uninstall")
+    var foreignReinstall = shell.runWith(command, journey.base, mapOf())
+    assert(foreignUninstall.exitCode == 2 && foreignReinstall.exitCode == 2)
+    assert(installText(journey.prefix + "/bin/kof-mut") == "another foreign command")
+    assert(installText(receiptPath) == receipt)
+}
+
+test "identical inputs reuse the image and concurrent updates publish complete matching versions", "update" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var current = journey.prefix + "/share/kof-mut/current"
+    var first = new java.io.File(current).getCanonicalPath()
+    var identity = process.run("/usr/bin/stat", "-c", "%i:%y", current).stdout
+    var repeated = shell.runWith(command, journey.base, mapOf())
+    assert(repeated.exitCode == 0, repeated.stdout + repeated.stderr)
+    assert(new java.io.File(current).getCanonicalPath() == first)
+    assert(process.run("/usr/bin/stat", "-c", "%i:%y", current).stdout == identity, "idempotency includes the current reference")
+    assert(installText(journey.base + "/builds.log") == "build\n")
+    assert(File(journey.checkout + "/install.sh").appendText("\n# Installer identity proof\n"))
+    var installerChanged = shell.runWith(command, journey.base, mapOf())
+    assert(installerChanged.exitCode == 0)
+    assert(new java.io.File(current).getCanonicalPath() != first, "installer bytes belong to image identity")
+    assert(installText(journey.base + "/builds.log") == "build\n")
+    var other = journey.base + "/other checkout"
+    assert(Directory(other).createDirectories())
+    var copied = process.run("cp", "-a", journey.checkout + "/bin", journey.checkout + "/scripts", journey.checkout + "/src", journey.checkout + "/docs", journey.checkout + "/README.md", journey.checkout + "/README.pt_BR.md", journey.checkout + "/LICENSE", journey.checkout + "/NOTICE", journey.checkout + "/VERSION", journey.checkout + "/kof.toml", journey.checkout + "/install.sh", other)
+    assert(copied.exitCode == 0)
+    var source = installText(journey.checkout + "/src/main/kof/kofmut/Main.kf")
+    assert(File(journey.checkout + "/src/main/kof/kofmut/Main.kf").writeText(source.replace("println(\"KofMut \" + version.trim())", "println(\"KofMut \" + version.trim() + \" B\")")))
+    assert(File(other + "/src/main/kof/kofmut/Main.kf").writeText(source.replace("println(\"KofMut \" + version.trim())", "println(\"KofMut \" + version.trim() + \" C\")")))
+    assert(File(journey.checkout + "/VERSION").writeText("0.1.0-B\n"))
+    assert(File(other + "/VERSION").writeText("0.1.0-C\n"))
+    assert(File(journey.prefix + "/bin/foreign").writeText("preserve sibling"))
+    var readyB = journey.base + "/concurrent-B"
+    var readyC = journey.base + "/concurrent-C"
+    var commandB = installEnvironment(journey)
+    commandB.add("KOF_MUT_TEST_BUILD=block-after-output"); commandB.add("KOF_MUT_TEST_READY=" + readyB)
+    commandB.add(journey.checkout + "/install.sh"); commandB.add("--prefix"); commandB.add(journey.prefix)
+    var commandC = installEnvironment(journey)
+    commandC.add("KOF_MUT_TEST_BUILD=block-after-output"); commandC.add("KOF_MUT_TEST_READY=" + readyC)
+    commandC.add(other + "/install.sh"); commandC.add("--prefix"); commandC.add(journey.prefix)
+    var firstUpdate = startInstallCommand(commandB, readyB)
+    var secondUpdate = startInstallCommand(commandC, readyC)
+    try {
+        installReady(readyB, firstUpdate); installReady(readyC, secondUpdate)
+        assert(firstUpdate.isAlive() && secondUpdate.isAlive(), "both preparations must overlap")
+        assert(File(readyB + ".continue").writeText("publish")); assert(File(readyC + ".continue").writeText("publish"))
+        assert(firstUpdate.waitFor(30000 as Long, TimeUnit.MILLISECONDS))
+        assert(secondUpdate.waitFor(30000 as Long, TimeUnit.MILLISECONDS))
+        assert(firstUpdate.exitValue() == 0, installText(readyB + ".stderr"))
+        assert(secondUpdate.exitValue() == 0, installText(readyC + ".stderr"))
+        var finalVersion = process.run(journey.prefix + "/bin/kof-mut", "--version")
+        assert(finalVersion.exitCode == 0)
+        assert(finalVersion.stdout == "KofMut 0.1.0-B B\n" || finalVersion.stdout == "KofMut 0.1.0-C C\n")
+        var observedB = false
+        var observedC = false
+        for (var name in Directory(journey.prefix + "/share/kof-mut/releases").list()) {
+            var release = journey.prefix + "/share/kof-mut/releases/" + name
+            var version = installText(release + "/VERSION").trim()
+            if (version == "0.1.0-B" || version == "0.1.0-C") {
+                var invoked = process.run(release + "/launch.sh", "--version")
+                assert(invoked.exitCode == 0)
+                if (version == "0.1.0-B") { assert(invoked.stdout == "KofMut 0.1.0-B B\n"); observedB = true }
+                if (version == "0.1.0-C") { assert(invoked.stdout == "KofMut 0.1.0-C C\n"); observedC = true }
+            }
+        }
+        assert(observedB && observedC, "both complete images remain available")
+        assert(installText(journey.prefix + "/bin/foreign") == "preserve sibling")
+    } finally {
+        if (firstUpdate.isAlive()) { firstUpdate.destroy(); firstUpdate.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        if (secondUpdate.isAlive()) { secondUpdate.destroy(); secondUpdate.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+    }
+}
+
+test "default prefix uses the selected HOME and all installed help forms describe management", "install" {
+    var journey = installJourney()
+    var home = journey.base + "/disposable home"
+    assert(Directory(home).createDirectories())
+    assert(File(home + "/.bashrc").writeText("preserve shell profile\n"))
+    var command = installEnvironment(journey)
+    command.add("HOME=" + home); command.add(journey.checkout + "/install.sh")
+    var help = installEnvironment(journey)
+    help.add("HOME=" + home); help.add(journey.checkout + "/install.sh"); help.add("--help")
+    var usage = shell.runWith(help, journey.base, mapOf())
+    assert(usage.exitCode == 0 && usage.stdout.contains("--prefix"))
+    assert(!File(home + "/.local").exists())
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var executable = home + "/.local/bin/kof-mut"
+    assert(installed.stdout.contains(home + "/.local/bin"))
+    assert(installText(home + "/.bashrc") == "preserve shell profile\n")
+    var empty = process.run(executable)
+    var shortHelp = process.run(executable, "-h")
+    var longHelp = process.run(executable, "--help")
+    assert(empty.exitCode == 0 && shortHelp.exitCode == 0 && longHelp.exitCode == 0)
+    assert(empty.stdout.contains("kof-mut uninstall"))
+    assert(shortHelp.stdout == empty.stdout && longHelp.stdout == empty.stdout)
+    var source = process.run(journey.checkout + "/bin/kof-mut", "uninstall")
+    assert(source.exitCode == 2, "source mode retains its original command contract")
+}
+
+test "installed entry preserves exact argv cwd environment and exit without checkout or compilation", "install" {
+    var journey = installJourney()
+    var source = installText("src/test/fixtures/LaunchObservation.kf")
+    source = source.replace("main() {", "main() {\n    if (args.length == 1 && (args[0] == \"--version\" || args[0] == \"--help\")) { println(\"KofMut fixture\"); return }")
+    assert(File(journey.checkout + "/src/main/kof/kofmut/Main.kf").writeText(source))
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    assert(Directory(journey.checkout).delete())
+    var caller = journey.base + "/caller with spaces"
+    assert(Directory(caller).createDirectories())
+
+    var invoked = process.run("/usr/bin/env", "--chdir=" + caller, "KOF_MUT_TEST_COMPILE=refuse", "KOF_MUT_TEST_VALUE=env 😀 value", journey.prefix + "/bin/kof-mut", "", "space value", "ação 😀", "line\nbreak", "$(touch INJECTED);*'\"\\", "--target", "not-a-target", "--deps", "missing-dependency")
+
+    assert(invoked.exitCode == 23, invoked.stdout + invoked.stderr)
+    var observed = json.decode<InstallObservation>(invoked.stdout)
+    assert(observed.arguments.size == 9)
+    assert(observed.arguments.get(0) == "")
+    assert(observed.arguments.get(1) == "space value")
+    assert(observed.arguments.get(2) == "ação 😀")
+    assert(observed.arguments.get(3) == "line\nbreak")
+    assert(observed.arguments.get(4) == "$(touch INJECTED);*'\"\\")
+    assert(observed.arguments.get(5) == "--target")
+    assert(observed.arguments.get(6) == "not-a-target")
+    assert(observed.arguments.get(7) == "--deps")
+    assert(observed.arguments.get(8) == "missing-dependency")
+    assert(observed.cwd == caller && observed.environment == "env 😀 value")
+    assert(!File(caller + "/INJECTED").exists())
+    assert(installText(journey.base + "/builds.log") == "build\n")
+}
+
+test "pinned dependencies ignore another Kof on PATH and changes fail before project commands", "install" {
+    var journey = installJourney()
+    var info = process.run("kof", "info", "--json")
+    var selected = json.decode<InstallKofInfo>(info.stdout)
+    var originalJar = selected.install + "/lib/kof.jar"
+    var originalHash = process.run("sha256sum", originalJar).stdout
+    var distribution = journey.base + "/physical dependency copy"
+    assert(Directory(distribution + "/bin").createDirectories())
+    assert(Directory(distribution + "/lib").createDirectories())
+    assert(process.run("cp", "-a", selected.install + "/bin/kof", distribution + "/bin/kof").exitCode == 0)
+    assert(process.run("cp", "--reflink=auto", "-p", originalJar, distribution + "/lib/kof.jar").exitCode == 0)
+    assert(process.run("ln", "-s", selected.install + "/jdk", distribution + "/jdk").exitCode == 0)
+    var jar = distribution + "/lib/kof.jar"
+    assert(!Files.isSymbolicLink(new java.io.File(jar).toPath()))
+    var command = installEnvironment(journey)
+    command.add("KOF_MUT_TEST_KOF=" + distribution + "/bin/kof")
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var fake = journey.base + "/foreign path"
+    assert(Directory(fake).createDirectories())
+    assert(File(fake + "/kof").writeText("#!/usr/bin/env bash\nprintf 'foreign Kof called' > \"$KOF_MUT_TEST_FOREIGN_CALLED\"\nexit 88\n"))
+    assert(new java.io.File(fake + "/kof").setExecutable(true, true))
+    var path = fake + ":" + System.getenv("PATH")
+    var executable = journey.prefix + "/bin/kof-mut"
+    var version = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_FOREIGN_CALLED=" + journey.base + "/foreign-called", executable, "--version")
+    assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0\n")
+    var running = startInstalledEvaluationPath(journey, "pinned", path)
+    var log = journey.base + "/pinned/observations"
+    try {
+        installReady(log + "/ready", running)
+        var pid = installText(log + "/parent.pid").trim()
+        assert(installText("/proc/" + pid + "/environ").contains("PATH=" + path + "\0"), "project commands retain the caller's exact PATH")
+        assert(File(log + "/release").writeText("continue"))
+        assert(running.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(running.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
+        assert(!File(journey.base + "/foreign-called").exists())
+    } finally { if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
+    assert(process.run("cp", "-a", journey.toolchain + "/kof", journey.toolchain + "/backup").exitCode == 0)
+    assert(File(journey.toolchain + "/kof").delete())
+    var missingKof = process.run(executable, "--version")
+    assert(missingKof.exitCode == 2 && missingKof.stderr.contains("pinned dependency missing or changed"))
+    assert(process.run("cp", "-a", journey.toolchain + "/backup", journey.toolchain + "/kof").exitCode == 0)
+    assert(File(journey.base + "/jar-marker").writeText("disposable archive marker\n"))
+    assert(File(journey.base + "/timestamp").writeText("timestamp"))
+    assert(process.run("touch", "-r", jar, journey.base + "/timestamp").exitCode == 0)
+    assert(process.run(selected.install + "/jdk/bin/jar", "--update", "--file", jar, "-C", journey.base, "jar-marker").exitCode == 0)
+    assert(process.run("touch", "-r", journey.base + "/timestamp", jar).exitCode == 0)
+    assert(new java.io.File(jar).lastModified() == new java.io.File(journey.base + "/timestamp").lastModified())
+    var rejected = startInstalledEvaluationPath(journey, "changed", path)
+    assert(rejected.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+    assert(rejected.exitValue() == 2)
+    assert(installText(journey.base + "/changed/observations/run.stderr").contains("pinned Kof jar changed"))
+    assert(!File(journey.base + "/changed/observations/commands").exists())
+    assert(!installText(journey.base + "/changed/observations/run.stdout").contains("reportPath="))
+    var previous = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    var repinned = shell.runWith(command, journey.base, mapOf())
+    assert(repinned.exitCode == 0, repinned.stdout + repinned.stderr)
+    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() != previous, "changed dependency contents select a new image")
+    var repinnedVersion = process.run(executable, "--version")
+    assert(repinnedVersion.exitCode == 0 && repinnedVersion.stdout == "KofMut 0.1.0\n")
+    assert(File(jar).delete())
+    var missingJar = process.run(executable, "--version")
+    assert(missingJar.exitCode == 2 && missingJar.stderr.contains("pinned dependency missing"))
+    assert(process.run("sha256sum", originalJar).stdout == originalHash, "the real Kof jar must remain intact")
+}
+
+test "a read only application writes logs to state and refuses log destinations inside inputs", "install" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var release = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    assert(process.run("chmod", "-R", "a-w", release).exitCode == 0)
+    assert(!File(release + "/write-denied").writeText("must be denied"), "the test must actually lack write access")
+    var before = process.run("find", release, "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout
+    var project = journey.base + "/readonly evaluation"
+    assert(process.run("cp", "-a", "fixtures/detected", project).exitCode == 0)
+    try {
+        var result = process.run(journey.prefix + "/bin/kof-mut", "run", "--project", project, "--files", project + "/scope.json")
+        assert(result.exitCode == 0, result.stdout + result.stderr)
+        var report = ""
+        for (var line in result.stdout.split("\n")) { if (line.startsWith("reportPath=")) { report = json.decode<String>(line.substring(11)) } }
+        assert(installText(report).contains(journey.prefix + "/state/kof-mut/logs/"))
+        assert(Directory(journey.prefix + "/state/kof-mut/logs").list().size > 0)
+        assert(!File(release + "/.agent").exists())
+        assert(process.run("find", release, "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout == before)
+        var overlapping = journey.prefix + "/state/kof-mut"
+        assert(Directory(overlapping + "/tests").createDirectories())
+        assert(File(overlapping + "/logs/Calc.kf").writeText("Bool flag() { return true }\n"))
+        assert(File(overlapping + "/tests/Suite.kf").writeText("test \"preserve\" { assert(true) }\n"))
+        assert(File(overlapping + "/kof.toml").writeText("[sources]\napp = \"logs\"\n"))
+        assert(File(overlapping + "/scope.json").writeText("[\"logs/Calc.kf\"]"))
+        var marker = journey.base + "/must-not-run"
+        assert(File(overlapping + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("logs"), listOf("tests"), listOf("logs", "tests", "kof.toml"), listOf("touch", marker), listOf("touch", marker), 10000, 0))))
+        var inputBefore = process.run("find", overlapping + "/logs", overlapping + "/tests", "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout
+        var refused = process.run(journey.prefix + "/bin/kof-mut", "run", "--project", overlapping, "--files", overlapping + "/scope.json", "--report-dir", journey.base + "/safe error reports")
+        assert(refused.exitCode == 2)
+        assert(refused.stdout.contains("log destination overlaps"))
+        assert(!File(marker).exists())
+        assert(process.run("find", overlapping + "/logs", overlapping + "/tests", "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout == inputBefore)
+    } finally { assert(process.run("chmod", "-R", "u+w", release).exitCode == 0) }
+}
+
+test "reinstallation preserves an unowned release directory instead of claiming or blocking it", "uninstall" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var original = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
+    assert(File(original + "/unknown.txt").writeText("keep through reinstallation"))
+    var removed = process.run(journey.prefix + "/bin/kof-mut", "uninstall")
+    assert(removed.exitCode == 0)
+    assert(installText(original + "/unknown.txt") == "keep through reinstallation")
+
+    var reinstalled = shell.runWith(command, journey.base, mapOf())
+
+    assert(reinstalled.exitCode == 0, reinstalled.stdout + reinstalled.stderr)
+    assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() != original)
+    assert(installText(original + "/unknown.txt") == "keep through reinstallation")
+    assert(!File(original + "/image.json").exists(), "the unowned directory must remain unclaimed")
+    assert(installText(journey.base + "/builds.log") == "build\n")
+    var version = process.run(journey.prefix + "/bin/kof-mut", "--version")
+    assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0\n")
+}
+
+test "the first installed invocation refuses overlapping logs without creating files in inputs", "install-output" {
+    var journey = installJourney()
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    assert(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var project = journey.prefix + "/state/kof-mut"
+    assert(Directory(project + "/logs").createDirectories())
+    assert(Directory(project + "/tests").createDirectories())
+    assert(File(project + "/logs/Calc.kf").writeText("Bool flag() { return true }\n"))
+    assert(File(project + "/tests/Suite.kf").writeText("test \"preserve\" { assert(true) }\n"))
+    assert(File(project + "/kof.toml").writeText("[sources]\napp = \"logs\"\n"))
+    assert(File(project + "/scope.json").writeText("[\"logs/Calc.kf\"]"))
+    var marker = journey.base + "/must-not-run"
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("logs"), listOf("tests"), listOf("."), listOf("touch", marker), listOf("touch", marker), 10000, 0))))
+    var before = process.run("find", project, "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout
+
+    var refused = process.run(journey.prefix + "/bin/kof-mut", "run", "--project", project, "--files", project + "/scope.json", "--report-dir", journey.base + "/safe error reports")
+
+    assert(refused.exitCode == 2)
+    assert(refused.stdout.contains("log destination overlaps"))
+    assert(!File(marker).exists())
+    assert(process.run("find", project, "-type", "f", "-printf", "%m %p\n", "-exec", "sha256sum", "{}", ";").stdout == before, "even coordination must not create new project input files")
+}

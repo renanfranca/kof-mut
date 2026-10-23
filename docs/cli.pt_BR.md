@@ -31,6 +31,41 @@ O último comando ilustra caminhos para seu projeto configurado. As [fixtures](.
 
 As flags recebem argumentos separados. Comandos ou flags desconhecidos, flags repetidas, valores ausentes ou vazios e inputs inválidos retornam 2. `run --help` não é um comando suportado. Coloque caminhos com espaços entre aspas. Os caminhos do escopo são relativos ao projeto, independentemente do cwd do chamador. O arquivo selecionado inteiro é avaliado, não apenas linhas alteradas; o KofMut não usa Git para escolher arquivos.
 
+## Instalação local e gerenciamento
+
+Execute o instalador em um checkout gravável com a distribuição compatível Kof 0.6.4 selecionada no PATH:
+
+```bash
+./install.sh
+./install.sh --prefix "$HOME/tools/kofmut"
+./install.sh --help
+```
+
+Escolha a instalação padrão ou o exemplo de prefixo personalizado. O prefixo padrão é `$HOME/.local`; um `--prefix PATH` relativo é resolvido a partir do cwd do chamador. Não há `sudo`, downloads nem atualização do Kof. Argumentos vazios ou repetidos, flags desconhecidas, caminhos sobrepostos a este checkout e prefixos contendo o separador de classpath JVM `:` retornam 2 antes de alterar uma instalação existente. Comandos alheios existentes, links simbólicos em diretórios gerenciados e metadados de propriedade inválidos são recusados. Perfis de shell são preservados. Se `bin` não estiver no PATH, o instalador informa o local do executável; no prefixo padrão use `export PATH="$HOME/.local/bin:$PATH"`.
+
+| Caminho relativo ao prefixo | Conteúdo |
+| --- | --- |
+| `bin/kof-mut` | Comando público gerenciado |
+| `share/kof-mut/current` | Referência atômica à versão ativa |
+| `share/kof-mut/releases/<id>` | Classes compiladas e runtime gerado, VERSION, documentação pública, LICENSE, NOTICE e metadados da imagem |
+| `state/kof-mut/owner.json` | Inventário de propriedade das versões publicadas |
+| `state/kof-mut/manage.lock`, `state/kof-mut/usage.lock` | Arquivos persistentes de coordenação |
+| `state/kof-mut/logs/run-<runId>-<unique-suffix>` | Logs das avaliações instaladas |
+
+O conjunto instalado não contém fontes de desenvolvimento, testes, metadados Git, cache do repositório, evidências históricas, jar do Kof nem JDK. Links de validação histórica no README copiado se referem a arquivos disponíveis no checkout. A execução precisa apenas desta instalação e de sua dependência Kof externa fixada. O diretório da aplicação pode ficar sem permissão de escrita; os logs precisam de estado gravável e os relatórios seguem `--report-dir`. Destinos de logs sobrepostos a inputs configurados, fontes, testes, manifesto, configuração ou escopo são recusados antes dos comandos. Isso inclui a primeira chamada instalada.
+
+A instalação registra Kof 0.6.4 e a versão do runtime JVM, caminhos canônicos de Kof/Java/jar e identificações SHA-256 do executável, Java, jar, módulos JDK e arquivo de versão JDK. As chamadas instaladas validam essas dependências e a imagem; dependências ausentes ou alteradas e imagens inválidas retornam 2 sem compilação automática nem retorno ao fonte. Mantenha essa instalação do Kof disponível. Outro `kof` ou `java` no PATH não altera a dependência do mutador. Os comandos do projeto avaliado mantêm PATH, ambiente, argv e seleção de destino herdados.
+
+Reinstale em um checkout atualizado com o mesmo prefixo para atualizar. Fontes, instalador, documentação e dependências fixadas determinam a identidade da imagem. Uma imagem compatível e íntegra, inclusive uma criada por reparo, é reutilizada. A preparação ocorre no filesystem de destino e executa provas reais de versão/ajuda antes da ativação atômica. Instaladores serializam a publicação. Preparação falha ou interrompida mantém a imagem ativa anterior utilizável; INT/TERM encerram o grupo de processos do próprio instalador. Cada chamada resolve sua versão concreta no início, e imagens anteriores permanecem disponíveis enquanto chamadas antigas terminam. O filesystem precisa suportar bloqueios de arquivo e movimentos atômicos. Os caminhos Kof selecionados permanecem fixados até a reinstalação. Para realocar a aplicação, instale em um prefixo novo; recibos existentes continuam indicando o prefixo original.
+
+Para reparar arquivos danificados da aplicação, execute `./install.sh` novamente com o mesmo prefixo e Kof compatível. O reparo publica uma imagem completa e mantém a versão danificada; arquivos alterados são preservados na desinstalação. A reinstalação pode usar outro identificador quando um diretório alheio ocupar o caminho de uma imagem. Arquivos de coordenação ausentes, recibos de propriedade corrompidos ou comandos alheios não autorizam reparo por sobrescrita: mantenha esses arquivos para inspeção e instale em outro prefixo. Encerramento abrupto pode deixar diretórios de preparação não ativados ou não registrados; eles nunca são usados como imagem ativa nem apagados apenas por seus nomes.
+
+```bash
+kof-mut uninstall
+```
+
+Somente a entrada instalada oferece `uninstall`; a execução pelo fonte mantém os comandos originais. Ajuda, `-h` e ausência de argumentos descrevem o gerenciamento instalado. A desinstalação obtém acesso exclusivo e retorna 2 sem remoção se houver uma chamada instalada ou gerenciamento da instalação ativo. Atualizações são permitidas durante avaliações. Desinstalação bem-sucedida retorna 0 e remove somente entradas com propriedade comprovada e arquivos intactos listados nos inventários das imagens. Preserva projetos, configurações, relatórios, logs, Kof, arquivos e diretórios desconhecidos e arquivos alterados da aplicação. O diretório de estado e os arquivos de coordenação permanecem para impedir que operações concorrentes obtenham inodes de bloqueio diferentes. Gerenciamento interrompido ou inválido não deve ser tratado como desinstalação concluída.
+
 ## Migrar de `--report`
 
 A antiga opção `--report FILE` foi removida. Retorna 2 com `--report was removed; use --report-dir DIRECTORY` antes de criar diretórios de relatório ou executar comandos do projeto.
@@ -111,11 +146,11 @@ SIGINT/SIGTERM durante comando ativo retornam 130/143 e limpam os grupos/sandbox
 
 A [referência do relatório](report-format.pt_BR.md#descobrir-o-relatório-atual) define reserva exclusiva, identidade canônica do projeto, `reportPath` atual, publicação atômica e validação. Falha de publicação retorna 2 sem relatório final utilizável. Nunca recorra a relatório anterior como alternativa.
 
-Logs separados de stdout/stderr dos comandos ficam em `.agent/tmp/run-<runId>-<unique-suffix>/` no checkout do KofMut. São referenciados no `summary` da baseline e no `evidence` de mutantes/descartes. Rejeição no parse pode acrescentar `<index>-parse.log`; logs de comandos usam prefixos `baseline-check`, `baseline-test`, `<index>-check` e `<index>-test` com `.stdout`/`.stderr`. Os índices mantêm as posições originais de seleção após descartes. Esses caminhos são evidências locais, não um arquivo de logs portátil embutido. Preserve logs referenciados ao mover relatórios para revisão.
+No modo por fonte, logs separados de stdout/stderr dos comandos ficam em `.agent/tmp/run-<runId>-<unique-suffix>/` no checkout do KofMut. O modo instalado usa `<prefix>/state/kof-mut/logs/run-<runId>-<unique-suffix>/` e recusa sobreposição com inputs do projeto antes de gravar. São referenciados no `summary` da baseline e no `evidence` de mutantes/descartes. Rejeição no parse pode acrescentar `<index>-parse.log`; logs de comandos usam prefixos `baseline-check`, `baseline-test`, `<index>-check` e `<index>-test` com `.stdout`/`.stderr`. Os índices mantêm as posições originais de seleção após descartes. Esses caminhos são evidências locais, não um arquivo de logs portátil embutido. Preserve logs referenciados ao mover relatórios para revisão.
 
 ## Lançador e cache
 
-A ponte Bash fixa o executável real do Kof e consulta `kof info --json` fresco em cada chamada. Localiza jar e Java embutido instalados sem downloads ou atualizações. Kof 0.6.4 é obrigatório tanto para versão e ajuda quanto para avaliação. A entrada Kof compilada `kofmut.launch.RuntimeEntry` valida a evidência fresca da instalação e inicia a aplicação na mesma JVM, preservando argv, cwd, ambiente, exit e sinais. Python não faz parte desse caminho.
+Na execução por fonte, a ponte Bash fixa o executável real do Kof e consulta `kof info --json` fresco em cada chamada. Localiza jar e Java embutido instalados sem downloads ou atualizações. Kof 0.6.4 é obrigatório tanto para versão e ajuda quanto para avaliação. A entrada Kof compilada `kofmut.launch.RuntimeEntry` valida a evidência fresca da instalação e inicia a aplicação na mesma JVM, preservando argv, cwd, ambiente, exit e sinais. Python não faz parte desse caminho.
 
 Quando não há cache válido, `scripts/bootstrap/Launch.kf` executa por `kof run`, valida os inputs capturados e os compila com `kof build --target jvm --classpath`. Um lock e uma segunda conferência do cache serializam a preparação; apenas imagem completa e bem-sucedida é publicada por movimento atômico de diretório. Aplicação, entrada e runtime JSON gerado compilam juntos. Falha de preparação retorna 2 sem recorrer a imagem anterior.
 

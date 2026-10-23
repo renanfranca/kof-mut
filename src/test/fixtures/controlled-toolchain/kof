@@ -15,6 +15,14 @@ if [[ "$1" == info ]]; then
 fi
 if [[ "$1" == build ]]; then
     printf 'build\n' >> "$KOF_MUT_TEST_LOG"
+    if [[ "${KOF_MUT_TEST_BUILD:-}" == block-before-output || "${KOF_MUT_TEST_BUILD:-}" == block-after-output ]]; then
+        if [[ "$KOF_MUT_TEST_BUILD" == block-after-output ]]; then "$KOF_MUT_TEST_KOF" "$@"; fi
+        printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+        printf '%s\n' "$PWD" > "$KOF_MUT_TEST_READY"
+        while [[ ! -e "$KOF_MUT_TEST_READY.continue" ]]; do /bin/sleep 0.02; done
+        if [[ "${KOF_MUT_TEST_FINISH:-}" == fail ]]; then echo 'controlled preparation failure' >&2; exit 7; fi
+        if [[ "$KOF_MUT_TEST_BUILD" == block-after-output ]]; then exit 0; fi
+    fi
     if [[ "${KOF_MUT_TEST_BUILD:-}" == fail-after-output ]]; then
         "$KOF_MUT_TEST_KOF" "$@"
         [[ -f "$PWD/classes/Default/Main.class" ]]

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+fail() { echo "kof-mut: $*" >&2; exit 2; }
+trap 'fail "installed launch failed; reinstall from a checkout to repair"' ERR
+KOF_MUT_RELEASE="$(readlink -f -- "${BASH_SOURCE[0]}")"
+KOF_MUT_RELEASE="${KOF_MUT_RELEASE%/*}"
+KOF_MUT_FIELDS=()
+while IFS= read -r -d '' KOF_MUT_FIELD; do KOF_MUT_FIELDS+=("$KOF_MUT_FIELD"); done < "$KOF_MUT_RELEASE/launch.bin"
+[[ -z "$KOF_MUT_FIELD" && ${#KOF_MUT_FIELDS[@]} == 8 && ${KOF_MUT_FIELDS[0]} == kofmut-installed-v1 ]] || fail 'invalid installed launch descriptor'
+KOF_MUT_JAVA="${KOF_MUT_FIELDS[2]}"
+KOF_MUT_JAR="${KOF_MUT_FIELDS[3]}"
+[[ -x "$KOF_MUT_JAVA" && -f "$KOF_MUT_JAR" ]] || fail 'pinned dependency missing; reinstall with Kof 0.6.4'
+KOF_MUT_HASH="$(sha256sum < "$KOF_MUT_JAVA")"
+[[ "${KOF_MUT_HASH:0:64}" == "${KOF_MUT_FIELDS[4]}" ]] || fail 'pinned Java changed; reinstall with Kof 0.6.4'
+KOF_MUT_HASH="$(sha256sum < "$KOF_MUT_JAR")"
+[[ "${KOF_MUT_HASH:0:64}" == "${KOF_MUT_FIELDS[5]}" ]] || fail 'pinned Kof jar changed; reinstall with Kof 0.6.4'
+[[ -f "${KOF_MUT_FIELDS[6]}" ]] || fail 'pinned Java modules missing; reinstall with Kof 0.6.4'
+KOF_MUT_HASH="$(sha256sum < "${KOF_MUT_FIELDS[6]}")"
+[[ "${KOF_MUT_HASH:0:64}" == "${KOF_MUT_FIELDS[7]}" ]] || fail 'pinned Java modules changed; reinstall with Kof 0.6.4'
+(cd -- "$KOF_MUT_RELEASE/classes" && sha256sum --check --status "$KOF_MUT_RELEASE/classes.sha256") || fail 'invalid installed image; reinstall from a checkout to repair'
+exec "$KOF_MUT_JAVA" -cp "$KOF_MUT_RELEASE/classes:$KOF_MUT_JAR" kofmut.launch.InstalledEntry "$KOF_MUT_RELEASE" "$@"

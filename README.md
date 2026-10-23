@@ -4,14 +4,14 @@
 
 KofMut evaluates Kof tests by changing one production token at a time in disposable copies and running the project's check and test commands. Selection, transformation, execution and reporting are written in Kof and run on Linux/JVM through the official Kof frontend.
 
-**Development source, version `0.1.0`.** The mutation cycle, independent reports, cancellation, recovery and optional evaluation of up to four mutants are implemented. This delivery provides source and public guides; it does not include a binary installer. Sensor integration is future work.
+**Development source, version `0.1.0`.** The mutation cycle, independent reports, cancellation, recovery and optional evaluation of up to four mutants are implemented. This delivery provides source, a local installer and public guides. Sensor integration is future work.
 
 ## Requirements
 
 - Linux, Bash 4.4 or later and the official **Kof 0.6.4** Linux distribution on `PATH`, including `lib/kof.jar` and its embedded JDK.
 - GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) and GNU diffutils (`cmp`).
 - `setsid` from util-linux, the external `kill` command and procfs at `/proc`. The official Kof launcher also uses `sed` and `head`; validation uses `ps`, `cp`, `ln`, `env` and `which`.
-- A writable checkout for `build/cache/` and `.agent/tmp/`, plus temporary disk space for disposable project copies.
+- A writable checkout for building and source execution (`build/cache/` and `.agent/tmp/`), a writable installation prefix, and temporary disk space for disposable project copies. Installed evaluations write logs to state and do not need the checkout.
 
 Python is not required by KofMut or its validation suite. Project commands can have their own dependencies. Other Kof versions are rejected until their frontend contracts are verified. If necessary, select your existing supported installation:
 
@@ -19,6 +19,34 @@ Python is not required by KofMut or its validation suite. Project commands can h
 export PATH="/path/to/kof-0.6.4-linux-x86_64/bin:$PATH"
 kof info --json
 ```
+
+## Install for daily use
+
+Select Kof 0.6.4 as above, then run from this checkout:
+
+```bash
+./install.sh
+export PATH="$HOME/.local/bin:$PATH"
+kof-mut --version
+kof-mut --help
+```
+
+The default prefix is `$HOME/.local`. The installer builds the checkout for the current user without `sudo`. It does not edit shell profiles; add the `bin` directory to your shell configuration if you want a persistent PATH setting. For another writable prefix, quote its path:
+
+```bash
+./install.sh --prefix "$HOME/tools/kofmut"
+./install.sh --help
+```
+
+The installed application works from any directory after removing the checkout and its build cache. Use `kof-mut run --project my-project --files my-project/scope.json` with your configured project. The Kof installation selected during installation must remain available and unchanged: KofMut pins its canonical executable, Java and jar paths and checks their contents. Changing PATH later does not switch the mutator's frontend or Java. Project commands still inherit the caller's original PATH and environment.
+
+To update or repair an application image, run `./install.sh` again from the desired checkout, repeating `--prefix` for a custom location. Preparation preserves the active version; activation replaces `current` atomically after validation. Identical healthy inputs reuse the image. Earlier versions remain available until uninstall so ongoing evaluations can finish. An invalid ownership receipt or a foreign `bin/kof-mut` is refused rather than overwritten; preserve those files and use a fresh prefix if ownership cannot be established.
+
+```bash
+kof-mut uninstall
+```
+
+Uninstall also works after removing the checkout. An active installed invocation causes exit 2 without removal; retry after it finishes. Successful installation and uninstall return 0; preparation and management errors return 2. Uninstall removes inventoried, unchanged application files and the managed command, while preserving reports, logs, Kof, unknown or modified files and coordination files. See [installation, data and recovery](docs/cli.md#local-installation-and-management) for paths and limits.
 
 ## Run from source
 
@@ -72,7 +100,7 @@ The [JSON v1 reference](docs/report-format.md) owns discovery, every field and n
 
 ## Validation and next milestones
 
-`./scripts/check` runs the launcher contracts, Kof mutation cycle tests and frontend assertions against the installed jar. See [M4 acceptance evidence](.agent/validation/kofmut-m4.md) and the [execution plan](EXECPLAN.md) for the reviewed source delivery and remaining work.
+`./scripts/check` runs the launcher contracts, Kof mutation cycle tests, installation journeys and frontend assertions against the installed jar. See [M5 installation evidence](.agent/validation/kofmut-m5.md) for installation, update, recovery and uninstall acceptance. See [M4 acceptance evidence](.agent/validation/kofmut-m4.md) and the [execution plan](EXECPLAN.md) for the reviewed source delivery and remaining work.
 
 Historical M3F evaluated `Background.kf` + `Meteor.kf` on SiFuture revision `82111142c85f98b970ccd65fbf044e492d017729` with `commandTimeoutMs: 10000`, `budgetMs: 0` and `maxParallelMutants: 4`, without an external deadline. The full invocation took **96.456 seconds**: `complete/1`, 42 evaluated candidates, 29 `Killed`, 13 `Survived`, no discards or inconclusive results, and 114 baseline cases. This is a historical observation of complete execution; quality failed because survivors remained. It does not diagnose equivalence or coverage or promise latency. The historical 90 second performance target remains **deferred and unmet**; sensors and their S1–S3 acceptance remain pending.
 

@@ -1,0 +1,100 @@
+package kofmut.launch
+
+import java.lang.System
+import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+
+record InstalledFile(String path, String hash)
+record PinnedDependency(String version, String javaVersion, String kof, String java, String jar, List<InstalledFile> contents)
+record InstalledImage(Int schemaVersion, String prefix, String id, String inputs, PinnedDependency dependency, List<InstalledFile> files)
+
+String installedHash(String path) {
+    var bytes = Files.readAllBytes(new java.io.File(path).toPath())
+    return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+}
+
+void installDirectory(String path) {
+    if (!Directory(path).createDirectories() && !File(path).isDirectory()) { throw "cannot create directory: " + path }
+}
+
+List<String> installedFiles(String root) {
+    var files: List<String> = listOf()
+    for (var name in Directory(root).list()) {
+        var path = root + "/" + name
+        if (Files.isSymbolicLink(new java.io.File(path).toPath())) { throw "unexpected symbolic link: " + path }
+        if (File(path).isDirectory()) {
+            for (var nested in installedFiles(path)) { files.add(nested) }
+        } else if (File(path).isFile()) { files.add(path) }
+        else { throw "unsupported installed file: " + path }
+    }
+    files.sort()
+    return files
+}
+
+void installCopy(String source, String target) {
+    installDirectory(new java.io.File(target).getParent())
+    var bytes = Files.readAllBytes(new java.io.File(source).toPath())
+    var output = new FileOutputStream(target)
+    try { output.write(bytes, 0, bytes.length) } finally { output.close() }
+}
+
+PinnedDependency pinInstallation() {
+    var selectedKof = System.getProperty("kofmut.kof")
+    var selectedJava = System.getProperty("kofmut.java")
+    var selectedJar = System.getProperty("kofmut.jar")
+    var kof = new java.io.File(selectedKof).getCanonicalPath()
+    var java = new java.io.File(selectedJava).getCanonicalPath()
+    var jar = new java.io.File(selectedJar).getCanonicalPath()
+    var distribution = new java.io.File(jar).getParentFile().getParent()
+    var contents: List<InstalledFile> = listOf()
+    for (var path in listOf(kof, java, jar, distribution + "/jdk/lib/modules", distribution + "/jdk/release")) {
+        contents.add(InstalledFile(path, installedHash(path)))
+    }
+    var javaVersion = System.getProperty("java.runtime.version")
+    return PinnedDependency("0.6.4", javaVersion, kof, java, jar, contents)
+}
+
+void validatePinned(PinnedDependency dependency) {
+    if (dependency.version != "0.6.4") { throw "pinned dependency requires Kof 0.6.4" }
+    for (var entry in dependency.contents) {
+        if (!File(entry.path).isFile() || installedHash(entry.path) != entry.hash) { throw "pinned dependency missing or changed: " + entry.path + "; reinstall with Kof 0.6.4" }
+    }
+}
+
+void validateImageReceipt(InstalledImage receipt) {
+    if (receipt.schemaVersion != 1 || !receipt.id.matches("[a-f0-9]{64}(-[a-f0-9-]{36})?") || !receipt.inputs.matches("[a-f0-9]{64}") || receipt.files.size == 0 || receipt.dependency.contents.size != 5) { throw "invalid installed image receipt" }
+    var names: List<String> = listOf()
+    for (var entry in receipt.files) {
+        if (entry.path == "" || entry.path.startsWith("/") || entry.path.contains("..") || entry.path == "image.json" || names.contains(entry.path) || !entry.hash.matches("[a-f0-9]{64}")) { throw "invalid installed inventory" }
+        names.add(entry.path)
+    }
+    for (var required in listOf("VERSION", "LICENSE", "NOTICE", "launch.sh", "launch.bin", "classes.sha256", "classes/Default/Main.class", "classes/kofmut/launch/InstalledEntry.class", "classes/dev/kof/runtime/KofRuntime.class")) { if (!names.contains(required)) { throw "incomplete installed inventory: " + required } }
+}
+
+InstalledImage validateInstalledImage(String release) {
+    var receipt = json.decode<InstalledImage>(launchText(release + "/image.json"))
+    validateImageReceipt(receipt)
+    if (!new java.io.File(release + "/launch.sh").canExecute()) { throw "installed launcher is not executable; reinstall to repair" }
+    var names: List<String> = listOf()
+    for (var entry in receipt.files) {
+        rejectInstallLinks(release, entry.path)
+        if (!File(release + "/" + entry.path).isFile() || installedHash(release + "/" + entry.path) != entry.hash) { throw "invalid installed image: " + entry.path + "; reinstall to repair" }
+        names.add(entry.path)
+    }
+    for (var path in installedFiles(release + "/classes")) { if (!names.contains(path.substring(release.length() + 1))) { throw "untracked class in installed image" } }
+    validatePinned(receipt.dependency)
+    return receipt
+}
+
+void installAtomicLink(String target, String destination) {
+    var parent = new java.io.File(destination).getParent()
+    var temporary = Files.createTempDirectory(new java.io.File(parent).toPath(), ".activate-")
+    var link = new java.io.File(temporary.toString() + "/link").toPath()
+    try {
+        var created = Files.createSymbolicLink(link, new java.io.File(target).toPath())
+        var moved = Files.move(link, new java.io.File(destination).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } finally { Directory(temporary.toString()).delete() }
+}

@@ -5,4 +5,5 @@ cd -- "$KOF_MUT_ROOT"
 ./bin/kof-mut --version
 kof test src/test/kof/kofmut/Cli.kf
 kof test src/test/kof/kofmut/Run.kf
+kof test src/test/kof/kofmut/Install.kf
 exec ./scripts/launch contracts

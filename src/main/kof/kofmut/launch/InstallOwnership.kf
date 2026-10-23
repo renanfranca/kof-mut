@@ -1,0 +1,130 @@
+package kofmut.launch
+
+import java.io.RandomAccessFile
+import java.lang.Exception
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+record OwnedRelease(String id, String receiptHash)
+record InstallationOwner(Int schemaVersion, String prefix, List<OwnedRelease> releases)
+
+String ownerPath(String prefix) { return prefix + "/state/kof-mut/owner.json" }
+
+void rejectInstallLinks(String prefix, String relative) {
+    var current = prefix
+    for (var part in relative.split("/")) {
+        current = current + "/" + part
+        if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+    }
+}
+
+Bool installPathExists(String path) { return File(path).exists() || Files.isSymbolicLink(new java.io.File(path).toPath()) }
+
+void checkCommandOwnership(String prefix, Bool owned) {
+    var command = new java.io.File(prefix + "/bin/kof-mut").toPath()
+    if (installPathExists(command.toString())) {
+        if (!owned || !Files.isSymbolicLink(command) || Files.readSymbolicLink(command).toString() != "../share/kof-mut/current/launch.sh") { throw "refusing foreign command: " + command.toString() }
+    }
+}
+
+InstallationOwner readInstallationOwner(String prefix) {
+    for (var relative in listOf("bin", "share/kof-mut/releases", "state/kof-mut", "state/kof-mut/owner.json", "state/kof-mut/manage.lock", "state/kof-mut/usage.lock")) { rejectInstallLinks(prefix, relative) }
+    var path = ownerPath(prefix)
+    if (!installPathExists(path)) {
+        checkCommandOwnership(prefix, false)
+        if (installPathExists(prefix + "/share/kof-mut/current")) { throw "unowned current reference" }
+        return InstallationOwner(1, prefix, listOf())
+    }
+    for (var name in listOf("manage.lock", "usage.lock")) {
+        if (!File(prefix + "/state/kof-mut/" + name).isFile()) { throw "missing installation coordination file: " + name }
+    }
+    var owner = json.decode<InstallationOwner>(launchText(path))
+    if (owner.schemaVersion != 1 || owner.prefix != prefix || owner.releases.size == 0) { throw "invalid installation ownership receipt" }
+    var ids: List<String> = listOf()
+    for (var release in owner.releases) {
+        if (!release.id.matches("[a-f0-9]{64}(-[a-f0-9-]{36})?") || !release.receiptHash.matches("[a-f0-9]{64}") || ids.contains(release.id)) { throw "invalid owned release" }
+        ids.add(release.id)
+        rejectInstallLinks(prefix, "share/kof-mut/releases/" + release.id + "/image.json")
+        var image = prefix + "/share/kof-mut/releases/" + release.id
+        if (installedHash(image + "/image.json") != release.receiptHash) { throw "invalid ownership metadata: " + image }
+        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        validateImageReceipt(receipt)
+        if (receipt.prefix != prefix || receipt.id != release.id) { throw "owned image identity mismatch" }
+    }
+    checkCommandOwnership(prefix, true)
+    var current = new java.io.File(prefix + "/share/kof-mut/current").toPath()
+    if (!installPathExists(current.toString())) { return owner }
+    if (!Files.isSymbolicLink(current)) { throw "invalid current reference" }
+    var target = Files.readSymbolicLink(current).toString()
+    if (!target.startsWith("releases/") || !ids.contains(target.substring(9))) { throw "current is not an owned release" }
+    return owner
+}
+
+void writeInstallationOwner(InstallationOwner owner) {
+    var parent = owner.prefix + "/state/kof-mut"
+    var temporary = Files.createTempDirectory(new java.io.File(parent).toPath(), ".receipt-").toString()
+    try {
+        var next = temporary + "/owner.json"
+        if (!File(next).writeText(json.encode(owner))) { throw "cannot write ownership receipt" }
+        var moved = Files.move(new java.io.File(next).toPath(), new java.io.File(ownerPath(owner.prefix)).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } finally { Directory(temporary).delete() }
+}
+
+void removeEmptyInstallDirectories(String image, List<InstalledFile> files) {
+    var directories: List<String> = listOf(image)
+    for (var entry in files) {
+        var parent = new java.io.File(image + "/" + entry.path).getParent()
+        while (parent != image) {
+            if (!directories.contains(parent)) { directories.add(parent) }
+            parent = new java.io.File(parent).getParent()
+        }
+    }
+    directories.sort()
+    for (var i = directories.size - 1; i >= 0; i--) { var removed = File(directories.get(i)).delete() }
+}
+
+void uninstallOwned(String prefix) {
+    var owner = readInstallationOwner(prefix)
+    if (owner.releases.size == 0) { throw "installation is not owned" }
+    // Preflight every path before removing any entry, including inactive images.
+    for (var release in owner.releases) {
+        var image = prefix + "/share/kof-mut/releases/" + release.id
+        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        for (var entry in receipt.files) { rejectInstallLinks(prefix, "share/kof-mut/releases/" + release.id + "/" + entry.path) }
+    }
+    var commandRemoved = Files.deleteIfExists(new java.io.File(prefix + "/bin/kof-mut").toPath())
+    var currentRemoved = Files.deleteIfExists(new java.io.File(prefix + "/share/kof-mut/current").toPath())
+    for (var release in owner.releases) {
+        var image = prefix + "/share/kof-mut/releases/" + release.id
+        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        for (var entry in receipt.files) {
+            var path = image + "/" + entry.path
+            if (File(path).isFile() && installedHash(path) == entry.hash) {
+                if (!File(path).delete()) { throw "cannot remove managed file: " + path }
+            }
+        }
+        if (!File(image + "/image.json").delete()) { throw "cannot remove image receipt" }
+        removeEmptyInstallDirectories(image, receipt.files)
+    }
+    if (!File(ownerPath(prefix)).delete()) { throw "cannot remove ownership receipt" }
+    println("Uninstalled kof-mut; reports, logs, dependencies and unknown files were preserved.")
+}
+
+void uninstallInstallation(String prefix) {
+    readInstallationOwner(prefix)
+    var management = new RandomAccessFile(prefix + "/state/kof-mut/manage.lock", "rw")
+    var managementChannel = management.getChannel()
+    try {
+        var manager = managementChannel.tryLock()
+        if (manager == null) { throw "installation management is active; try again later" }
+        try {
+            var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "rw")
+            var usageChannel = usage.getChannel()
+            try {
+                var exclusive = usageChannel.tryLock()
+                if (exclusive == null) { throw "installed execution is active; no files removed" }
+                try { uninstallOwned(prefix) } finally { exclusive.release() }
+            } finally { usageChannel.close(); usage.close() }
+        } finally { manager.release() }
+    } finally { managementChannel.close(); management.close() }
+}

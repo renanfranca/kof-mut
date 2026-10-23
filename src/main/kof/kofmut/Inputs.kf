@@ -2,6 +2,7 @@ package kofmut
 
 import java.nio.file.Files
 import java.util.UUID
+import java.lang.System
 
 record RunOptions(String project, String config, String files, String reportDir, String runId)
 record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs, Object maxParallelMutants)
@@ -126,4 +127,17 @@ Bool reportTargetAllowed(RunOptions options, RunConfig config) {
         if (pathsOverlap(target, new java.io.File(root + "/" + relativeInput(tests)).getCanonicalPath())) { return false }
     }
     return true
+}
+
+void protectInstalledLogs(RunOptions options, RunConfig config) {
+    var logs = System.getProperty("kofmut.logs", "")
+    if (logs == "") { return }
+    logs = new java.io.File(logs).getCanonicalPath()
+    var destination = RunOptions(options.project, options.config, options.files, logs, options.runId)
+    protectRunOutput(destination)
+    if (!reportTargetAllowed(destination, config)) { throw "Installed log destination overlaps project inputs" }
+    for (var input in config.inputs) {
+        var path = new java.io.File(options.project + "/" + relativeInput(input)).getCanonicalPath()
+        if (pathsOverlap(logs, path)) { throw "Installed log destination overlaps project inputs" }
+    }
 }

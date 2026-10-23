@@ -4,7 +4,7 @@ fail() { echo "kof-mut: $*" >&2; exit 2; }
 trap 'fail "launch preparation failed"' ERR
 KOF_MUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 KOF_MUT_MODE="${1:-}"
-[[ "$KOF_MUT_MODE" == app || "$KOF_MUT_MODE" == contracts ]] || fail 'unknown launch mode'
+[[ "$KOF_MUT_MODE" == app || "$KOF_MUT_MODE" == contracts || "$KOF_MUT_MODE" == install ]] || fail 'unknown launch mode'
 shift
 KOF_MUT_KOF="$(command -v kof)" || fail 'kof was not found on PATH; install Kof 0.6.4'
 KOF_MUT_KOF="$(readlink -f -- "$KOF_MUT_KOF")"

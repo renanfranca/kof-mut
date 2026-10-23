@@ -4,14 +4,14 @@
 
 O KofMut avalia testes Kof alterando um token de produção por vez em cópias descartáveis e executando os comandos de check e teste do projeto. Seleção, transformação, execução e relatório são escritos em Kof e executam em Linux/JVM com o frontend oficial do Kof.
 
-**Fonte em desenvolvimento, versão `0.1.0`.** O ciclo de mutação, os relatórios independentes, o cancelamento, a recuperação e a avaliação opcional de até quatro mutantes estão implementados. Esta entrega oferece fonte e guias públicos; não inclui instalador binário. A integração dos sensores é trabalho futuro.
+**Fonte em desenvolvimento, versão `0.1.0`.** O ciclo de mutação, os relatórios independentes, o cancelamento, a recuperação e a avaliação opcional de até quatro mutantes estão implementados. Esta entrega oferece fonte, instalador local e guias públicos. A integração dos sensores é trabalho futuro.
 
 ## Requisitos
 
 - Linux, Bash 4.4 ou posterior e a distribuição Linux oficial **Kof 0.6.4** no `PATH`, incluindo `lib/kof.jar` e seu JDK embutido.
 - GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) e GNU diffutils (`cmp`).
 - `setsid` de util-linux, o comando externo `kill` e procfs em `/proc`. O lançador oficial do Kof também usa `sed` e `head`; a validação usa `ps`, `cp`, `ln`, `env` e `which`.
-- Checkout gravável para `build/cache/` e `.agent/tmp/`, além de espaço temporário para cópias descartáveis dos projetos.
+- Checkout gravável para compilação e execução por fonte (`build/cache/` e `.agent/tmp/`), prefixo de instalação gravável e espaço temporário para cópias descartáveis dos projetos. Avaliações instaladas gravam logs no estado e dispensam o checkout.
 
 Python não é necessário para o KofMut nem para sua suíte de validação. Os comandos do projeto podem ter suas próprias dependências. Outras versões do Kof são recusadas até a verificação dos contratos do frontend. Se necessário, selecione sua instalação compatível existente:
 
@@ -19,6 +19,34 @@ Python não é necessário para o KofMut nem para sua suíte de validação. Os 
 export PATH="/path/to/kof-0.6.4-linux-x86_64/bin:$PATH"
 kof info --json
 ```
+
+## Instalação para uso diário
+
+Selecione Kof 0.6.4 como acima e execute neste checkout:
+
+```bash
+./install.sh
+export PATH="$HOME/.local/bin:$PATH"
+kof-mut --version
+kof-mut --help
+```
+
+O prefixo padrão é `$HOME/.local`. O instalador compila o checkout para o usuário atual sem `sudo`. Não edita perfis de shell; acrescente o diretório `bin` à configuração do shell se quiser manter o PATH entre sessões. Para outro prefixo gravável, coloque o caminho entre aspas:
+
+```bash
+./install.sh --prefix "$HOME/tools/kofmut"
+./install.sh --help
+```
+
+A aplicação instalada funciona de qualquer diretório após a remoção do checkout e de seu cache de compilação. Use `kof-mut run --project my-project --files my-project/scope.json` com seu projeto configurado. A instalação do Kof selecionada durante a instalação deve continuar disponível e intacta: o KofMut fixa os caminhos canônicos do executável, Java e jar e confere seus conteúdos. Alterar o PATH depois não troca o frontend nem o Java do mutador. Os comandos do projeto continuam herdando o PATH e o ambiente originais do chamador.
+
+Para atualizar ou reparar uma imagem da aplicação, execute `./install.sh` novamente no checkout desejado, repetindo `--prefix` para um local personalizado. A preparação preserva a versão ativa; a ativação substitui `current` atomicamente após a validação. Inputs idênticos e íntegros reutilizam a imagem. Versões anteriores permanecem disponíveis até a desinstalação para que avaliações em andamento possam terminar. Recibo de propriedade inválido ou `bin/kof-mut` alheio é recusado sem sobrescrita; preserve esses arquivos e use outro prefixo se não for possível comprovar a propriedade.
+
+```bash
+kof-mut uninstall
+```
+
+A desinstalação também funciona após a remoção do checkout. Uma chamada instalada ativa causa exit 2 sem remoção; tente novamente depois de seu término. Instalação e desinstalação bem-sucedidas retornam 0; erros de preparação ou gerenciamento retornam 2. A desinstalação remove arquivos da aplicação inventariados e intactos e o comando gerenciado, preservando relatórios, logs, Kof, arquivos desconhecidos ou alterados e arquivos de coordenação. Veja [instalação, dados e recuperação](docs/cli.pt_BR.md#instalação-local-e-gerenciamento) para caminhos e limites.
 
 ## Executar a partir do fonte
 
@@ -72,7 +100,7 @@ A [referência JSON v1](docs/report-format.pt_BR.md) concentra descoberta, todos
 
 ## Validação e próximos marcos
 
-`./scripts/check` executa contratos do lançador, testes Kof do ciclo de mutação e asserções do frontend contra o jar instalado. Veja [evidência de aceitação M4](.agent/validation/kofmut-m4.md) e [plano de execução](EXECPLAN.md) para a entrega revisada do fonte e as pendências.
+`./scripts/check` executa contratos do lançador, testes Kof do ciclo de mutação, jornadas de instalação e asserções do frontend contra o jar instalado. Veja [evidência de instalação M5](.agent/validation/kofmut-m5.md) para aceitação de instalação, atualização, recuperação e desinstalação. Veja [evidência de aceitação M4](.agent/validation/kofmut-m4.md) e [plano de execução](EXECPLAN.md) para a entrega revisada do fonte e as pendências.
 
 O M3F histórico avaliou `Background.kf` + `Meteor.kf` no SiFuture revisão `82111142c85f98b970ccd65fbf044e492d017729` com `commandTimeoutMs: 10000`, `budgetMs: 0` e `maxParallelMutants: 4`, sem prazo externo. A chamada completa levou **96.456 segundos**: `complete/1`, 42 candidatos avaliados, 29 `Killed`, 13 `Survived`, nenhum descarte ou resultado inconclusivo e 114 casos na baseline. É uma observação histórica de execução completa; a qualidade foi reprovada pelos sobreviventes. Não diagnostica equivalência ou cobertura nem promete latência. A meta histórica de desempenho de 90 segundos permanece **adiada e não atingida**; sensores e sua aceitação S1–S3 continuam pendentes.
 
