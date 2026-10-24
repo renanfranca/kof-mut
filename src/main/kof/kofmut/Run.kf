@@ -233,7 +233,7 @@ class MutationRun {
         if (!canPublish) { throw "Report destination refused: configuration is invalid or destination overlaps inputs; original preserved" }
         var counts = countMutants(mutants)
         var version = readRequired(System.getProperty("kofmut.root") + "/VERSION").trim()
-        var report = MutationReport(1, version, "0.6.4", options.runId, status, scope, baseline, counts, mutants, discardedCandidates, limitations, startedAt, elapsedMs(start))
+        var report = MutationReport(1, version, System.getProperty("kofmut.kof.version"), options.runId, status, scope, baseline, counts, mutants, discardedCandidates, limitations, startedAt, elapsedMs(start))
         if (reportPath == "") { reserveReport() }
         var target = new java.io.File(reportPath)
         var staging = Files.createTempDirectory(target.getParentFile().toPath(), ".kofmut-")

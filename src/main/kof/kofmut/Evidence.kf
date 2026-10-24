@@ -18,6 +18,8 @@ CommandResult executeCommand(List<String> arguments, String cwd, String log, Lon
     var argv = new String[arguments.size + 1]
     argv[0] = "setsid"
     for (var i = 0; i < arguments.size; i++) { argv[i + 1] = arguments.get(i) }
+    var selectedKof = System.getProperty("kofmut.kof")
+    if (arguments.size > 0 && arguments.get(0) == "kof" && selectedKof != null) { argv[1] = selectedKof }
     var builder = new ProcessBuilder(argv)
     builder.directory(new java.io.File(cwd))
     builder.redirectOutput(new java.io.File(log + ".stdout"))

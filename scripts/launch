@@ -1,25 +1,49 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-fail() { echo "kof-mut: $*" >&2; exit 2; }
+fail() {
+    local cause="$*" evidence="unavailable" version="unknown" stage="bootstrap" token=""
+    local detail=()
+    if [[ -n "${KOF_MUT_CONTEXT:-}" && -d "$KOF_MUT_CONTEXT" ]]; then
+        evidence="$KOF_MUT_CONTEXT"
+        if [[ -f "$KOF_MUT_CONTEXT/preparation-detail" ]]; then
+            while IFS= read -r -d '' token; do detail+=("$token"); done < "$KOF_MUT_CONTEXT/preparation-detail"
+            version="${detail[0]:-unknown}"; stage="${detail[1]:-bootstrap}"
+        fi
+        if [[ ! -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+            IFS= read -r token < /proc/sys/kernel/random/uuid || token="bootstrap-$$"
+            local saved="$KOF_MUT_ROOT/.agent/tmp/m6/$token"
+            if mkdir -p -- "$saved" && cp -a -- "$KOF_MUT_CONTEXT/." "$saved/"; then evidence="$saved"; else KOF_MUT_KEEP_CONTEXT=1; fi
+        else KOF_MUT_KEEP_CONTEXT=1; fi
+    fi
+    echo "kof-mut: $cause" >&2
+    echo "kof-mut: Kof $version; preparation $stage failed: $cause; evidence: $evidence" >&2
+    exit 2
+}
 trap 'fail "launch preparation failed"' ERR
 KOF_MUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+KOF_MUT_STARTED="$(date +%s%3N)"
 KOF_MUT_MODE="${1:-}"
 [[ "$KOF_MUT_MODE" == app || "$KOF_MUT_MODE" == contracts || "$KOF_MUT_MODE" == install ]] || fail 'unknown launch mode'
 shift
-KOF_MUT_KOF="$(command -v kof)" || fail 'kof was not found on PATH; install Kof 0.6.4'
+if [[ -f "$KOF_MUT_ROOT/launch.bin" && "${1:-}" == uninstall ]]; then KOF_MUT_MODE=management; fi
+KOF_MUT_KOF="$(command -v kof)" || fail 'kof was not found on PATH; install Kof for Linux/JVM'
 KOF_MUT_KOF="$(readlink -f -- "$KOF_MUT_KOF")"
 KOF_MUT_CONTEXT="$(mktemp -d)" || fail 'cannot create launch handoff'
-trap 'rm -rf -- "$KOF_MUT_CONTEXT"' EXIT
+KOF_MUT_KEEP_CONTEXT=0
+trap 'if (( ! KOF_MUT_KEEP_CONTEXT )); then rm -rf -- "$KOF_MUT_CONTEXT"; fi' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-"$KOF_MUT_KOF" info --json > "$KOF_MUT_CONTEXT/info.json" || fail 'kof info --json failed'
-KOF_MUT_INPUTS=("$KOF_MUT_KOF" "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT/scripts/launch" "$KOF_MUT_ROOT/bin/kof-mut" "$KOF_MUT_ROOT/scripts/check" "$KOF_MUT_ROOT/VERSION" "$KOF_MUT_ROOT/kof.toml")
+{ printf 'kofmut-arguments-v1\0'; printf '%s\0' "$@"; printf 'end\0'; } > "$KOF_MUT_CONTEXT/arguments"
+timeout --foreground --kill-after=2 10 "$KOF_MUT_KOF" info --json > "$KOF_MUT_CONTEXT/info.json" || fail 'kof info --json failed'
+KOF_MUT_INPUTS=("$KOF_MUT_KOF" "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT/scripts/launch" "$KOF_MUT_ROOT/scripts/supervise" "$KOF_MUT_ROOT/VERSION" "$KOF_MUT_ROOT/kof.toml")
+if [[ ! -f "$KOF_MUT_ROOT/launch.bin" ]]; then KOF_MUT_INPUTS+=("$KOF_MUT_ROOT/bin/kof-mut" "$KOF_MUT_ROOT/scripts/check"); fi
 find "$KOF_MUT_ROOT/src/main/kof" -type f -name '*.kf' -print0 > "$KOF_MUT_CONTEXT/sources"
 if [[ "$KOF_MUT_MODE" == contracts ]]; then
     printf '%s\0' "$KOF_MUT_ROOT/src/test/kof/kofmut/FrontendContracts.kf" >> "$KOF_MUT_CONTEXT/sources"
 fi
 LC_ALL=C sort -z "$KOF_MUT_CONTEXT/sources" -o "$KOF_MUT_CONTEXT/sources"
 while IFS= read -r -d '' KOF_MUT_SOURCE; do
+    if [[ ( "$KOF_MUT_MODE" == app || "$KOF_MUT_MODE" == management ) && "$KOF_MUT_SOURCE" != */launch/Compatibility.kf ]]; then continue; fi
     if [[ "$KOF_MUT_MODE" != contracts || "$KOF_MUT_SOURCE" != */Main.kf ]]; then
         KOF_MUT_INPUTS+=("$KOF_MUT_SOURCE")
     fi
@@ -31,7 +55,7 @@ if [[ "$KOF_MUT_MODE" == install ]]; then
     find "$KOF_MUT_ROOT/src/main/kof" -type f ! -name '*.kf' -print0 >> "$KOF_MUT_CONTEXT/package-files"
     while IFS= read -r -d '' KOF_MUT_SOURCE; do KOF_MUT_CAPTURE+=("$KOF_MUT_SOURCE"); done < "$KOF_MUT_CONTEXT/package-files"
 fi
-if ! sha256sum -z -- "${KOF_MUT_CAPTURE[@]}" > "$KOF_MUT_CONTEXT/hashes"; then
+if ! timeout --foreground --kill-after=2 10 sha256sum -z -- "${KOF_MUT_CAPTURE[@]}" > "$KOF_MUT_CONTEXT/hashes"; then
     if [[ "$KOF_MUT_MODE" == install ]]; then fail 'checkout changed during installation; retry'; fi
     fail 'launch preparation failed'
 fi
@@ -60,9 +84,47 @@ fi
 KOF_MUT_PRELIMINARY="$(sha256sum < "$KOF_MUT_CONTEXT/request")"
 KOF_MUT_PRELIMINARY="${KOF_MUT_PRELIMINARY:0:64}"
 KOF_MUT_CACHE="$KOF_MUT_ROOT/build/cache/kof-launch-v2"
+KOF_MUT_STATE="$KOF_MUT_ROOT/build/cache/compatibility"
+if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+    IFS= read -r -d '' KOF_MUT_MAGIC < "$KOF_MUT_ROOT/launch.bin" || true
+    [[ "$KOF_MUT_MAGIC" == kofmut-installed-v2 ]] || fail 'invalid installed descriptor'
+    KOF_MUT_PREFIX="$(dirname -- "$(dirname -- "$(dirname -- "$(dirname -- "$KOF_MUT_ROOT")")")")"
+    KOF_MUT_STATE="$KOF_MUT_PREFIX/state/kof-mut/compatibility"
+    KOF_MUT_CACHE="$KOF_MUT_STATE/bootstrap"
+fi
+printf '%s\n' "$KOF_MUT_STATE" > "$KOF_MUT_CONTEXT/compatibility-state"
+printf '%s\n' "$KOF_MUT_STARTED" > "$KOF_MUT_CONTEXT/started"
+printf '%s\n' "$KOF_MUT_CACHE" > "$KOF_MUT_CONTEXT/cache"
 KOF_MUT_DESCRIPTOR="$KOF_MUT_CACHE/locations/$KOF_MUT_PRELIMINARY"
 prepare() {
-    "$KOF_MUT_KOF" run --target jvm "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_CONTEXT" >&2 || fail 'Kof preparation failed'
+    local bootstrap_status=0
+    if [[ "$KOF_MUT_MODE" == app ]]; then
+        rm -f -- "$KOF_MUT_CONTEXT/bootstrap-running"
+        local compilation_start preparer elapsed
+        compilation_start="$(date +%s%3N)"
+        "$KOF_MUT_KOF" run --target jvm "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_CONTEXT" > "$KOF_MUT_CONTEXT/bootstrap.stdout" 2> "$KOF_MUT_CONTEXT/bootstrap.stderr" &
+        preparer=$!
+        while kill -0 "$preparer" 2>/dev/null; do
+            elapsed=$(( $(date +%s%3N) - KOF_MUT_STARTED ))
+            if (( elapsed >= 90000 )); then fail 'bootstrap coordination exceeded 90000 ms'; fi
+            if [[ ! -f "$KOF_MUT_CONTEXT/bootstrap-running" ]] && (( $(date +%s%3N) - compilation_start >= 10000 )); then fail 'bootstrap compilation command exceeded 10000 ms'; fi
+            /bin/sleep 0.02
+        done
+        if wait "$preparer"; then bootstrap_status=0; else bootstrap_status=$?; fi
+    else
+        if "$KOF_MUT_KOF" run --target jvm "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_CONTEXT" > "$KOF_MUT_CONTEXT/bootstrap.stdout" 2> "$KOF_MUT_CONTEXT/bootstrap.stderr"; then bootstrap_status=0; else bootstrap_status=$?; fi
+    fi
+    if (( bootstrap_status != 0 )); then
+        if [[ -f "$KOF_MUT_CONTEXT/preflight-refused" ]]; then
+            cat "$KOF_MUT_CONTEXT/preflight.stdout"; cat "$KOF_MUT_CONTEXT/preflight.stderr" >&2
+            KOF_MUT_KEEP_CONTEXT=1
+            echo "kof-mut: preparation evidence: $KOF_MUT_CONTEXT" >&2
+            exit 2
+        fi
+        cat "$KOF_MUT_CONTEXT/bootstrap.stdout" "$KOF_MUT_CONTEXT/bootstrap.stderr" >&2
+        fail 'Kof preparation failed'
+    fi
+    cat "$KOF_MUT_CONTEXT/bootstrap.stdout" "$KOF_MUT_CONTEXT/bootstrap.stderr" >&2
 }
 read_location() {
     KOF_MUT_LOCATION=()
@@ -73,27 +135,82 @@ read_location() {
     done < "$KOF_MUT_DESCRIPTOR"
     [[ -z "$field" && ${#KOF_MUT_LOCATION[@]} == 3 && ${KOF_MUT_LOCATION[0]} == kofmut-location-v1 && -x ${KOF_MUT_LOCATION[1]} && -f ${KOF_MUT_LOCATION[2]} ]]
 }
+if [[ -f "$KOF_MUT_ROOT/launch.bin" ]] && ! (cd -- "$KOF_MUT_ROOT/classes" && timeout --foreground --kill-after=2 10 sha256sum --check --quiet "$KOF_MUT_ROOT/classes.sha256") > "$KOF_MUT_CONTEXT/package-check.stdout" 2> "$KOF_MUT_CONTEXT/package-check.stderr"; then
+    # The source bootstrap diagnoses damaged packaged classes before loading any.
+    prepare
+    fail 'invalid installed image; reinstall from a checkout to repair'
+fi
 if ! read_location; then prepare; read_location || fail 'invalid installation descriptor'; fi
 select_image() {
     KOF_MUT_JAVA="${KOF_MUT_LOCATION[1]}"
     KOF_MUT_JAR="${KOF_MUT_LOCATION[2]}"
-    KOF_MUT_JAR_HASH="$(b2sum -- "$KOF_MUT_JAR")"
+    KOF_MUT_JAR_HASH="$(timeout --foreground --kill-after=2 10 b2sum -- "$KOF_MUT_JAR")"
     KOF_MUT_JAR_HASH="${KOF_MUT_JAR_HASH:0:128}"
     KOF_MUT_KEY="$(printf '%s\0%s\0%s\0' "$KOF_MUT_PRELIMINARY" "$KOF_MUT_JAR" "$KOF_MUT_JAR_HASH" | sha256sum)"
     KOF_MUT_KEY="${KOF_MUT_KEY:0:64}"
     KOF_MUT_IMAGE="$KOF_MUT_CACHE/images/$KOF_MUT_KEY"
     printf 'kofmut-image-v2\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_PRELIMINARY" "$KOF_MUT_JAR_HASH" "$KOF_MUT_KEY" "$KOF_MUT_JAVA" "$KOF_MUT_JAR" > "$KOF_MUT_CONTEXT/identity"
 }
+if [[ "$KOF_MUT_MODE" == management ]]; then
+    KOF_MUT_JAVA="${KOF_MUT_LOCATION[1]}"
+    KOF_MUT_JAR="${KOF_MUT_LOCATION[2]}"
+    rm -rf -- "$KOF_MUT_CONTEXT"
+    exec "$KOF_MUT_JAVA" -cp "$KOF_MUT_ROOT/classes:$KOF_MUT_JAR" kofmut.launch.InstalledEntry "$KOF_MUT_ROOT" "$@"
+fi
+if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+    if timeout --foreground --kill-after=2 10 "${KOF_MUT_LOCATION[1]}" -cp "$KOF_MUT_ROOT/classes:${KOF_MUT_LOCATION[2]}" kofmut.InstalledPreflight "$KOF_MUT_ROOT" "$KOF_MUT_PREFIX" "$KOF_MUT_CONTEXT/arguments" 2> "$KOF_MUT_CONTEXT/preflight.stderr"; then
+        cat "$KOF_MUT_CONTEXT/preflight.stderr" >&2
+    else
+        cat "$KOF_MUT_CONTEXT/preflight.stderr" >&2
+        KOF_MUT_KEEP_CONTEXT=1
+        echo "kof-mut: preparation evidence: $KOF_MUT_CONTEXT" >&2
+        exit 2
+    fi
+fi
 select_image
 complete_image() {
-    [[ -f "$KOF_MUT_IMAGE/classes/Default/Main.class" && -f "$KOF_MUT_IMAGE/classes/kofmut/launch/RuntimeEntry.class" && -f "$KOF_MUT_IMAGE/identity" && -f "$KOF_MUT_IMAGE/checksums" ]] &&
+    [[ ( "$KOF_MUT_MODE" == app && -f "$KOF_MUT_IMAGE/classes/kofmut/launch/CompatibilityEntry.class" ) || ( "$KOF_MUT_MODE" != app && -f "$KOF_MUT_IMAGE/classes/Default/Main.class" && -f "$KOF_MUT_IMAGE/classes/kofmut/launch/RuntimeEntry.class" ) ]] && [[ -f "$KOF_MUT_IMAGE/classes/kofmut/launch/CompatibilityEntry.class" && -f "$KOF_MUT_IMAGE/identity" && -f "$KOF_MUT_IMAGE/checksums" ]] &&
         cmp -s -- "$KOF_MUT_CONTEXT/identity" "$KOF_MUT_IMAGE/identity" &&
-        (cd -- "$KOF_MUT_IMAGE/classes" && sha256sum --check --status "$KOF_MUT_IMAGE/checksums")
+        (cd -- "$KOF_MUT_IMAGE/classes" && timeout --foreground --kill-after=2 10 sha256sum --check --status "$KOF_MUT_IMAGE/checksums")
 }
 if ! complete_image; then
     prepare
     read_location || fail 'invalid installation descriptor'
     select_image
     complete_image || fail 'incomplete compiled image'
+fi
+if [[ "$KOF_MUT_MODE" == app ]]; then
+    KOF_MUT_REMAINING=$((90000 - $(date +%s%3N) + KOF_MUT_STARTED))
+    (( KOF_MUT_REMAINING > 0 )) || fail 'preparation exceeded 90000 ms'
+    printf -v KOF_MUT_DEADLINE '%d.%03ds' "$((KOF_MUT_REMAINING / 1000))" "$((KOF_MUT_REMAINING % 1000))"
+    if timeout --foreground --kill-after=2 "$KOF_MUT_DEADLINE" "$KOF_MUT_JAVA" -cp "$KOF_MUT_IMAGE/classes:$KOF_MUT_JAR" kofmut.launch.CompatibilityEntry "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_CONTEXT" "$KOF_MUT_IMAGE" "$@"; then
+        [[ -f "$KOF_MUT_CONTEXT/evaluation" ]] || exit 0
+    else
+        KOF_MUT_RESULT=$?
+        if [[ "$KOF_MUT_RESULT" == 124 || "$KOF_MUT_RESULT" == 137 ]]; then
+            KOF_MUT_DETAIL=()
+            if [[ -f "$KOF_MUT_CONTEXT/preparation-detail" ]]; then
+                while IFS= read -r -d '' KOF_MUT_FIELD; do KOF_MUT_DETAIL+=("$KOF_MUT_FIELD"); done < "$KOF_MUT_CONTEXT/preparation-detail"
+            fi
+            echo "kof-mut: Kof ${KOF_MUT_DETAIL[0]:-unknown}; preparation ${KOF_MUT_DETAIL[1]:-bootstrap} failed: exceeded 90000 ms; evidence: ${KOF_MUT_DETAIL[2]:-$KOF_MUT_CONTEXT}" >&2
+        elif [[ "$KOF_MUT_RESULT" != 2 ]]; then
+            fail "preparation JVM failed (exit $KOF_MUT_RESULT)"
+        elif [[ -f "$KOF_MUT_CONTEXT/bootstrap-failure" ]]; then
+            if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+                KOF_MUT_KEEP_CONTEXT=1
+                echo "kof-mut: preparation evidence: $KOF_MUT_CONTEXT" >&2
+            else
+                fail 'compatibility bootstrap failed'
+            fi
+        fi
+        exit 2
+    fi
+    KOF_MUT_EVALUATION=()
+    while IFS= read -r -d '' KOF_MUT_FIELD; do KOF_MUT_EVALUATION+=("$KOF_MUT_FIELD"); done < "$KOF_MUT_CONTEXT/evaluation"
+    [[ -z "$KOF_MUT_FIELD" && ${#KOF_MUT_EVALUATION[@]} == 8 && ${KOF_MUT_EVALUATION[0]} == kofmut-evaluation-v1 && ${KOF_MUT_EVALUATION[4]} == "$KOF_MUT_ROOT" && ${KOF_MUT_EVALUATION[5]} == "$KOF_MUT_KOF" ]] || fail 'invalid prepared application handoff'
+    KOF_MUT_JVM_ARGS=("-Dkofmut.root=${KOF_MUT_EVALUATION[4]}" "-Dkofmut.kof=${KOF_MUT_EVALUATION[5]}" "-Dkofmut.kof.version=${KOF_MUT_EVALUATION[6]}")
+    if [[ -n "${KOF_MUT_EVALUATION[7]}" ]]; then KOF_MUT_JVM_ARGS+=("-Dkofmut.logs=${KOF_MUT_EVALUATION[7]}"); fi
+    rm -rf -- "$KOF_MUT_CONTEXT"
+    exec "${KOF_MUT_EVALUATION[1]}" "${KOF_MUT_JVM_ARGS[@]}" -cp "${KOF_MUT_EVALUATION[2]}/classes:${KOF_MUT_EVALUATION[3]}" kofmut.launch.CompatibilityApplication "$@"
 fi
 exec "$KOF_MUT_JAVA" -cp "$KOF_MUT_IMAGE/classes:$KOF_MUT_JAR" kofmut.launch.RuntimeEntry "$KOF_MUT_ROOT" "$KOF_MUT_KOF" "$KOF_MUT_MODE" "$KOF_MUT_CONTEXT" "$KOF_MUT_IMAGE" "$@"

@@ -7,7 +7,7 @@ record InputEntry(String path, Int[] bytes, String permissions, Bool directory)
 
 Bool excludedInput(String relative) {
     for (var segment in relative.split("/")) { if (segment == ".git") { return true } }
-    return underPath(relative, ".kof-mut/reports") || underPath(relative, ".agent/tmp") || underPath(relative, "build/cache/kof-launch-v2")
+    return underPath(relative, ".kof-mut/reports") || underPath(relative, ".agent/tmp") || underPath(relative, "build/cache/kof-launch-v2") || underPath(relative, "build/cache/compatibility")
 }
 
 List<InputEntry> captureInputs(RunOptions options, RunConfig config) {

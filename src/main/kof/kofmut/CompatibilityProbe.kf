@@ -1,0 +1,92 @@
+package kofmut
+
+import dev.kof.compiler.KofVersion
+import java.lang.Exception
+import java.lang.System
+
+record CompatibilityConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
+
+void compatibilityFrontend() {
+    var source = "Bool choose(Int a, Int b) { var text = \"😀 < false\" // ignored +\r\n return (a < b) && true }"
+    var scan = scanSource(source, "Contract.kf")
+    assert(scan.errors.size == 0 && scan.limitations.size == 0 && scan.sites.size == 3, "frontend candidate contract")
+    var sites = orderedSites(scan.sites)
+    var expected = listOf("<", "&&", "true")
+    var replacement = listOf("<=", "||", "false")
+    for (var i = 0; i < sites.size; i++) {
+        var site = sites.get(i)
+        assert(site.original == expected.get(i) && site.replacement == replacement.get(i), "operator contract")
+        assert(site.line == 2 && site.length == site.original.length(), "position contract")
+        assert(source.substring(site.offset, site.offset + site.length) == site.original, "UTF-16 extent contract")
+        var changed = source.substring(0, site.offset) + site.replacement + source.substring(site.offset + site.length)
+        assert(validateVariantTokens(source, changed, "Contract.kf", site.offset, site.length, site.original, site.replacement).accepted, "official variant lexer/parser contract")
+    }
+    var directions = scanSource("Bool f(Int a, Int b) { var x = a < b var y = a <= b var z = a > b var w = a >= b var e = a == b var n = a != b return true && false || true } Int g(Int a, Int b) { return (a + b) - (a * b) / b }", "Directions.kf")
+    assert(directions.errors.size == 0 && directions.limitations.size == 0 && directions.sites.size == 15, "operator direction contract")
+    var originals = listOf("<", "<=", ">", ">=", "==", "!=", "true", "&&", "false", "||", "true", "+", "-", "*", "/")
+    var replacements = listOf("<=", "<", ">=", ">", "!=", "==", "false", "||", "true", "&&", "false", "-", "+", "/", "*")
+    var ordered = orderedSites(directions.sites)
+    for (var i = 0; i < ordered.size; i++) { assert(ordered.get(i).original == originals.get(i) && ordered.get(i).replacement == replacements.get(i), "direction contract") }
+    assert(scanSource("record Point(Int x)", "Unsupported.kf").limitations.size == 1, "unknown syntax must be explicit")
+    assert(scanSource("Int broken( {", "Broken.kf").errors.size > 0, "parser errors must be explicit")
+    assert(scanSource("String broken() { return \"unterminated", "Lexical.kf").errors.size > 0, "lexer errors must be explicit")
+    var fields = scanSource("class Labels { String value = \"x\" String show(Int value) { return this.value + value } Int sum(Int value) { return value + 1 } }", "Fields.kf")
+    assert(fields.errors.size == 0 && fields.limitations.size == 0 && fields.sites.size == 1 && fields.sites.get(0).original == "+", "field and local contract")
+}
+
+void compatibilityMutation(String kof, String version, String evidence, String mode) {
+    var project = evidence + "/" + mode + "-project"
+    assert(Directory(project + "/src/math").createDirectories())
+    assert(Directory(project + "/tests").createDirectories())
+    assert(File(project + "/src/math/Calc.kf").writeText("package src.math\n\nclass Calc {\n    Int sum(Int a, Int b) { return a + b }\n}\n"))
+    var assertion = "assert(new Calc().sum(2, 3) == 5)"
+    if (mode == "survived") { assertion = "assert(new Calc().sum(2, 0) == 2)" }
+    assert(File(project + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"sum contract\" { " + assertion + " }\n"))
+    assert(File(project + "/kof.toml").writeText("[sources]\napp = \".\"\ntest = \"tests\"\n"))
+    assert(File(project + "/scope.json").writeText("[\"src/math/Calc.kf\"]"))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(CompatibilityConfig(1, listOf("src"), listOf("tests"), listOf("kof.toml", "src", "tests"), listOf(kof, "check", "src/math/Calc.kf", "--json"), listOf(kof, "test", "tests"), 10000, 8500))))
+    var args = new String[9]
+    args[0] = "run"; args[1] = "--project"; args[2] = project; args[3] = "--files"; args[4] = project + "/scope.json"; args[5] = "--report-dir"; args[6] = evidence + "/" + mode + "-reports"; args[7] = "--run-id"; args[8] = "7b20e8d4-f994-4eaa-bb0c-f34b1ed99f31"
+    var result = runMutation(args)
+    var expected = 0
+    if (mode == "survived") { expected = 1 }
+    assert(result == expected, "synthetic mutation exit")
+    var reports = Directory(args[6]).list()
+    assert(reports.size == 1, "one independent report")
+    var group = args[6] + "/" + reports.get(0)
+    var calls = Directory(group).list()
+    assert(calls.size == 1, "one report for this call")
+    var text = readRequired(group + "/" + calls.get(0) + "/report.json")
+    var report = json.decode<MutationReport>(text)
+    assert(report.schemaVersion == 1 && report.kofVersion == version && report.status == "complete", "synthetic report identity")
+    assert(report.baseline.status == "passed" && report.baseline.check.filesChecked == 1 && report.baseline.test.executedTests == 1, "synthetic baseline evidence")
+    assert(report.counts.candidates == 1 && report.counts.executed == 1 && report.counts.pending == 0 && report.counts.testError == 0 && report.counts.timeout == 0 && report.discardedCandidates.size == 0 && report.limitations.size == 0, "synthetic reconciliation")
+    var mutant = report.mutants.get(0)
+    assert(mutant.file == "src/math/Calc.kf" && mutant.operator == "arithmetic" && mutant.original == "+" && mutant.replacement == "-", "synthetic candidate identity")
+    assert(mutant.location.line == 4 && mutant.location.column == 38 && mutant.location.length == 1, "synthetic candidate location")
+    assert(mutant.phase == "test" && mutant.evidence.contains("process group cleanup confirmed"), "synthetic test evidence")
+    if (mode == "killed") { assert(mutant.status == "Killed" && report.counts.killed == 1 && report.counts.survived == 0 && mutant.evidence.contains("1 failed"), "detected contract") }
+    else { assert(mutant.status == "Survived" && report.counts.survived == 1 && report.counts.killed == 0 && mutant.evidence.contains("0 failed"), "survivor contract") }
+}
+
+class CompatibilityProbe {
+    static void main(String[] arguments) {
+        try {
+            if (arguments.length != 5) { throw "invalid compatibility probe arguments" }
+            var root = arguments[0]
+            var kof = arguments[1]
+            var version = arguments[2]
+            var evidence = arguments[3]
+            var mode = arguments[4]
+            assert(KofVersion.version() == version, "declared version must match loaded frontend")
+            System.setProperty("kofmut.root", root)
+            System.setProperty("kofmut.kof", kof)
+            System.setProperty("kofmut.kof.version", version)
+            System.setProperty("kofmut.logs", evidence + "/execution")
+            if (mode == "frontend") { compatibilityFrontend() }
+            else if (mode == "killed" || mode == "survived") { compatibilityMutation(kof, version, evidence, mode) }
+            else { throw "unknown compatibility probe" }
+            assert(File(evidence + "/" + mode + ".ok").writeText("verified\n"))
+        } catch (Exception error) { System.err.println("kof-mut: compatibility probe: " + error); process.exit(2) }
+    }
+}

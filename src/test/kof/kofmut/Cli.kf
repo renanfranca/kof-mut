@@ -1,4 +1,6 @@
 import java.lang.System
+import java.lang.Process
+import java.util.concurrent.TimeUnit
 import java.lang.Thread
 import java.nio.file.Files
 
@@ -60,7 +62,7 @@ test "source launcher prints the version from VERSION" {
     }
 }
 
-test "unsupported Kof is rejected before using a cached build" {
+test "an incomplete selected Kof is rejected before using a cached bootstrap" {
     var fake = Path("src/test/fixtures/unsupported-toolchain/bin").toAbsolute().path()
     var inherited = System.getenv("PATH")
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -68,7 +70,7 @@ test "unsupported Kof is rejected before using a cached build" {
     var result = process.run("env", "PATH=" + fake + ":" + inherited, "KOF_MUT_TEST_KOF=" + kof, "./bin/kof-mut", "--version")
 
     assert(result.exitCode == 2)
-    assert(result.stderr.contains("requires Kof/compiler/runtime/stdlib 0.6.4"))
+    assert(result.stderr.contains("incomplete Kof distribution"))
     assert(!result.stdout.contains("KofMut 0.1.0"))
 }
 
@@ -77,7 +79,7 @@ test "source launcher works with no Python executable on PATH" {
     Directory(root + "/.agent/tmp").createDirectories()
     var temporary = Files.createTempDirectory(new java.io.File(root + "/.agent/tmp").toPath(), "no-python-").toString()
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
-    for (var tool in listOf("bash", "dirname", "readlink", "sed", "head", "mktemp", "rm", "find", "sort", "sha256sum", "b2sum", "cat", "cmp")) {
+    for (var tool in listOf("bash", "dirname", "readlink", "sed", "head", "mktemp", "mkfifo", "setsid", "date", "timeout", "cp", "mkdir", "rm", "find", "sort", "sha256sum", "b2sum", "cat", "cmp")) {
         var linked = process.run("/bin/ln", "-s", "/usr/bin/" + tool, temporary + "/" + tool)
         assert(linked.exitCode == 0)
     }
@@ -158,7 +160,7 @@ test "cache is reused and invalidated by VERSION and source contents" {
 
         var copied = process.run("/bin/cp", "src/test/fixtures/LaunchObservation.kf", project + "/src/main/kof/kofmut/Main.kf")
         assert(copied.exitCode == 0)
-        var source = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_VALUE=new source", project + "/bin/kof-mut")
+        var source = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_VALUE=new source", project + "/bin/kof-mut", "--fixture")
         assert(source.exitCode == 23)
         assert(source.stdout.contains("new source"))
         assert(File(log).readText() == "build\nbuild\nbuild\n", "changed source bytes must invalidate the cache")
@@ -235,7 +237,7 @@ test "compiler failure after emitting classes is rejected and retried" {
     }
 }
 
-test "concurrent cold launches compile the application exactly once" {
+test "concurrent cold informational launches compile the minimal bootstrap exactly once" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -330,7 +332,7 @@ test "inconsistent location descriptor is prepared again automatically" {
     }
 }
 
-test "incomplete or damaged images are rebuilt before application execution" {
+test "incomplete or damaged bootstrap images are rebuilt before public commands" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -344,17 +346,17 @@ test "incomplete or damaged images are rebuilt before application execution" {
         assert(names.size() == 1)
         var image = images + "/" + names[0]
         var expectedBuilds = "build\n"
-        for (var relative in listOf("identity", "classes/Default/Main.class", "classes/kofmut/launch/RuntimeEntry.class", "classes/dev/kof/runtime/KofRuntime.class")) {
+        for (var relative in listOf("identity", "classes/Default/Main.class", "classes/kofmut/launch/CompatibilityEntry.class", "classes/dev/kof/runtime/KofRuntime.class")) {
             assert(File(image + "/" + relative).writeText("incomplete image\n"))
 
             var recovered = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
 
-            assert(recovered.exitCode == 0, "damaged image must recover automatically: " + relative)
+            cliAssertEvidence(recovered.exitCode == 0, "damaged image must recover automatically: " + relative)
             assert(recovered.stdout == "KofMut 0.1.0\n")
             expectedBuilds = expectedBuilds + "build\n"
             assert(File(log).readText() == expectedBuilds)
         }
-        assert(File(image + "/classes/kofmut/launch/RuntimeEntry.class").delete())
+        assert(File(image + "/classes/kofmut/launch/CompatibilityEntry.class").delete())
         var missing = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
         assert(missing.exitCode == 0)
         assert(File(log).readText() == expectedBuilds + "build\n")
@@ -373,7 +375,7 @@ test "tool input bytes invalidate images even when timestamps are preserved" {
         var first = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
         assert(first.exitCode == 0)
         var builds = "build\n"
-        for (var relative in listOf("src/main/kof/kofmut/Frontend.kf", "src/main/kof/kofmut/launch/RuntimeEntry.kf", "scripts/bootstrap/Launch.kf", "scripts/launch", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "toolchain/kof")) {
+        for (var relative in listOf("src/main/kof/kofmut/launch/Compatibility.kf", "scripts/supervise", "scripts/bootstrap/Launch.kf", "scripts/launch", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "toolchain/kof")) {
             var file = project + "/" + relative
             assert(process.run("/bin/cp", "-p", file, project + "/timestamp").exitCode == 0)
             var content = File(file).readText()
@@ -384,10 +386,10 @@ test "tool input bytes invalidate images even when timestamps are preserved" {
 
             var changed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
 
-            assert(changed.exitCode == 0, "changed input must still launch: " + relative)
+            cliAssertEvidence(changed.exitCode == 0, "changed input must still launch: " + relative)
             assert(changed.stdout == "KofMut 0.1.0\n")
             builds = builds + "build\n"
-            assert(File(log).readText() == builds, "changed contents must compile once: " + relative)
+            cliAssertEvidence(File(log).readText() == builds, "changed contents must compile once: " + relative)
         }
         assert(Directory(project + "/evaluated/src").createDirectories())
         assert(File(project + "/evaluated/src/Example.kf").writeText("main() { println(1) }\n"))
@@ -460,7 +462,7 @@ test "warm argument fixture preserves the public invocation without a compiler" 
     assert(process.run("/bin/cp", "src/test/fixtures/LaunchObservation.kf", project + "/src/main/kof/kofmut/Main.kf").exitCode == 0)
 
     try {
-        var prepared = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut")
+        var prepared = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--fixture")
         assert(prepared.exitCode == 23)
 
         var result = process.run("/usr/bin/env", "--chdir=" + caller, "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_COMPILE=refuse", "KOF_MUT_TEST_VALUE=env 😀 value", project + "/bin/kof-mut", "", "space value", "ação 😀", "line\nbreak", "$(touch INJECTED);*'\"\\", "--target", "not-a-target", "--deps", "missing-dependency")
@@ -480,13 +482,13 @@ test "warm argument fixture preserves the public invocation without a compiler" 
         assert(observed.cwd == caller)
         assert(observed.environment == "env 😀 value")
         assert(!File(caller + "/INJECTED").exists())
-        assert(File(log).readText() == "build\n")
+        assert(File(log).readText() == "build\nbuild\n")
     } finally {
         assert(Directory(project).delete())
     }
 }
 
-test "application consumes the context and receives TERM in the launch JVM" {
+test "application consumes its handoff and forwards TERM through the public invocation" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -511,11 +513,11 @@ test "application consumes the context and receives TERM in the launch JVM" {
         if (raw != null) {
             var observed = json.decode<LiveLaunch>(raw)
             pid = observed.processDirectory.substring(6)
-            assert(observed.command.startsWith("kofmut.launch.RuntimeEntry "), "application must run inside the launch JVM")
-            assert(observed.contexts == 0, "context must be removed before application main")
+            assert(observed.command.contains(ready), "the prepared application receives its original arguments")
+            assert(observed.contexts == 1, "only the outer signal barrier remains; the application handoff was removed")
             assert(observed.children == "", "launch JVM must not supervise another application process")
         }
-        assert(File(log).readText() == "build\n")
+        assert(File(log).readText() == "build\nbuild\n")
         assert(process.run("/bin/kill", "-TERM", pid).exitCode == 0)
         deadline = System.currentTimeMillis() + 10000
         while (application.alive() && System.currentTimeMillis() < deadline) { Thread.sleep(25) }
@@ -530,7 +532,7 @@ test "application consumes the context and receives TERM in the launch JVM" {
     }
 }
 
-test "runtime rejects altered fresh evidence and removes its context on failure" {
+test "runtime rejects altered fresh evidence and removes its context on failure", "compatibility-context-errors" {
     var project = disposableProject()
     var path = controlledPath(project)
     var original = json.decode<TestInstallation>(process.run("kof", "info", "--json").stdout)
@@ -617,4 +619,301 @@ test "jar hash failure returns two and cannot execute the warm image" {
     } finally {
         assert(Directory(project).delete())
     }
+}
+
+List<String> compatibilityInvocation(String project, String path, String kof, String log) {
+    var evaluated = new java.io.File("fixtures/detected").getCanonicalPath()
+    assert(File(project + "/empty-scope.json").writeText("[]"))
+    return listOf("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "run", "--project", evaluated, "--files", project + "/empty-scope.json", "--report-dir", project + "/reports")
+}
+
+test "a new Kof prepares and checks compatibility once before evaluation", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+
+    try {
+        var first = shell.runWith(command, project, mapOf())
+        if (first.exitCode != 3) { println(first.stdout + first.stderr) }
+        cliAssertEvidence(first.exitCode == 3, first.stdout + first.stderr)
+        cliAssertEvidence(first.stderr.contains("detected; preparing application..."), first.stderr)
+        assert(first.stderr.contains("kof-mut: checking compatibility..."))
+        assert(first.stderr.contains("kof-mut: ready; starting evaluation."))
+        assert(first.stdout.contains("reportPath="))
+        var builds = File(log).readText()
+        assert(builds != null)
+
+        var second = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+        if (second.exitCode != 3) { println(second.stdout + second.stderr) }
+        cliAssertEvidence(second.exitCode == 3, second.stdout + second.stderr)
+        assert(!second.stderr.contains("preparing application"))
+        assert(!second.stderr.contains("checking compatibility"))
+        assert(!second.stderr.contains("ready; starting evaluation"))
+        assert(second.stdout.contains("reportPath="))
+        if (builds != null) { assert(builds.equals(File(log).readText())) }
+    } finally { assert(Directory(project).delete()) }
+}
+
+test "compilation alone cannot approve a frontend behavior change and retry repairs it", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    var file = project + "/src/main/kof/kofmut/Frontend.kf"
+    var original = File(file).readText()
+    assert(original != null)
+
+    try {
+        if (original != null) { assert(File(file).writeText(original.replace("return \"arithmetic\"", "return \"wrong-family\""))) }
+        var refused = shell.runWith(command, project, mapOf())
+        assert(refused.exitCode == 2)
+        assert(refused.stdout == "")
+        cliAssertEvidence(refused.stderr.contains("preparation contracts failed"), refused.stderr)
+        assert(refused.stderr.contains("compatibility killed verification failed"))
+        assert(refused.stderr.contains("evidence:"))
+        assert(!refused.stderr.contains("ready; starting evaluation"))
+        assert(!File(project + "/reports").exists())
+        assert(File(log).readText() == "build\nbuild\n", "the candidate compiled before behavioral refusal")
+
+        if (original != null) { assert(File(file).writeText(original)) }
+        var retry = shell.runWith(command, project, mapOf())
+        cliAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
+        assert(retry.stderr.contains("ready; starting evaluation"))
+        assert(retry.stdout.contains("reportPath="))
+        assert(File(log).readText() == "build\nbuild\nbuild\n")
+    } finally { assert(Directory(project).delete()) }
+}
+
+test "concurrent first evaluations share one complete preparation", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    assert(File(project + "/concurrent.sh").writeText("#!/bin/bash\n\"$@\" > first.stdout 2> first.stderr &\na=$!\n\"$@\" > second.stdout 2> second.stderr &\nb=$!\nwait $a; x=$?\nwait $b; y=$?\n[[ $x == 3 && $y == 3 ]]\n"))
+    var invocation = listOf("/bin/bash", project + "/concurrent.sh")
+    for (var arg in command) { invocation.add(arg) }
+
+    try {
+        var result = shell.runWith(invocation, project, mapOf())
+        assert(result.exitCode == 0)
+        assert(File(log).readText() == "build\nbuild\n", "one bootstrap and one application build")
+        var first = File(project + "/first.stdout").readText()
+        var second = File(project + "/second.stdout").readText()
+        assert(first != null && second != null)
+        if (first != null && second != null) { assert(first.contains("reportPath=")); assert(second.contains("reportPath=")); assert(!first.equals(second)) }
+    } finally { assert(Directory(project).delete()) }
+}
+
+String compatibilityRead(String path) {
+    var text = File(path).readText()
+    if (text != null) { return text }
+    throw "missing evidence: " + path
+}
+
+Process startCompatibility(List<String> command, String log) {
+    var argv = new String[command.size]
+    for (var i = 0; i < command.size; i++) { argv[i] = command.get(i) }
+    var builder = new java.lang.ProcessBuilder(argv)
+    builder.redirectOutput(new java.io.File(log + ".stdout"))
+    builder.redirectError(new java.io.File(log + ".stderr"))
+    return builder.start()
+}
+
+Bool compatibilityProcessActive(String pid) {
+    var result = process.run("/bin/ps", "-o", "stat=", "-p", pid)
+    return result.exitCode == 0 && result.stdout.trim() != "" && !result.stdout.trim().startsWith("Z")
+}
+
+test "INT and TERM discard an emitted candidate and allow retry without cleanup", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    var warmed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+    assert(warmed.exitCode == 0)
+
+    try {
+        for (var signal in listOf("INT", "TERM")) {
+            // Change engine contents so each signal meets a fresh candidate.
+            var source = project + "/src/main/kof/kofmut/Main.kf"
+            assert(File(source).writeText(compatibilityRead(source) + "\n"))
+            var ready = project + "/ready-" + signal
+            var invocation = listOf("/usr/bin/env", "KOF_MUT_TEST_BUILD=block-after-output", "KOF_MUT_TEST_READY=" + ready)
+            for (var arg in command) { invocation.add(arg) }
+            var child = startCompatibility(invocation, project + "/cancel-" + signal)
+            try {
+                var deadline = System.currentTimeMillis() + 30000
+                while (!File(ready).exists() && child.isAlive() && System.currentTimeMillis() < deadline) { Thread.sleep(20 as Long) }
+                assert(File(ready).exists(), "emitted candidate readiness")
+                var compilerPid = compatibilityRead(ready + ".pid").trim()
+                var candidate = compatibilityRead(ready).trim()
+                assert(File(candidate + "/classes/Default/Main.class").isFile())
+                var pid = "" + child.pid()
+                assert(process.run("/bin/kill", "-" + signal, pid).exitCode == 0)
+                assert(child.waitFor(5000 as Long, TimeUnit.MILLISECONDS))
+                var expected = 130
+                if (signal == "TERM") { expected = 143 }
+                assert(child.exitValue() == expected)
+                assert(!compatibilityProcessActive(compilerPid), "compiler stopped before test cleanup")
+                assert(!File(candidate + "/approval.json").exists())
+                assert(File(ready + ".continue").writeText("release"))
+                Thread.sleep(100 as Long)
+                assert(!File(candidate + "/approval.json").exists(), "no late approval")
+            } finally { if (child.isAlive()) { child.destroyForcibly() } }
+            var retry = shell.runWith(command, project, mapOf())
+            cliAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
+            assert(retry.stderr.contains("ready; starting evaluation"))
+        }
+    } finally { assert(Directory(project).delete()) }
+}
+
+test "a preparation command timeout refuses evaluation and retry needs no cache cleanup", "compatibility", "compatibility-timeout" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    var warmed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+    cliAssertEvidence(warmed.exitCode == 0, warmed.stdout + warmed.stderr)
+    var ready = project + "/timeout-ready"
+    var invocation = listOf("/usr/bin/env", "KOF_MUT_TEST_BUILD=block-before-output", "KOF_MUT_TEST_READY=" + ready)
+    for (var arg in command) { invocation.add(arg) }
+    var started = System.nanoTime()
+    var child = startCompatibility(invocation, project + "/command-timeout")
+
+    try {
+        while (!File(ready).exists() && child.isAlive() && System.nanoTime() - started < 90000000000) { Thread.sleep(20 as Long) }
+        cliAssertEvidence(File(ready).exists(), "compiler readiness: " + compatibilityRead(project + "/command-timeout.stderr"))
+        var commandStarted = System.nanoTime()
+        var finished = child.waitFor(12000 as Long, TimeUnit.MILLISECONDS)
+        var commandElapsed = (System.nanoTime() - commandStarted) / 1000000
+        var elapsed = (System.nanoTime() - started) / 1000000
+        var error = compatibilityRead(project + "/command-timeout.stderr")
+        println("timeout observation: preparationMs=" + elapsed + "; observedCommandAndCleanupMs=" + commandElapsed + "; stderr=" + error)
+        cliAssertEvidence(finished, "command must stop within ten seconds plus two shared cleanup seconds: " + commandElapsed)
+        cliAssertEvidence(child.exitValue() == 2, error)
+        cliAssertEvidence(elapsed < 92000, "preparation plus cleanup exceeded its total bound: " + elapsed)
+        assert(compatibilityRead(project + "/command-timeout.stdout") == "")
+        assert(error.contains("preparation compile failed"))
+        assert(error.contains("10000 ms maximum"))
+        assert(error.contains("evidence:"))
+        assert(!File(project + "/reports").exists())
+        assert(!compatibilityProcessActive(compatibilityRead(ready + ".pid").trim()))
+        var retry = shell.runWith(command, project, mapOf())
+        cliAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
+        assert(retry.stderr.contains("ready; starting evaluation"))
+    } finally {
+        if (child.isAlive()) { child.destroy(); var stopped = child.waitFor(5000 as Long, TimeUnit.MILLISECONDS); if (child.isAlive()) { child.destroyForcibly() } }
+        assert(Directory(project).delete())
+    }
+}
+
+test "contents changing during preparation cannot publish approval even with preserved timestamps", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    var warmed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+    assert(warmed.exitCode == 0)
+    var ready = project + "/integrity-ready"
+    var invocation = listOf("/usr/bin/env", "KOF_MUT_TEST_BUILD=block-after-output", "KOF_MUT_TEST_READY=" + ready)
+    for (var arg in command) { invocation.add(arg) }
+    var child = startCompatibility(invocation, project + "/integrity")
+
+    try {
+        var deadline = System.currentTimeMillis() + 30000
+        while (!File(ready).exists() && child.isAlive() && System.currentTimeMillis() < deadline) { Thread.sleep(20 as Long) }
+        assert(File(ready).exists())
+        var source = project + "/src/main/kof/kofmut/Main.kf"
+        assert(process.run("/bin/cp", "-p", source, project + "/timestamp").exitCode == 0)
+        assert(File(source).writeText(compatibilityRead(source) + "\n"))
+        assert(process.run("/usr/bin/touch", "-r", project + "/timestamp", source).exitCode == 0)
+        assert(new java.io.File(source).lastModified() == new java.io.File(project + "/timestamp").lastModified())
+        assert(File(ready + ".continue").writeText("go"))
+        assert(child.waitFor(30000 as Long, TimeUnit.MILLISECONDS))
+        assert(child.exitValue() == 2)
+        var error = compatibilityRead(project + "/integrity.stderr")
+        assert(error.contains("preparation integrity failed"))
+        assert(error.contains("components changed during preparation; retry"))
+        assert(compatibilityRead(project + "/integrity.stdout") == "")
+        assert(!File(project + "/reports").exists())
+        var retry = shell.runWith(command, project, mapOf())
+        cliAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
+        assert(retry.stderr.contains("ready; starting evaluation"))
+        var reused = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+        assert(reused.exitCode == 3)
+        assert(!reused.stderr.contains("checking compatibility"))
+    } finally { if (child.isAlive()) { child.destroyForcibly() }; assert(Directory(project).delete()) }
+}
+
+test "all informational commands avoid engine compilation even with invalid engine syntax", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    assert(File(project + "/src/main/kof/kofmut/Main.kf").writeText("invalid engine syntax {"))
+
+    try {
+        for (var option in listOf("--version", "--help", "-h", "")) {
+            var command = listOf("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut")
+            if (option != "") { command.add(option) }
+            var result = shell.runWith(command, project, mapOf())
+            cliAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+            assert(result.stdout.contains("KofMut"))
+            assert(!result.stderr.contains("preparing application"))
+            assert(!result.stderr.contains("checking compatibility"))
+            assert(!result.stderr.contains("ready; starting evaluation"))
+            assert(File(log).readText() == "build\n", "only the minimal bootstrap compiles")
+        }
+        assert(!File(project + "/build/cache/compatibility/images").exists())
+        var run = shell.runWith(compatibilityInvocation(project, path, kof, log), project, mapOf())
+        assert(run.exitCode == 2)
+        assert(run.stderr.contains("preparation compile failed"))
+        assert(run.stdout == "")
+    } finally { assert(Directory(project).delete()) }
+}
+
+test "JDK contents invalidate approval with the same declared version and timestamps", "compatibility" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var installed = json.decode<TestInstallation>(process.run("kof", "info", "--json").stdout)
+    var distribution = project + "/copied Kof"
+    assert(process.run("cp", "-a", "--reflink=auto", installed.install, distribution).exitCode == 0)
+    var kof = distribution + "/bin/kof"
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+
+    try {
+        var first = shell.runWith(command, project, mapOf())
+        cliAssertEvidence(first.exitCode == 3, first.stdout + first.stderr)
+        assert(File(log).readText() == "build\nbuild\n")
+        var expected = "build\nbuild\n"
+        for (var relative in listOf("jdk/release", "jdk/lib/jvm.cfg")) {
+            var file = distribution + "/" + relative
+            assert(process.run("cp", "-p", file, project + "/timestamp").exitCode == 0)
+            assert(File(file).writeText(compatibilityRead(file) + "\n# compatibility content proof\n"))
+            assert(process.run("touch", "-r", project + "/timestamp", file).exitCode == 0)
+            assert(new java.io.File(file).lastModified() == new java.io.File(project + "/timestamp").lastModified())
+            var changed = shell.runWith(command, project, mapOf())
+            cliAssertEvidence(changed.exitCode == 3, changed.stdout + changed.stderr)
+            assert(changed.stderr.contains("checking compatibility"))
+            expected = expected + "build\n"
+            assert(File(log).readText() == expected)
+            var reused = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+            assert(reused.exitCode == 3)
+            assert(!reused.stderr.contains("checking compatibility"))
+            assert(File(log).readText() == expected)
+        }
+    } finally { assert(Directory(project).delete()) }
+}
+
+void cliAssertEvidence(Bool condition, String evidence) {
+    if (!condition) { println(evidence) }
+    assert(condition, "behavior failed; see evidence above")
 }

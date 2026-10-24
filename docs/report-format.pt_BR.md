@@ -102,7 +102,7 @@ Todos os campos abaixo são obrigatórios e não nulos. Objetos JSON não são o
 | --- | --- | --- |
 | `schemaVersion` | inteiro | `1` |
 | `toolVersion` | string | VERSION do KofMut, atualmente `0.1.0` |
-| `kofVersion` | string | Versão do frontend/runtime suportado, `0.6.4` |
+| `kofVersion` | string | Versão do frontend efetivamente selecionado e verificado nesta avaliação |
 | `runId` | string | UUID solicitado ou gerado |
 | `status` | string | Estado geral da tabela de estados abaixo |
 | `scope` | array de strings | Caminhos de produção normalizados, deduplicados e ordenados, relativos ao projeto; pode estar vazio |

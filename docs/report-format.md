@@ -102,7 +102,7 @@ All fields below are required and nonnull. JSON objects are not ordered. Arrays 
 | --- | --- | --- |
 | `schemaVersion` | integer | `1` |
 | `toolVersion` | string | KofMut VERSION, currently `0.1.0` |
-| `kofVersion` | string | Supported frontend/runtime version, `0.6.4` |
+| `kofVersion` | string | Frontend version actually selected and verified for this evaluation |
 | `runId` | string | Requested or generated UUID |
 | `status` | string | Overall state from the status table below |
 | `scope` | array of strings | Normalized, deduplicated, sorted production paths relative to project; can be empty |

@@ -8,12 +8,12 @@ KofMut evaluates Kof tests by changing one production token at a time in disposa
 
 ## Requirements
 
-- Linux, Bash 4.4 or later and the official **Kof 0.6.4** Linux distribution on `PATH`, including `lib/kof.jar` and its embedded JDK.
-- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkfifo`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) and GNU diffutils (`cmp`).
-- `setsid` from util-linux, the external `kill` command and procfs at `/proc`. The official Kof launcher also uses `sed` and `head`; validation uses `ps`, `cp`, `ln`, `env` and `which`.
+- Linux, Bash 4.4 or later and the official **Kof** Linux distribution on `PATH`, including `lib/kof.jar` and its embedded JDK.
+- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkfifo`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`, `date`, `timeout`, `cp`), GNU findutils (`find`) and GNU diffutils (`cmp`).
+- `setsid` and `flock` from util-linux, the external `kill` command and procfs at `/proc`. The official Kof launcher also uses `sed` and `head`; validation uses `ps`, `cp`, `ln`, `env` and `which`.
 - A writable checkout for building and source execution (`build/cache/` and `.agent/tmp/`), a writable installation prefix, and temporary disk space for disposable project copies. Installed evaluations write logs to state and do not need the checkout.
 
-Python is not required by KofMut or its validation suite. Project commands can have their own dependencies. Other Kof versions are rejected until their frontend contracts are verified. If necessary, select your existing supported installation:
+Python is not required by KofMut or its validation suite. Project commands can have their own dependencies. Each installation selected on PATH must pass compatibility preparation before evaluation. KofMut does not download or update Kof. If needed, select an existing installation:
 
 ```bash
 export PATH="/path/to/kof-0.6.4-linux-x86_64/bin:$PATH"
@@ -22,7 +22,7 @@ kof info --json
 
 ## Install for daily use
 
-Select Kof 0.6.4 as above, then run from this checkout:
+Select your Kof installation as above, then run from this checkout:
 
 ```bash
 ./install.sh
@@ -40,7 +40,7 @@ The default prefix is `$HOME/.local`. The installer builds the checkout for the 
 
 Without `--prefix`, HOME must be present, nonempty and absolute; otherwise installation returns 2 with `HOME must be a non-empty absolute path when --prefix is omitted`. An explicit prefix works independently of HOME and can be relative to the caller's cwd. `--help` returns 0 without requiring valid HOME.
 
-The installed application works from any directory after removing the checkout and its build cache. Use `kof-mut run --project my-project --files my-project/scope.json` with your configured project. The Kof installation selected during installation must remain available and unchanged: KofMut pins its canonical executable, Java and jar paths and checks their contents. Changing PATH later does not switch the mutator's frontend or Java. Project commands still inherit the caller's original PATH and environment.
+The installed application includes the sources needed for recompilation and works from any directory after removing the checkout and its build cache. Use `kof-mut run --project my-project --files my-project/scope.json` with your configured project. Each invocation selects `kof` from PATH and binds the concrete installation for that evaluation’s frontend. The first evaluation with new components recompiles KofMut and checks compatibility; subsequent calls reuse approval while contents stay identical. The old build installation can be removed after selecting another compatible one and allowing evaluations that still use it to finish. Preparation failure never falls back to a previous installation.
 
 To update or repair an application image, run `./install.sh` again from the desired checkout, repeating `--prefix` for a custom location. Preparation preserves the active version; activation replaces `current` atomically after validation. Identical healthy inputs reuse the image. Earlier versions remain available until uninstall so ongoing evaluations can finish. An invalid ownership receipt or a foreign `bin/kof-mut` is refused rather than overwritten; preserve those files and use a fresh prefix if ownership cannot be established.
 
@@ -62,11 +62,11 @@ From the checkout root:
 ./scripts/check
 ```
 
-The version prints `KofMut 0.1.0`; version and help return 0. The first invocation prepares a local compiled image. Later invocations validate and reuse it. Checkout paths with spaces work; quote path arguments. See [CLI and cache recovery](docs/cli.md#launcher-and-cache) for preparation, dependencies and recovery.
+The version prints `KofMut 0.1.0`; version and help return 0. Help, `-h`, no arguments and version do not compile the engine or check compatibility. In a checkout they may compile only the minimal bootstrap. The first evaluation prepares and checks the engine; subsequent calls validate and reuse approval. Checkout paths with spaces work; quote path arguments. See [CLI and cache recovery](docs/cli.md#launcher-and-cache) for preparation, dependencies and recovery.
 
 ## Run an evaluation
 
-These synthetic examples are ready to run from the checkout root with Kof 0.6.4 on `PATH`:
+These synthetic examples are ready to run from the checkout root with your selected Kof on `PATH`:
 
 ```bash
 ./bin/kof-mut run --project fixtures/detected \
@@ -103,6 +103,8 @@ Every reserved run announces `reportPath=<JSON string>` for its own final JSON d
 The [JSON v1 reference](docs/report-format.md) owns discovery, every field and null, status/count rules, UTF-16 locations and the exit mapping. Exit 0 means complete with all applicable mutants killed; 1 means complete with survivors; 2 means error or failed baseline; 3 means incomplete, no scope or no applicable mutants. Help/version exit 0 is not a quality evaluation.
 
 ## Validation and next milestones
+
+[M6 acceptance evidence](.agent/validation/kofmut-m6.md) records the real installation matrix, migration, compatibility, preservation and performance measurements. Automatic approval is specific to verified contents; it does not declare unrestricted support for future versions.
 
 `./scripts/check` runs the launcher contracts, Kof mutation cycle tests, installation journeys and frontend assertions against the installed jar. See [M5 corrections evidence](.agent/validation/kofmut-m5-corrections.md) for current installer acceptance and [historical M5 installation evidence](.agent/validation/kofmut-m5.md) for the original installation, update, recovery and uninstall validation. See [M4 acceptance evidence](.agent/validation/kofmut-m4.md) and the [execution plan](EXECPLAN.md) for the reviewed source delivery and remaining work.
 

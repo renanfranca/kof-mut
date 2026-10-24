@@ -26,7 +26,7 @@ void publishCheckout(String prefix, InstallationOwner owner, CheckoutManifest ma
     var root = System.getProperty("kofmut.root")
     var classes = System.getProperty("kofmut.image") + "/classes"
     var dependency = pinInstallation()
-    var identity = "kofmut-install-v1\0"
+    var identity = "kofmut-install-v2\0"
     for (var entry in manifest.files) { identity = identity + entry.path + "\0" + entry.hash + "\0" }
     var inputs = crypto.sha256(identity)
     var home = prefix + "/share/kof-mut"
@@ -43,12 +43,14 @@ void publishCheckout(String prefix, InstallationOwner owner, CheckoutManifest ma
         for (var source in installedFiles(classes)) { installCopy(source, temporary + "/classes/" + source.substring(classes.length() + 1)) }
         for (var name in listOf("VERSION", "LICENSE", "NOTICE", "README.md", "README.pt_BR.md")) { copyCheckoutInput(root, name, temporary + "/" + name, manifest) }
         for (var entry in manifest.files) {
-            if (entry.path.startsWith("docs/")) { copyCheckoutInput(root, entry.path, temporary + "/" + entry.path, manifest) }
+            if (entry.path.startsWith("docs/") || entry.path.startsWith("src/main/kof/") || entry.path == "scripts/launch" || entry.path == "scripts/supervise" || entry.path == "scripts/bootstrap/Launch.kf" || entry.path == "scripts/installed-launch" || entry.path == "kof.toml") { copyCheckoutInput(root, entry.path, temporary + "/" + entry.path, manifest) }
+        }
+        for (var executable in listOf("scripts/launch", "scripts/supervise")) {
+            if (!new java.io.File(temporary + "/" + executable).setExecutable(true, true)) { throw "cannot make installed script executable" }
         }
         copyCheckoutInput(root, "scripts/installed-launch", temporary + "/launch.sh", manifest)
         if (!new java.io.File(temporary + "/launch.sh").setExecutable(true, true)) { throw "cannot make launcher executable" }
-        var modules = dependency.contents.get(3)
-        var descriptor = "kofmut-installed-v1\0" + prefix + "\0" + dependency.java + "\0" + dependency.jar + "\0" + installedHash(dependency.java) + "\0" + installedHash(dependency.jar) + "\0" + modules.path + "\0" + modules.hash + "\0"
+        var descriptor = "kofmut-installed-v2\0" + prefix + "\0"
         if (!File(temporary + "/launch.bin").writeText(descriptor)) { throw "cannot write installed descriptor" }
         var checksums = ""
         for (var path in installedFiles(temporary + "/classes")) { checksums = checksums + installedHash(path) + "  " + path.substring((temporary + "/classes/").length()) + "\n" }
@@ -60,7 +62,7 @@ void publishCheckout(String prefix, InstallationOwner owner, CheckoutManifest ma
         var reusable = false
         for (var owned in owner.releases) {
             var candidatePath = releases + "/" + owned.id
-            var candidate = json.decode<InstalledImage>(launchText(candidatePath + "/image.json"))
+            var candidate = readImageReceipt(candidatePath + "/image.json")
             if (candidate.inputs == inputs && json.encode(candidate.dependency) == json.encode(dependency) && json.encode(candidate.files) == json.encode(files)) {
                 try {
                     validateInstalledImage(candidatePath)
@@ -72,7 +74,11 @@ void publishCheckout(String prefix, InstallationOwner owner, CheckoutManifest ma
             }
         }
         if (!reusable && installPathExists(release)) { id = id + "-" + UUID.randomUUID().toString(); release = releases + "/" + id }
-        var receipt = InstalledImage(1, prefix, id, inputs, dependency, files)
+        var runtimeSources: List<InstalledFile> = listOf()
+        for (var file in files) {
+            if (file.path.startsWith("src/main/kof/") || file.path.startsWith("scripts/") || file.path == "kof.toml" || file.path == "VERSION") { runtimeSources.add(file) }
+        }
+        var receipt = InstalledImageV2(2, prefix, id, inputs, dependency, runtimeSources, files)
         if (!File(temporary + "/image.json").writeText(json.encode(receipt))) { throw "cannot write image receipt" }
         validateInstalledImage(temporary)
         for (var argument in listOf("--version", "--help")) {
@@ -113,7 +119,7 @@ void installCheckout(String prefix, CheckoutManifest manifest) {
 class InstallEntry {
     static void main(String[] arguments, CheckoutManifest manifest) {
         try {
-            if (arguments.length == 1 && arguments[0] == "--help") { println("Usage: ./install.sh [--prefix PATH] | --help\nDefault prefix: $HOME/.local; requires installed Kof 0.6.4, no sudo."); return }
+            if (arguments.length == 1 && arguments[0] == "--help") { println("Usage: ./install.sh [--prefix PATH] | --help\nDefault prefix: $HOME/.local; requires installed Kof for Linux/JVM, no sudo."); return }
             var prefix = installationPrefix(arguments, System.getProperty("kofmut.root"))
             installCheckout(prefix, manifest)
         } catch (Exception error) { System.err.println("kof-mut: installation failed: " + error); process.exit(2) }

@@ -47,7 +47,7 @@ InstallationOwner readInstallationOwner(String prefix) {
         rejectInstallLinks(prefix, "share/kof-mut/releases/" + release.id + "/image.json")
         var image = prefix + "/share/kof-mut/releases/" + release.id
         if (installedHash(image + "/image.json") != release.receiptHash) { throw "invalid ownership metadata: " + image }
-        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        var receipt = readImageReceipt(image + "/image.json")
         validateImageReceipt(receipt)
         if (receipt.prefix != prefix || receipt.id != release.id) { throw "owned image identity mismatch" }
     }
@@ -89,14 +89,14 @@ void uninstallOwned(String prefix) {
     // Preflight every path before removing any entry, including inactive images.
     for (var release in owner.releases) {
         var image = prefix + "/share/kof-mut/releases/" + release.id
-        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        var receipt = readImageReceipt(image + "/image.json")
         for (var entry in receipt.files) { rejectInstallLinks(prefix, "share/kof-mut/releases/" + release.id + "/" + entry.path) }
     }
     var commandRemoved = Files.deleteIfExists(new java.io.File(prefix + "/bin/kof-mut").toPath())
     var currentRemoved = Files.deleteIfExists(new java.io.File(prefix + "/share/kof-mut/current").toPath())
     for (var release in owner.releases) {
         var image = prefix + "/share/kof-mut/releases/" + release.id
-        var receipt = json.decode<InstalledImage>(launchText(image + "/image.json"))
+        var receipt = readImageReceipt(image + "/image.json")
         for (var entry in receipt.files) {
             var path = image + "/" + entry.path
             if (File(path).isFile() && installedHash(path) == entry.hash) {

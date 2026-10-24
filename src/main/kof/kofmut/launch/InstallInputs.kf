@@ -5,7 +5,7 @@ import java.lang.Exception
 record CheckoutManifest(String compilation, List<InstalledFile> files)
 
 List<String> checkoutInputPaths(String root) {
-    var paths = listOf("install.sh", "scripts/launch", "scripts/installed-launch", "scripts/bootstrap/Launch.kf", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "LICENSE", "NOTICE", "README.md", "README.pt_BR.md")
+    var paths = listOf("install.sh", "scripts/launch", "scripts/installed-launch", "scripts/supervise", "scripts/bootstrap/Launch.kf", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "LICENSE", "NOTICE", "README.md", "README.pt_BR.md")
     for (var directory in listOf("src/main/kof", "docs")) {
         for (var path in installedFiles(root + "/" + directory)) { paths.add(path.substring(root.length() + 1)) }
     }

@@ -8,7 +8,7 @@ void runInstalled(String release, InstalledImage receipt, String[] arguments) {
     if (System.getProperty("java.class.path") != release + "/classes:" + receipt.dependency.jar) { throw "invalid installed classpath" }
     System.setProperty("kofmut.root", release)
     System.setProperty("kofmut.logs", receipt.prefix + "/state/kof-mut/logs")
-    System.setProperty("kofmut.kof.version", "0.6.4")
+    System.setProperty("kofmut.kof.version", receipt.dependency.version)
     if (arguments.length == 0 || (arguments.length == 1 && (arguments[0] == "--help" || arguments[0] == "-h"))) { println("Installed management: kof-mut uninstall") }
     invokeApplication(arguments)
 }
@@ -26,11 +26,21 @@ class ImageProbe {
 }
 
 class InstalledEntry {
+    static void preflight(String release) {
+        var receipt = validateInstalledImage(release)
+        var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
+        if (prefix != receipt.prefix || release != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
+        var owner = readInstallationOwner(prefix)
+        var registered = false
+        for (var owned in owner.releases) { if (owned.id == receipt.id) { registered = true } }
+        if (!registered) { throw "installed image is not owned" }
+    }
+
     static void main(String[] arguments) {
         try {
             if (arguments.length < 1) { throw "missing installed image" }
             var release = arguments[0]
-            var receipt = json.decode<InstalledImage>(launchText(release + "/image.json"))
+            var receipt = readImageReceipt(release + "/image.json")
             var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
             if (prefix != receipt.prefix || release != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
             for (var path in listOf("state/kof-mut", "state/kof-mut/usage.lock", "state/kof-mut/manage.lock")) { rejectInstallLinks(prefix, path) }

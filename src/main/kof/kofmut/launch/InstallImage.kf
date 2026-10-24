@@ -9,6 +9,8 @@ import java.util.HexFormat
 
 record InstalledFile(String path, String hash)
 record PinnedDependency(String version, String javaVersion, String kof, String java, String jar, List<InstalledFile> contents)
+record ImageReceiptVersion(Int schemaVersion)
+record InstalledImageV2(Int schemaVersion, String prefix, String id, String inputs, PinnedDependency buildDependency, List<InstalledFile> runtimeSources, List<InstalledFile> files)
 record InstalledImage(Int schemaVersion, String prefix, String id, String inputs, PinnedDependency dependency, List<InstalledFile> files)
 
 String installedHash(String path) {
@@ -54,7 +56,7 @@ PinnedDependency pinInstallation() {
         contents.add(InstalledFile(path, installedHash(path)))
     }
     var javaVersion = System.getProperty("java.runtime.version")
-    return PinnedDependency("0.6.4", javaVersion, kof, java, jar, contents)
+    return PinnedDependency(System.getProperty("kofmut.kof.version"), javaVersion, kof, java, jar, contents)
 }
 
 void validatePinned(PinnedDependency dependency) {
@@ -65,7 +67,7 @@ void validatePinned(PinnedDependency dependency) {
 }
 
 void validateImageReceipt(InstalledImage receipt) {
-    if (receipt.schemaVersion != 1 || !receipt.id.matches("[a-f0-9]{64}(-[a-f0-9-]{36})?") || !receipt.inputs.matches("[a-f0-9]{64}") || receipt.files.size == 0 || receipt.dependency.contents.size != 5) { throw "invalid installed image receipt" }
+    if ((receipt.schemaVersion != 1 && receipt.schemaVersion != 2) || !receipt.id.matches("[a-f0-9]{64}(-[a-f0-9-]{36})?") || !receipt.inputs.matches("[a-f0-9]{64}") || receipt.files.size == 0 || receipt.dependency.contents.size != 5) { throw "invalid installed image receipt" }
     var names: List<String> = listOf()
     for (var entry in receipt.files) {
         if (entry.path == "" || entry.path.startsWith("/") || entry.path.contains("..") || entry.path == "image.json" || names.contains(entry.path) || !entry.hash.matches("[a-f0-9]{64}")) { throw "invalid installed inventory" }
@@ -74,18 +76,42 @@ void validateImageReceipt(InstalledImage receipt) {
     for (var required in listOf("VERSION", "LICENSE", "NOTICE", "launch.sh", "launch.bin", "classes.sha256", "classes/Default/Main.class", "classes/kofmut/launch/InstalledEntry.class", "classes/dev/kof/runtime/KofRuntime.class")) { if (!names.contains(required)) { throw "incomplete installed inventory: " + required } }
 }
 
+InstalledImage readImageReceipt(String path) {
+    var raw = launchText(path)
+    var version = json.decode<ImageReceiptVersion>(raw)
+    if (version.schemaVersion == 1) { return json.decode<InstalledImage>(raw) }
+    if (version.schemaVersion != 2) { throw "invalid installed image receipt schemaVersion" }
+    var current = json.decode<InstalledImageV2>(raw)
+    if (current.runtimeSources.size == 0) { throw "missing runtimeSources; reinstall to repair" }
+    var names: List<String> = listOf()
+    for (var source in current.runtimeSources) {
+        if (names.contains(source.path)) { throw "duplicate runtime source" }
+        var inventoried = false
+        for (var file in current.files) { if (file.path == source.path && file.hash == source.hash) { inventoried = true } }
+        if (!inventoried) { throw "invalid runtimeSources inventory; reinstall to repair" }
+        names.add(source.path)
+    }
+    for (var required in listOf("src/main/kof/kofmut/Main.kf", "src/main/kof/kofmut/CompatibilityProbe.kf", "src/main/kof/kofmut/launch/Compatibility.kf", "scripts/launch", "scripts/supervise", "scripts/bootstrap/Launch.kf", "scripts/installed-launch", "VERSION", "kof.toml")) {
+        if (!names.contains(required)) { throw "incomplete runtimeSources: " + required + "; reinstall to repair" }
+    }
+    return InstalledImage(2, current.prefix, current.id, current.inputs, current.buildDependency, current.files)
+}
+
 InstalledImage validateInstalledImage(String release) {
-    var receipt = json.decode<InstalledImage>(launchText(release + "/image.json"))
+    var receipt = readImageReceipt(release + "/image.json")
     validateImageReceipt(receipt)
     if (!new java.io.File(release + "/launch.sh").canExecute()) { throw "installed launcher is not executable; reinstall to repair" }
     var names: List<String> = listOf()
     for (var entry in receipt.files) {
         rejectInstallLinks(release, entry.path)
-        if (!File(release + "/" + entry.path).isFile() || installedHash(release + "/" + entry.path) != entry.hash) { throw "invalid installed image: " + entry.path + "; reinstall to repair" }
+        if (!File(release + "/" + entry.path).isFile() || installedHash(release + "/" + entry.path) != entry.hash) {
+            if (receipt.schemaVersion == 2 && (entry.path.startsWith("src/main/kof/") || entry.path.startsWith("scripts/") || entry.path == "VERSION" || entry.path == "kof.toml")) { throw "invalid installed runtime source: " + entry.path + "; reinstall to repair the installation" }
+            throw "invalid installed image: " + entry.path + "; reinstall to repair"
+        }
         names.add(entry.path)
     }
     for (var path in installedFiles(release + "/classes")) { if (!names.contains(path.substring(release.length() + 1))) { throw "untracked class in installed image" } }
-    validatePinned(receipt.dependency)
+    if (receipt.schemaVersion == 1) { validatePinned(receipt.dependency) }
     return receipt
 }
 

@@ -34,7 +34,7 @@ class RuntimeEntry {
         try {
             var raw = launchText(context + "/info.json")
             var installation = json.decode<LaunchInstallation>(raw)
-            if (installation.kof != "0.6.4" || installation.compiler != "0.6.4" || installation.runtime != "0.6.4" || installation.stdlib != "0.6.4") { throw "this build requires Kof/compiler/runtime/stdlib 0.6.4" }
+            if (installation.kof == "" || installation.compiler != installation.kof || installation.runtime != installation.kof || installation.stdlib != installation.kof) { throw "incoherent Kof/compiler/runtime/stdlib versions" }
             if (installation.os != "linux" || !installation.embeddedJdk) { throw "this build requires the Linux distribution with its embedded JDK" }
             var distribution = new java.io.File(installation.install).getCanonicalPath()
             var jar = distribution + "/lib/kof.jar"
