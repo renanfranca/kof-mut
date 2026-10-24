@@ -602,7 +602,7 @@ M6.4 runs focused compatibility suites and scripts/check with both real installa
 - [x] M6.1: preparation and compatibility; foundation/lifecycle evidence recorded below. Final acceptance remains M6.4.
 - [x] M6.2: source installation, separate state, legacy receipt management and preflight preservation. Final matrix remains M6.4.
 - [x] M6.3: visibility, fast informational commands, actual frontend identity and bilingual policy. Final frozen-copy checks remain M6.4.
-- [x] M6.4: validation, performance and acceptance evidence; C1–C10 accepted below and in the final report.
+- [x] M6.4: historical acceptance retained below; C7 and final acceptance revalidated by M6R on 2026-10-24.
 
 ### Validation
 
@@ -687,3 +687,61 @@ Criterion proofs include actual receipt 1 migration without rewriting its bytes 
 Performance ran only after all suites stopped, against a32a88bab05971b7a605f1bca8cd3aa00b5290bc with the same real 0.6.4/host: three blocks of eleven alternating pairs per source/installed version/empty-scope case, 264 total samples, 33 per variant/case. Warm monotonic medians base→M6 in ms: checkout version 703.5→693.2, checkout empty scope 708.8→1525.1 (+115.2%); installed version 1611.7→1672.1 (+3.8%), installed empty scope 1631.5→2035.9 (+24.8%). Initial M6 empty-scope preparation/evaluation was 12.829/13.336 monotonic seconds for checkout/installed, with candidate creation/compilation 2.258/2.275 and checks/final integrity/publication 9.156/9.156 seconds. No numeric regression threshold was applied. Wall time includes intermittent differences absent from monotonic readings; installed empty-scope wall p95 is 5613.3 ms versus monotonic 2073.6 ms. Both clocks/raw samples are retained; the cause is unknown and no timing attribution is invented.
 
 The final audit verifies exact delivered source/diagnostic/benchmark runtime hashes, raw sample pairing/order, readonly installed inputs, original ExecPlan as an exact prefix, all 26 historical validation files unchanged, actual Kof/JDK fingerprints/local Kof sources unchanged, no real user KofMut installation created, eight public documents/104 links with old headings preserved, no task processes remaining and a clean diff check. `.agent/validation/kofmut-m6.sha256` identifies this delivered tree. Sources/checks are packaged, external Kof/JDK are not; future combinations still require their own operational approval and active concrete runtimes must remain intact. Sensor work and the historical real-project ninety second target remain deferred. No commits, worktrees, subagents, remotes, publication, Kof changes or Kof updates were performed.
+
+
+# M6R: protect evaluated inputs and diagnose startup
+
+## Purpose and success
+
+Repair installed state paths that follow symbolic links into an evaluated project, then measure recurring startup cost. Optimization requires a later user decision. Historical M6 evidence remains historical; C7 and final M6.4 acceptance are reopened.
+
+## Context and limits
+
+Authorized base `03bc7c003524d3c0123be5ebd1d543b5df295a99`, existing `kofmut-frontend` branch, initially clean. Preserve PATH selection, content identities, behavioral approvals, deadlines, CLI and JSON contracts. Use synthetic disposable projects, Kof behavioral tests and local Kof sources. No Kof changes/downloads, worktrees, subagents, commits or publication. Logs: `.agent/tmp/m6r/`; new evidence: `.agent/validation/kofmut-m6r.md`.
+
+## Milestones
+
+M6R.1: first reproduce the cold `compatibility -> project/src` failure in `src/test/kof/kofmut/Install.kf` with tag `state-preservation`. Inventory files, empty directories, links, bytes and permissions. Guard real destinations even outside the prefix, refuse symlink components including nested cache files before cache reads or state effects at shell, bootstrap, preflight and coordinator boundaries. Exit 2 with offending path/cause on stderr and evidence in a safe temporary context. Preserve links and existing overlap/configuration refusals.
+
+M6R.2: strengthen warm approval journeys for bootstrap, images, approvals, locks and logs, valid and broken links and command canaries. Remove only the invalid link, recover a real detected evaluation and silently reuse approval with compilation refused. Validate real 0.6.4 and 0.6.6, readonly packages, removed checkout, spaces, no Python, concurrency, cancellation, updates and uninstall. Update `docs/cli.md` and `docs/cli.pt_BR.md` recovery guidance.
+
+M6R.3: after suites, compare base and corrected disposable snapshots using real 0.6.6 on this host. For source/installed `--version` and empty scope, use three blocks of eleven alternating pairs, raw monotonic/wall samples, median and nearest-rank p95. Measure cold preparation separately. Trace separately with strace and temporary timers in disposable copies; distinguish Java processes, hashes, package integrity, approval lookup and application entry. Record demonstrated contributions, unexplained costs and a next-work recommendation without removing checks or adding a public profiler.
+
+## Progress
+
+- [x] M6R.1: failing reproduction and corrected cold/warm link protection; complete recovery and matrix evidence recorded below.
+- [x] M6R.2: recovery, regressions and bilingual documentation validated on both real distributions; independent raw/direct-boundary proofs complete.
+- [x] M6R.3: measured performance diagnosis recorded, including raw pairs, both clocks, separate tracing/timers, lifecycle probe, unknowns and next-work recommendation.
+
+## Validation
+
+For each real Kof distribution first on PATH: `kof test src/test/kof/kofmut/Install.kf --tag state-preservation`, `kof test src/test/kof/kofmut/Install.kf --tag compatibility`, `./scripts/check`. Run broad checks after stabilization and performance afterward. Independently audit test expectations and assertion strength. Record command, result and artifact per criterion; gaps remain pending.
+
+C1: cold external project and writable source link, exit 2 with complete unchanged inventory and red evidence on base. C2: warm nested bootstrap/images/approved/locks/log links rejected before project canaries, reports or new approval. C3: valid/broken links and target/package/receipts/healthy approvals unchanged, precise diagnostic. C4: unlink only, detected evaluation JSON v1/actual kofVersion, then silent reuse despite compiler refusal. C5: direct overlap, invalid configuration and existing normal/concurrent/management/signal contracts pass both real distributions. C6: raw paired samples, environment/source/tool hashes, separate traces and explicit limits support diagnosis without an acceleration promise.
+
+
+### M6R.1 boundary (2026-10-24)
+
+`red.log` on unchanged production base reproduced a modified external project after the cold compatibility symlink. `base-red/` is an ordinary `git archive 03bc7c0` extraction, not a worktree; `red-warm.log` also rejects the old behavior after a warm bootstrap link: it proceeds to project baseline instead of refusing the named link. `green-cold-2.log` passes the cold refusal; `green-nested.log` passes both initial public journeys (56685 ms), including sixteen warm link locations, full inventories, canaries and silent readonly/checkout-removed recovery with compilation refused. An initial compile attempt exposed file-based Kof import resolution; the preflight calls its already imported InstalledEntry boundary, with no new module or Kof changes.
+
+Protection now validates lexical components and existing managed descendants before executable-cache consultation, bootstrap writes/removal and coordinator evidence/approval/image operations. InstalledPreflight no longer skips real-destination checks merely because the project is outside state. Existing symlinks, including broken ones, are retained; early errors retain the offending cause in a private temporary context outside rejected state. The usage lease bridge checks ancestors before opening its descriptor. The scan is deliberately conservative across generated cache/log subtrees. It detects existing links, not an adversarial concurrent replacement between checking and using a path; exclusive filesystem ownership remains required during manual repair. M6R.2 expands metadata/log-file cases and cold recovery and runs the complete two-version matrix before final acceptance.
+
+
+### M6R.2 boundary (2026-10-24)
+
+Both real distributions passed the exact `Install.kf --tag state-preservation` (3/0) and `--tag compatibility` (7/0) commands, then `./scripts/check` (29 CLI, 44 execution, 27 installation and 15 frontend contracts; exit 0). Full checks took 2403.156/2363.203 monotonic seconds for 0.6.4/0.6.6, with 76 input files byte/mode identical in each disposable checkout with spaces and PATH without Python. Source/test/runtime bytes remain identical to those snapshots. The later documentation-only delta is one M6R evidence-link paragraph per CLI guide; independent link/heading/recovery audits pass, and final installed examples use these final guide bytes.
+
+`installed-acceptance-<version>.json` proves both readonly installed cycles with deleted checkout: detected/survived/invalid/equivalent exit 0/1/3/1, JSON v1, actual frontend, expected counts, unchanged payload and evaluated projects. After restoring owner write permissions, uninstall succeeds while retaining generated state and user targets. `direct-preflight/coordinator-<version>.*` reject a nested state link independently of shell validation, preserving prefix/target inventories and retaining actual coordinator evidence in the private context. `direct-source-bootstrap.*` independently proves the standalone Kof bootstrap refuses a linked cache without changing its target.
+
+`raw-cold-base/new-before/after.json` and `raw-cold-summary.json` retain complete inspectable inventories for the original cold external-src scenario: base adds state entries and returns 3/no_scope; the correction returns 2, creates no report and leaves the full project inventory identical. The 22-location warm matrix also checks precise link text/target, valid/broken links, package/receipt/approval/report inventories, command canaries and actual retained failure cause. Cold recovery unlinks only the invalid link, completes detected with one killed mutant and actual kofVersion, then reuses approval with compilation refused. Historical validation files remain untouched. Final acceptance/C6 still awaits performance diagnosis.
+
+
+### M6R.3 boundary and final acceptance (2026-10-24)
+
+C1–C6 are accepted in `.agent/validation/kofmut-m6r.md`; C7 and final M6.4 acceptance are revalidated. All suites finished before performance. Against exact base 03bc7c0 and real Kof 0.6.6 on the same host, three blocks of eleven alternating pairs per source/installed version/empty case produced 264 samples, 33 per variant/case, retaining monotonic and wall clocks and nearest-rank p95. Warm monotonic medians base → fix: checkout version 689.1 → 709.8 ms (+3.0%), checkout empty 1516.0 → 1545.1 (+1.9%), installed version 1677.2 → 1743.2 (+3.9%), installed empty 2042.1 → 2127.4 (+4.2%). No numeric acceptance threshold or acceleration promise. Twelve samples have approximately 3.6 s wall-only discrepancies; all remain in raw data and wall statistics, with cause unknown.
+
+Separate first app-mode version preparation cost 5.093/6.415 monotonic seconds for checkout/installed. First empty scope after that bootstrap cost 12.319/13.353 seconds, including candidate copy/compile 2.236/2.339 and checks/final integrity/publication 8.575/8.927 seconds. These are single observations with OS/installation-mode cache caveats, not percentile estimates.
+
+Sixteen process traces prove 3 JVMs for source version, 4 for source empty and 5 for installed version/empty, including the Kof launcher's Java version probe and info. Twenty-four separate untraced diagnostic calls locate fingerprints at 330–388 ms, reference lookup below 1 ms, approval/class validation 14–21 ms, installed coordinator package validation about 66–67 ms and a recurring 313–317 ms return/termination interval after the last preflight/handoff markers. These nested/instrumented phases are not an additive decomposition of benchmark latency. The same-JDK/classpath standalone probe is 17.3 ms without generated runtime load and 411.5 ms with KofRuntime loaded, with 324.1 ms outside its marked main body. The internal cause of that tail remains unknown; no Kof change was made. Recommend isolating runtime lifecycle work before evaluating a KofMut JVM-consolidation prototype that preserves every current check, lease, signal and deadline boundary. Optimization remains a later user decision.
+
+Final audit verifies exact production/test bytes against both full source checkpoints, measured runtime identities and installed receipts, raw pair order and both-clock quantiles, 28 preserved historical validation files, unchanged selected Kof fingerprints/local Kof head/status, no product profiling interface or remaining task JVM and clean diff check. EN/PT recovery and evidence links preserve headings/navigation. New evidence and manifest are `.agent/validation/kofmut-m6r.md` and `.agent/validation/kofmut-m6r.sha256`; all raw logs/scripts remain in `.agent/tmp/m6r/`. Existing-link checks do not claim atomic defense against hostile concurrent replacement; earlier contaminated synthetic inputs remain preserved for inspection. No commits, worktrees, subagents, remotes, publications or Kof changes/updates were performed.

@@ -5,6 +5,7 @@ fail() {
     local detail=()
     if [[ -n "${KOF_MUT_CONTEXT:-}" && -d "$KOF_MUT_CONTEXT" ]]; then
         evidence="$KOF_MUT_CONTEXT"
+        printf '%s\n' "$cause" > "$KOF_MUT_CONTEXT/launch-failure"
         if [[ -f "$KOF_MUT_CONTEXT/preparation-detail" ]]; then
             while IFS= read -r -d '' token; do detail+=("$token"); done < "$KOF_MUT_CONTEXT/preparation-detail"
             version="${detail[0]:-unknown}"; stage="${detail[1]:-bootstrap}"
@@ -91,6 +92,26 @@ if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
     KOF_MUT_PREFIX="$(dirname -- "$(dirname -- "$(dirname -- "$(dirname -- "$KOF_MUT_ROOT")")")")"
     KOF_MUT_STATE="$KOF_MUT_PREFIX/state/kof-mut/compatibility"
     KOF_MUT_CACHE="$KOF_MUT_STATE/bootstrap"
+fi
+check_state_path() {
+    local path="$1" current="$1"
+    while [[ "$current" != / && -n "$current" ]]; do
+        [[ ! -L "$current" ]] || fail "managed path contains a symbolic link: $current"
+        current="${current%/*}"
+    done
+    if [[ -d "$path" ]]; then
+        timeout --foreground --kill-after=2 10 find -P "$path" -type l -print0 -quit > "$KOF_MUT_CONTEXT/state-links" || fail "cannot inspect managed state: $path"
+        local link=""
+        if IFS= read -r -d '' link < "$KOF_MUT_CONTEXT/state-links"; then fail "managed path contains a symbolic link: $link"; fi
+    fi
+}
+if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+    for KOF_MUT_STATE_PATH in compatibility logs owner.json usage.lock manage.lock; do
+        check_state_path "$KOF_MUT_PREFIX/state/kof-mut/$KOF_MUT_STATE_PATH"
+    done
+else
+    check_state_path "$KOF_MUT_CACHE"
+    check_state_path "$KOF_MUT_STATE"
 fi
 printf '%s\n' "$KOF_MUT_STATE" > "$KOF_MUT_CONTEXT/compatibility-state"
 printf '%s\n' "$KOF_MUT_STARTED" > "$KOF_MUT_CONTEXT/started"

@@ -22,7 +22,11 @@ class InstalledPreflight {
     }
 
     static void main(String[] arguments) {
-        try { InstalledEntry.preflight(arguments[0]) }
+        try {
+            if (arguments.length != 3) { throw "invalid installed preflight context" }
+            InstalledEntry.guardState(arguments[1])
+            InstalledEntry.preflight(arguments[0])
+        }
         catch (Exception error) { System.err.println("kof-mut: Kof " + KofVersion.version() + "; preparation package integrity failed: " + error); process.exit(2) }
         try {
             if (arguments.length != 3) { throw "invalid installed preflight context" }
@@ -33,8 +37,7 @@ class InstalledPreflight {
             for (var i = 0; i < forwarded.length; i++) { forwarded[i] = parts[i + 1] }
             if (forwarded.length == 0 || forwarded[0] != "run") { return }
             var options = runOptions(forwarded)
-            var state = new java.io.File(arguments[1] + "/state/kof-mut").getCanonicalPath()
-            if (!pathsOverlap(options.project, state)) { return }
+            var state = arguments[1] + "/state/kof-mut"
             protectRunOutput(options)
             var config = InstalledPreflight.guardedConfig(options, arguments[0])
             for (var destination in listOf(state + "/logs", state + "/compatibility")) {

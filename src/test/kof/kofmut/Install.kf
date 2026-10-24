@@ -905,7 +905,7 @@ test "reinstallation preserves an unowned release directory instead of claiming 
     assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0\n")
 }
 
-test "the first installed invocation refuses overlapping logs without creating files in inputs", "install-output" {
+test "the first installed invocation refuses overlapping logs without creating files in inputs", "install-output", "state-preservation" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -1151,4 +1151,132 @@ test "compatibility command limits do not truncate the existing installer prepar
         if (child.isAlive()) { child.destroy(); child.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
         if (child.isAlive()) { child.destroyForcibly() }
     }
+}
+
+
+String preservationInventory(String root) {
+    var result = process.run("find", "-P", root, "-printf", "%y %m %p %l\n", "-type", "f", "-exec", "sha256sum", "{}", ";")
+    assert(result.exitCode == 0)
+    return result.stdout
+}
+
+test "cold installed state never follows a compatibility link into an external project", "state-preservation" {
+    var journey = installJourney()
+    var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
+    installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var project = journey.base + "/external evaluated project"
+    assert(process.run("cp", "-a", "fixtures/detected", project).exitCode == 0)
+    assert(Directory(project + "/src/empty directory").createDirectories())
+    assert(process.run("ln", "-s", "math/Calc.kf", project + "/src/source link").exitCode == 0)
+    assert(File(project + "/empty.json").writeText("[]"))
+    var state = journey.prefix + "/state/kof-mut/compatibility"
+    assert(!File(state).exists())
+    assert(process.run("ln", "-s", project + "/src", state).exitCode == 0)
+    var before = preservationInventory(project)
+    var packageBefore = preservationInventory(journey.prefix + "/share")
+    var ownerBefore = installText(journey.prefix + "/state/kof-mut/owner.json")
+
+    var command = installEnvironment(journey)
+    command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(project); command.add("--files"); command.add(project + "/empty.json"); command.add("--report-dir"); command.add(journey.base + "/reports")
+    var refused = shell.runWith(command, journey.base, mapOf())
+
+    installAssertEvidence(preservationInventory(project) == before, "state preparation changed the evaluated project: " + refused.stdout + refused.stderr)
+    installAssertEvidence(refused.exitCode == 2 && refused.stderr.contains(state) && refused.stderr.contains("symbolic link"), refused.stdout + refused.stderr)
+    assert(Files.isSymbolicLink(new java.io.File(state).toPath()))
+    assert(preservationInventory(journey.prefix + "/share") == packageBefore)
+    assert(installText(journey.prefix + "/state/kof-mut/owner.json").equals(ownerBefore))
+    assert(!File(journey.base + "/reports").exists())
+    assert(process.run("unlink", state).exitCode == 0)
+    command.set(command.size - 3, project + "/scope.json")
+    var recovered = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(recovered.exitCode == 0 && recovered.stderr.contains("checking compatibility"), recovered.stdout + recovered.stderr)
+    assert(recovered.stdout.contains("killed=1 survived=0"))
+    var report = ""
+    for (var line in recovered.stdout.split("\n")) { if (line.startsWith("reportPath=")) { report = json.decode<String>(line.substring(11)) } }
+    var result = json.decode<CompatibilityResult>(installText(report))
+    var expected = json.decode<CompatibilityVersion>(process.run("kof", "info", "--json").stdout)
+    assert(result.status == "complete" && result.kofVersion == expected.kof)
+    assert(installText(report).contains("\"schemaVersion\":1"))
+    var reused = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    installAssertEvidence(reused.exitCode == 0 && !reused.stderr.contains("checking compatibility") && !reused.stderr.contains("preparing application"), reused.stdout + reused.stderr)
+    assert(preservationInventory(project) == before)
+}
+
+
+test "warm installed state refuses nested links without damage and recovers by unlinking only", "state-preservation" {
+    var journey = installJourney()
+    var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
+    installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var project = journey.base + "/external evaluated project"
+    assert(process.run("cp", "-a", "fixtures/detected", project).exitCode == 0)
+    var command = installEnvironment(journey)
+    command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(project); command.add("--files"); command.add(project + "/scope.json"); command.add("--report-dir"); command.add(journey.base + "/reports")
+    var first = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(first.exitCode == 0, first.stdout + first.stderr)
+    var state = journey.prefix + "/state/kof-mut"
+    var cache = state + "/compatibility"
+    var bootstrap = cache + "/bootstrap"
+    var location = Directory(bootstrap + "/locations").list().get(0)
+    var bootstrapImage = Directory(bootstrap + "/images").list().get(0)
+    var image = Directory(cache + "/images").list().get(0)
+    var approval = Directory(cache + "/approved").list().get(0)
+    var lock = Directory(cache + "/locks").list().get(0)
+    var preparationLog = process.run("find", "-P", cache + "/logs", "-type", "f", "-print", "-quit").stdout.trim()
+    var applicationLog = process.run("find", "-P", state + "/logs", "-type", "f", "-print", "-quit").stdout.trim()
+    assert(preparationLog != "" && applicationLog != "")
+    var marker = journey.base + "/project-command-must-not-run"
+    var config = installText(project + "/kof-mut.json")
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf("touch", marker), listOf("touch", marker), 10000, 0))))
+    var targetFile = journey.base + "/target-file"
+    assert(File(targetFile).writeText("target bytes stay unchanged"))
+    var paths = listOf(cache, bootstrap, bootstrap + "/locations", bootstrap + "/locations/" + location, bootstrap + "/images", bootstrap + "/images/" + bootstrapImage + "/identity", bootstrap + "/build.lock", cache + "/images", cache + "/images/" + image + "/classes/Default/Main.class", cache + "/images/" + image + "/approval.json", cache + "/approved", cache + "/approved/" + approval, cache + "/locks", cache + "/locks/" + lock, cache + "/logs", state + "/logs", cache + "/logs/broken-link", preparationLog, applicationLog, state + "/owner.json", state + "/usage.lock", state + "/manage.lock")
+    for (var path in paths) {
+        var existed = File(path).exists()
+        var directory = File(path).isDirectory()
+        if (existed) { assert(process.run("mv", path, journey.base + "/held-entry").exitCode == 0) }
+        var target = targetFile
+        if (directory) { target = project + "/src" }
+        if (!existed) { target = journey.base + "/missing-target" }
+        assert(process.run("ln", "-s", target, path).exitCode == 0)
+        var prefixBefore = preservationInventory(journey.prefix)
+        var projectBefore = preservationInventory(project)
+        var reportsBefore = preservationInventory(journey.base + "/reports")
+
+        var refused = shell.runWith(command, journey.base, mapOf())
+
+        installAssertEvidence(refused.exitCode == 2 && refused.stderr.contains(path) && refused.stderr.contains("symbolic link"), path + "\n" + refused.stdout + refused.stderr)
+        assert(!File(marker).exists())
+        assert(preservationInventory(journey.prefix) == prefixBefore, "package, receipts, links and approvals must remain unchanged")
+        assert(preservationInventory(project) == projectBefore, "project entries, bytes and permissions must remain unchanged")
+        assert(preservationInventory(journey.base + "/reports") == reportsBefore, "refusal must not publish a report")
+        assert(installText(targetFile) == "target bytes stay unchanged")
+        assert(!File(journey.base + "/missing-target").exists())
+        assert(Files.isSymbolicLink(new java.io.File(path).toPath()))
+        assert(Files.readSymbolicLink(new java.io.File(path).toPath()).toString() == target)
+        var evidenceMarker = "; evidence: "
+        assert(refused.stderr.contains(evidenceMarker))
+        var evidence = refused.stderr.substring(refused.stderr.lastIndexOf(evidenceMarker) + evidenceMarker.length()).trim()
+        assert(File(evidence).isDirectory())
+        assert(!evidence.startsWith(journey.prefix + "/"))
+        assert(installText(evidence + "/launch-failure").contains(path))
+        assert(process.run("unlink", path).exitCode == 0)
+        if (existed) { assert(process.run("mv", journey.base + "/held-entry", path).exitCode == 0) }
+    }
+    assert(File(project + "/kof-mut.json").writeText(config))
+    assert(process.run("chmod", "-R", "a-w", journey.prefix + "/share/kof-mut/releases").exitCode == 0)
+    assert(Directory(journey.checkout).delete())
+    var readonlyBefore = preservationInventory(journey.prefix + "/share")
+    try {
+        var recovered = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+        installAssertEvidence(recovered.exitCode == 0 && !recovered.stderr.contains("checking compatibility") && !recovered.stderr.contains("preparing application"), recovered.stdout + recovered.stderr)
+        var report = ""
+        for (var line in recovered.stdout.split("\n")) { if (line.startsWith("reportPath=")) { report = json.decode<String>(line.substring(11)) } }
+        var result = json.decode<CompatibilityResult>(installText(report))
+        var expected = json.decode<CompatibilityVersion>(process.run("kof", "info", "--json").stdout)
+        assert(result.status == "complete" && result.kofVersion == expected.kof)
+        assert(installText(report).contains("\"schemaVersion\":1"))
+        var repeated = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+        installAssertEvidence(repeated.exitCode == 0 && !repeated.stderr.contains("checking compatibility"), repeated.stdout + repeated.stderr)
+        assert(preservationInventory(journey.prefix + "/share") == readonlyBefore)
+    } finally { assert(process.run("chmod", "-R", "u+w", journey.prefix + "/share/kof-mut/releases").exitCode == 0) }
 }

@@ -154,8 +154,27 @@ class CompatibilityWork implements Runnable {
     void run() {
         cancelled.set(true)
         lock.lock()
-        try { stopChildren(); if (candidate != "" && File(candidate).exists()) { Directory(candidate).delete() } } catch (Exception error) { System.err.println("kof-mut: preparation cleanup failed: " + error) }
+        try { stopChildren(); if (candidate != "" && File(candidate).exists()) { CompatibilityState.guard(candidate); Directory(candidate).delete() } } catch (Exception error) { System.err.println("kof-mut: preparation cleanup failed: " + error) }
         finally { lock.unlock() }
+    }
+}
+
+class CompatibilityState {
+    static void guard(String path) {
+        var current = new java.io.File(path).getAbsolutePath()
+        while (current != "") {
+            if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+            var separator = current.lastIndexOf("/")
+            if (separator <= 0) { break }
+            current = current.substring(0, separator)
+        }
+        if (File(path).isDirectory()) {
+            for (var name in Directory(path).list()) { CompatibilityState.guard(path + "/" + name) }
+        }
+    }
+
+    static void installed(String prefix) {
+        for (var path in listOf("compatibility", "logs", "owner.json", "usage.lock", "manage.lock")) { CompatibilityState.guard(prefix + "/state/kof-mut/" + path) }
     }
 }
 
@@ -239,6 +258,7 @@ void compatibilityCopy(String source, String target, String expected) {
 }
 
 String prepareCompatibility(String root, String kof, CompatibilityInstallation installation, String state, CompatibilityWork work) {
+    CompatibilityState.guard(state)
     work.active()
     var inputs = compatibilityInputs(root, kof, installation, work)
     var identity = crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
@@ -301,7 +321,7 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
                 } finally { work.lock.unlock() }
                 System.err.println("kof-mut: ready; starting evaluation.")
                 return image
-            } finally { if (File(candidate).exists()) { Directory(candidate).delete() } }
+            } finally { if (File(candidate).exists()) { CompatibilityState.guard(candidate); Directory(candidate).delete() } }
         } finally { lease.release() }
     } finally { channel.close(); file.close() }
 }
@@ -328,6 +348,7 @@ class CompatibilityApplication {
                 var receipt = json.decode<CompatibilityPackage>(compatibilityText(root + "/image.json"))
                 var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
                 if (prefix != receipt.prefix || root != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
+                CompatibilityState.installed(prefix)
                 compatibilityNoLinks(prefix, "state/kof-mut/usage.lock")
                 var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "r")
                 var channel = usage.getChannel()
@@ -355,6 +376,11 @@ void compatibilityDispatch(String[] arguments) {
         var context = arguments[3]
         var state = compatibilityText(context + "/compatibility-state").trim()
         var started = compatibilityText(context + "/started").trim().toLong()
+        CompatibilityState.guard(state)
+        if (File(root + "/image.json").isFile()) {
+            var prefix = new java.io.File(root).getParentFile().getParentFile().getParentFile().getParent()
+            CompatibilityState.installed(prefix)
+        }
         var token = UUID.randomUUID()
         var evidence = root + "/.agent/tmp/m6/" + token.toString()
         if (File(root + "/image.json").isFile()) { evidence = state + "/logs/" + token.toString() }
@@ -427,6 +453,7 @@ class CompatibilityEntry {
             var uninstall = arguments.length > 5 && arguments[5] == "uninstall"
             if (File(root + "/image.json").isFile() && !uninstall) {
                 var prefix = new java.io.File(root).getParentFile().getParentFile().getParentFile().getParent()
+                CompatibilityState.installed(prefix)
                 compatibilityNoLinks(prefix, "state/kof-mut/usage.lock")
                 var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "r")
                 var channel = usage.getChannel()

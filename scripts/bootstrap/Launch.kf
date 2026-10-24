@@ -94,10 +94,25 @@ void publishImage(String root, String kof, String jar, List<SourceSnapshot> sour
         if (jarHash(jar) != expectedJar) { throw "Kof jar changed during compilation" }
         writeChecksums(temporary)
         if (!File(temporary + "/identity").writeText(identity)) { throw "cannot write image identity" }
+        guardStatePath(image)
         if (File(image).exists() && !Directory(image).delete()) { throw "cannot remove incomplete cache entry" }
         var published = Files.move(temporaryPath, new java.io.File(image).toPath(), StandardCopyOption.ATOMIC_MOVE)
     } finally {
+        guardStatePath(temporary)
         if (File(temporary).exists() && !Directory(temporary).delete()) { throw "cannot clean compilation directory" }
+    }
+}
+
+void guardStatePath(String path) {
+    var current = new java.io.File(path).getAbsolutePath()
+    while (current != "") {
+        if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+        var separator = current.lastIndexOf("/")
+        if (separator <= 0) { break }
+        current = current.substring(0, separator)
+    }
+    if (File(path).isDirectory()) {
+        for (var name in Directory(path).list()) { guardStatePath(path + "/" + name) }
     }
 }
 
@@ -142,6 +157,8 @@ void prepare(String root, String kof, String mode, String context) {
     }
     var preliminary = crypto.sha256(request)
     var cache = requiredText(context + "/cache").trim()
+    guardStatePath(cache)
+    guardStatePath(requiredText(context + "/compatibility-state").trim())
     if (!Directory(cache + "/locations").createDirectories() && !File(cache + "/locations").isDirectory()) { throw "cannot create location cache" }
     if (!Directory(cache + "/images").createDirectories() && !File(cache + "/images").isDirectory()) { throw "cannot create image cache" }
     var expectedJar = jarHash(jar)

@@ -26,6 +26,8 @@ class ImageProbe {
 }
 
 class InstalledEntry {
+    static void guardState(String prefix) { CompatibilityState.installed(prefix) }
+
     static void preflight(String release) {
         var receipt = validateInstalledImage(release)
         var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
