@@ -9,7 +9,7 @@ O KofMut avalia testes Kof alterando um token de produção por vez em cópias d
 ## Requisitos
 
 - Linux, Bash 4.4 ou posterior e a distribuição Linux oficial **Kof 0.6.4** no `PATH`, incluindo `lib/kof.jar` e seu JDK embutido.
-- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) e GNU diffutils (`cmp`).
+- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkfifo`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) e GNU diffutils (`cmp`).
 - `setsid` de util-linux, o comando externo `kill` e procfs em `/proc`. O lançador oficial do Kof também usa `sed` e `head`; a validação usa `ps`, `cp`, `ln`, `env` e `which`.
 - Checkout gravável para compilação e execução por fonte (`build/cache/` e `.agent/tmp/`), prefixo de instalação gravável e espaço temporário para cópias descartáveis dos projetos. Avaliações instaladas gravam logs no estado e dispensam o checkout.
 
@@ -38,9 +38,13 @@ O prefixo padrão é `$HOME/.local`. O instalador compila o checkout para o usu�
 ./install.sh --help
 ```
 
+Sem `--prefix`, HOME deve estar presente, não vazio e ser absoluto; caso contrário, a instalação retorna 2 com `HOME must be a non-empty absolute path when --prefix is omitted`. Um prefixo explícito funciona independentemente de HOME e pode ser relativo ao cwd do chamador. `--help` retorna 0 sem exigir HOME válido.
+
 A aplicação instalada funciona de qualquer diretório após a remoção do checkout e de seu cache de compilação. Use `kof-mut run --project my-project --files my-project/scope.json` com seu projeto configurado. A instalação do Kof selecionada durante a instalação deve continuar disponível e intacta: o KofMut fixa os caminhos canônicos do executável, Java e jar e confere seus conteúdos. Alterar o PATH depois não troca o frontend nem o Java do mutador. Os comandos do projeto continuam herdando o PATH e o ambiente originais do chamador.
 
 Para atualizar ou reparar uma imagem da aplicação, execute `./install.sh` novamente no checkout desejado, repetindo `--prefix` para um local personalizado. A preparação preserva a versão ativa; a ativação substitui `current` atomicamente após a validação. Inputs idênticos e íntegros reutilizam a imagem. Versões anteriores permanecem disponíveis até a desinstalação para que avaliações em andamento possam terminar. Recibo de propriedade inválido ou `bin/kof-mut` alheio é recusado sem sobrescrita; preserve esses arquivos e use outro prefixo se não for possível comprovar a propriedade.
+
+Mudanças detectadas nos inputs do checkout durante a preparação, incluindo arquivos adicionados ou removidos e alterações de conteúdo com timestamps preservados, abortam com exit 2 e `checkout changed during installation; retry`. A instalação anterior continua ativa. Conclua as mudanças no checkout e tente novamente. Uma mudança estável somente na documentação ou em `install.sh` atualiza o pacote reutilizando classes compiladas válidas.
 
 ```bash
 kof-mut uninstall
@@ -100,7 +104,7 @@ A [referência JSON v1](docs/report-format.pt_BR.md) concentra descoberta, todos
 
 ## Validação e próximos marcos
 
-`./scripts/check` executa contratos do lançador, testes Kof do ciclo de mutação, jornadas de instalação e asserções do frontend contra o jar instalado. Veja [evidência de instalação M5](.agent/validation/kofmut-m5.md) para aceitação de instalação, atualização, recuperação e desinstalação. Veja [evidência de aceitação M4](.agent/validation/kofmut-m4.md) e [plano de execução](EXECPLAN.md) para a entrega revisada do fonte e as pendências.
+`./scripts/check` executa contratos do lançador, testes Kof do ciclo de mutação, jornadas de instalação e asserções do frontend contra o jar instalado. Veja [evidência das correções M5](.agent/validation/kofmut-m5-corrections.md) para a aceitação atual do instalador e [evidência histórica de instalação M5](.agent/validation/kofmut-m5.md) para a validação original de instalação, atualização, recuperação e desinstalação. Veja [evidência de aceitação M4](.agent/validation/kofmut-m4.md) e [plano de execução](EXECPLAN.md) para a entrega revisada do fonte e as pendências.
 
 O M3F histórico avaliou `Background.kf` + `Meteor.kf` no SiFuture revisão `82111142c85f98b970ccd65fbf044e492d017729` com `commandTimeoutMs: 10000`, `budgetMs: 0` e `maxParallelMutants: 4`, sem prazo externo. A chamada completa levou **96.456 segundos**: `complete/1`, 42 candidatos avaliados, 29 `Killed`, 13 `Survived`, nenhum descarte ou resultado inconclusivo e 114 casos na baseline. É uma observação histórica de execução completa; a qualidade foi reprovada pelos sobreviventes. Não diagnostica equivalência ou cobertura nem promete latência. A meta histórica de desempenho de 90 segundos permanece **adiada e não atingida**; sensores e sua aceitação S1–S3 continuam pendentes.
 

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" > "$KOF_MUT_SCHEDULE_READY.pid"
+: > "$KOF_MUT_SCHEDULE_READY"
+while [[ ! -e "$KOF_MUT_SCHEDULE_READY.continue" ]]; do /bin/sleep 0.02; done
+exec /usr/bin/setsid "$@"

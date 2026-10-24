@@ -24,15 +24,38 @@ while IFS= read -r -d '' KOF_MUT_SOURCE; do
         KOF_MUT_INPUTS+=("$KOF_MUT_SOURCE")
     fi
 done < "$KOF_MUT_CONTEXT/sources"
-sha256sum -z -- "${KOF_MUT_INPUTS[@]}" > "$KOF_MUT_CONTEXT/hashes"
+KOF_MUT_CAPTURE=("${KOF_MUT_INPUTS[@]}")
+if [[ "$KOF_MUT_MODE" == install ]]; then
+    KOF_MUT_CAPTURE+=("$KOF_MUT_ROOT/install.sh" "$KOF_MUT_ROOT/scripts/installed-launch" "$KOF_MUT_ROOT/LICENSE" "$KOF_MUT_ROOT/NOTICE" "$KOF_MUT_ROOT/README.md" "$KOF_MUT_ROOT/README.pt_BR.md")
+    find "$KOF_MUT_ROOT/docs" -type f -print0 > "$KOF_MUT_CONTEXT/package-files"
+    find "$KOF_MUT_ROOT/src/main/kof" -type f ! -name '*.kf' -print0 >> "$KOF_MUT_CONTEXT/package-files"
+    while IFS= read -r -d '' KOF_MUT_SOURCE; do KOF_MUT_CAPTURE+=("$KOF_MUT_SOURCE"); done < "$KOF_MUT_CONTEXT/package-files"
+fi
+if ! sha256sum -z -- "${KOF_MUT_CAPTURE[@]}" > "$KOF_MUT_CONTEXT/hashes"; then
+    if [[ "$KOF_MUT_MODE" == install ]]; then fail 'checkout changed during installation; retry'; fi
+    fail 'launch preparation failed'
+fi
+declare -A KOF_MUT_HASHES
+while IFS= read -r -d '' KOF_MUT_HASH; do
+    KOF_MUT_HASHES["${KOF_MUT_HASH:66}"]="${KOF_MUT_HASH:0:64}"
+done < "$KOF_MUT_CONTEXT/hashes"
+if [[ "$KOF_MUT_MODE" == install ]]; then
+    printf '%s\0' "${KOF_MUT_CAPTURE[@]:1}" | LC_ALL=C sort -z > "$KOF_MUT_CONTEXT/package-files"
+    {
+        printf 'kofmut-package-v1\0'
+        while IFS= read -r -d '' KOF_MUT_SOURCE; do
+            printf '%s\0%s\0' "${KOF_MUT_SOURCE#"$KOF_MUT_ROOT/"}" "${KOF_MUT_HASHES[$KOF_MUT_SOURCE]}"
+        done < "$KOF_MUT_CONTEXT/package-files"
+    } > "$KOF_MUT_CONTEXT/package"
+fi
 {
     printf 'kofmut-request-v2\0%s\0%s\0%s\0' "$KOF_MUT_MODE" "$KOF_MUT_ROOT" "$KOF_MUT_KOF"
     # Preserve the raw JSON, including its final newline, in the identity.
     cat "$KOF_MUT_CONTEXT/info.json"
     printf '\0'
-    while IFS= read -r -d '' KOF_MUT_HASH; do
-        printf '%s\0%s\0' "${KOF_MUT_HASH:66}" "${KOF_MUT_HASH:0:64}"
-    done < "$KOF_MUT_CONTEXT/hashes"
+    for KOF_MUT_SOURCE in "${KOF_MUT_INPUTS[@]}"; do
+        printf '%s\0%s\0' "$KOF_MUT_SOURCE" "${KOF_MUT_HASHES[$KOF_MUT_SOURCE]}"
+    done
 } > "$KOF_MUT_CONTEXT/request"
 KOF_MUT_PRELIMINARY="$(sha256sum < "$KOF_MUT_CONTEXT/request")"
 KOF_MUT_PRELIMINARY="${KOF_MUT_PRELIMINARY:0:64}"

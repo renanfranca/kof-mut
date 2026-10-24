@@ -9,7 +9,7 @@ KofMut evaluates Kof tests by changing one production token at a time in disposa
 ## Requirements
 
 - Linux, Bash 4.4 or later and the official **Kof 0.6.4** Linux distribution on `PATH`, including `lib/kof.jar` and its embedded JDK.
-- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) and GNU diffutils (`cmp`).
+- GNU coreutils (`dirname`, `readlink`, `mktemp`, `mkfifo`, `mkdir`, `rmdir`, `rm`, `cat`, `sort`, `sha256sum`, `b2sum`), GNU findutils (`find`) and GNU diffutils (`cmp`).
 - `setsid` from util-linux, the external `kill` command and procfs at `/proc`. The official Kof launcher also uses `sed` and `head`; validation uses `ps`, `cp`, `ln`, `env` and `which`.
 - A writable checkout for building and source execution (`build/cache/` and `.agent/tmp/`), a writable installation prefix, and temporary disk space for disposable project copies. Installed evaluations write logs to state and do not need the checkout.
 
@@ -38,9 +38,13 @@ The default prefix is `$HOME/.local`. The installer builds the checkout for the 
 ./install.sh --help
 ```
 
+Without `--prefix`, HOME must be present, nonempty and absolute; otherwise installation returns 2 with `HOME must be a non-empty absolute path when --prefix is omitted`. An explicit prefix works independently of HOME and can be relative to the caller's cwd. `--help` returns 0 without requiring valid HOME.
+
 The installed application works from any directory after removing the checkout and its build cache. Use `kof-mut run --project my-project --files my-project/scope.json` with your configured project. The Kof installation selected during installation must remain available and unchanged: KofMut pins its canonical executable, Java and jar paths and checks their contents. Changing PATH later does not switch the mutator's frontend or Java. Project commands still inherit the caller's original PATH and environment.
 
 To update or repair an application image, run `./install.sh` again from the desired checkout, repeating `--prefix` for a custom location. Preparation preserves the active version; activation replaces `current` atomically after validation. Identical healthy inputs reuse the image. Earlier versions remain available until uninstall so ongoing evaluations can finish. An invalid ownership receipt or a foreign `bin/kof-mut` is refused rather than overwritten; preserve those files and use a fresh prefix if ownership cannot be established.
+
+Detected changes to checkout inputs during preparation, including added or removed files and content changes with preserved timestamps, abort with exit 2 and `checkout changed during installation; retry`. The previous installation stays active. Finish the checkout changes and retry. A stable change only to documentation or `install.sh` updates the package while reusing valid compiled classes.
 
 ```bash
 kof-mut uninstall
@@ -100,7 +104,7 @@ The [JSON v1 reference](docs/report-format.md) owns discovery, every field and n
 
 ## Validation and next milestones
 
-`./scripts/check` runs the launcher contracts, Kof mutation cycle tests, installation journeys and frontend assertions against the installed jar. See [M5 installation evidence](.agent/validation/kofmut-m5.md) for installation, update, recovery and uninstall acceptance. See [M4 acceptance evidence](.agent/validation/kofmut-m4.md) and the [execution plan](EXECPLAN.md) for the reviewed source delivery and remaining work.
+`./scripts/check` runs the launcher contracts, Kof mutation cycle tests, installation journeys and frontend assertions against the installed jar. See [M5 corrections evidence](.agent/validation/kofmut-m5-corrections.md) for current installer acceptance and [historical M5 installation evidence](.agent/validation/kofmut-m5.md) for the original installation, update, recovery and uninstall validation. See [M4 acceptance evidence](.agent/validation/kofmut-m4.md) and the [execution plan](EXECPLAN.md) for the reviewed source delivery and remaining work.
 
 Historical M3F evaluated `Background.kf` + `Meteor.kf` on SiFuture revision `82111142c85f98b970ccd65fbf044e492d017729` with `commandTimeoutMs: 10000`, `budgetMs: 0` and `maxParallelMutants: 4`, without an external deadline. The full invocation took **96.456 seconds**: `complete/1`, 42 evaluated candidates, 29 `Killed`, 13 `Survived`, no discards or inconclusive results, and 114 baseline cases. This is a historical observation of complete execution; quality failed because survivors remained. It does not diagnose equivalence or coverage or promise latency. The historical 90 second performance target remains **deferred and unmet**; sensors and their S1–S3 acceptance remain pending.
 

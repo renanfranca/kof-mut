@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$1" == run && "${KOF_MUT_TEST_RUN:-}" == block ]]; then
+    printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+    : > "$KOF_MUT_TEST_READY"
+    while [[ ! -e "$KOF_MUT_TEST_READY.continue" ]]; do /bin/sleep 0.02; done
+fi
 if [[ "${KOF_MUT_TEST_COMPILE:-}" == refuse && ( "$1" == run || "$1" == build ) ]]; then
     echo 'controlled toolchain refuses compilation' >&2
     exit 91

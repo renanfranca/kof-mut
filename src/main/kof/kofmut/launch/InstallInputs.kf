@@ -1,0 +1,68 @@
+package kofmut.launch
+
+import java.lang.Exception
+
+record CheckoutManifest(String compilation, List<InstalledFile> files)
+
+List<String> checkoutInputPaths(String root) {
+    var paths = listOf("install.sh", "scripts/launch", "scripts/installed-launch", "scripts/bootstrap/Launch.kf", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "LICENSE", "NOTICE", "README.md", "README.pt_BR.md")
+    for (var directory in listOf("src/main/kof", "docs")) {
+        for (var path in installedFiles(root + "/" + directory)) { paths.add(path.substring(root.length() + 1)) }
+    }
+    paths.sort()
+    return paths
+}
+
+String checkoutInputHash(CheckoutManifest manifest, String path) {
+    for (var entry in manifest.files) { if (entry.path == path) { return entry.hash } }
+    throw "incomplete installation context: " + path
+}
+
+CheckoutManifest readCheckoutManifest(String context, String root, String request) {
+    var raw = launchText(context + "/package")
+    var fields = raw.split("\0")
+    if (!raw.endsWith("\0") || fields.length < 3 || fields[0] != "kofmut-package-v1" || (fields.length - 1) % 2 != 0) { throw "invalid installation context" }
+    var files: List<InstalledFile> = listOf()
+    var names: List<String> = listOf()
+    for (var i = 1; i < fields.length; i = i + 2) {
+        var path = fields[i]
+        if (path == "" || path.startsWith("/") || path.contains("..") || names.contains(path) || !fields[i + 1].matches("[a-f0-9]{64}")) { throw "invalid installation context inventory" }
+        names.add(path)
+        files.add(InstalledFile(path, fields[i + 1]))
+    }
+    var manifest = CheckoutManifest(crypto.sha256(request), files)
+    var compilation = request.split("\0")
+    if ((compilation.length - 5) % 2 != 0) { throw "invalid compilation context" }
+    var sources: List<String> = listOf()
+    for (var i = 7; i < compilation.length; i = i + 2) {
+        if (!compilation[i].startsWith(root + "/")) { throw "invalid compilation context path" }
+        var path = compilation[i].substring(root.length() + 1)
+        if (checkoutInputHash(manifest, path) != compilation[i + 1]) { throw "installation and compilation inputs differ" }
+        if (path.startsWith("src/main/kof/") && path.endsWith(".kf")) { sources.add(path) }
+    }
+    for (var entry in files) {
+        if (entry.path.startsWith("src/main/kof/") && entry.path.endsWith(".kf") && !sources.contains(entry.path)) { throw "incomplete compilation context" }
+    }
+    return manifest
+}
+
+void validateCheckout(CheckoutManifest manifest, String root) {
+    try {
+        var actual = checkoutInputPaths(root)
+        var expected: List<String> = listOf()
+        for (var entry in manifest.files) {
+            expected.add(entry.path)
+            if (installedHash(root + "/" + entry.path) != entry.hash) { throw "changed input" }
+        }
+        expected.sort()
+        if (json.encode(actual) != json.encode(expected)) { throw "changed input inventory" }
+    } catch (Exception error) { throw "checkout changed during installation; retry" }
+}
+
+void copyCheckoutInput(String root, String path, String target, CheckoutManifest manifest) {
+    try {
+        var expected = checkoutInputHash(manifest, path)
+        installCopy(root + "/" + path, target)
+        if (installedHash(target) != expected) { throw "changed copied input" }
+    } catch (Exception error) { throw "checkout changed during installation; retry" }
+}

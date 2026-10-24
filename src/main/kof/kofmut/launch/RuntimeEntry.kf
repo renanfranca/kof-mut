@@ -1,6 +1,7 @@
 package kofmut.launch
 
 import java.lang.Class
+import java.lang.Exception
 import java.lang.System
 
 record LaunchInstallation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
@@ -29,6 +30,7 @@ class RuntimeEntry {
         var context = arguments[3]
         var image = arguments[4]
         var valid = true
+        var manifest = CheckoutManifest("", listOf())
         try {
             var raw = launchText(context + "/info.json")
             var installation = json.decode<LaunchInstallation>(raw)
@@ -47,13 +49,18 @@ class RuntimeEntry {
             if (parts.length != 9 || parts[0] != "kofmut-image-v2" || parts[1] != root || parts[2] != kof || parts[3] != mode || parts[4] != preliminary || parts[7] != java || parts[8] != jar) { throw "invalid image identity" }
             var key = crypto.sha256(preliminary + "\0" + jar + "\0" + parts[5] + "\0")
             if (parts[6] != key || image != root + "/build/cache/kof-launch-v2/images/" + key || launchText(image + "/identity") != identity || System.getProperty("java.class.path") != image + "/classes:" + jar) { throw "compiled image identity mismatch" }
+            if (mode == "install") {
+                manifest = readCheckoutManifest(context, root, request)
+                if (manifest.compilation != preliminary) { throw "installation compilation identity mismatch" }
+                validateCheckout(manifest, root)
+            }
             var previousRoot = System.setProperty("kofmut.root", root)
             var previousVersion = System.setProperty("kofmut.kof.version", installation.kof)
             System.setProperty("kofmut.kof", kof)
             System.setProperty("kofmut.java", java)
             System.setProperty("kofmut.jar", jar)
             System.setProperty("kofmut.image", image)
-        } catch (String error) {
+        } catch (Exception error) {
             System.err.println("kof-mut: " + error)
             valid = false
         } finally {
@@ -62,7 +69,7 @@ class RuntimeEntry {
         if (!valid) { process.exit(2) }
         var applicationArgs = new String[arguments.length - 5]
         for (var i = 0; i < applicationArgs.length; i++) { applicationArgs[i] = arguments[i + 5] }
-        if (mode == "install") { InstallEntry.main(applicationArgs); return }
+        if (mode == "install") { InstallEntry.main(applicationArgs, manifest); return }
         invokeApplication(applicationArgs)
     }
 }

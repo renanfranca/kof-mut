@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${3:-}" == kofmut.launch.RuntimeEntry && -n "${KOF_MUT_INSTALL_CONTEXT:-}" ]]; then
+    printf '%s\n' "$7" > "$KOF_MUT_TEST_READY"
+    case "$KOF_MUT_INSTALL_CONTEXT" in
+        missing) /bin/rm -f -- "$7/package" ;;
+        truncated) printf 'kofmut-package-v1\0VERSION\0' > "$7/package" ;;
+        incompatible) printf 'kofmut-package-v99\0VERSION\0' > "$7/package" ;;
+        compilation)
+            {
+                IFS= read -r -d '' schema
+                printf '%s\0' "$schema"
+                while IFS= read -r -d '' path && IFS= read -r -d '' hash; do
+                    if [[ "$path" == VERSION ]]; then hash=0000000000000000000000000000000000000000000000000000000000000000; fi
+                    printf '%s\0%s\0' "$path" "$hash"
+                done
+            } < "$7/package" > "$7/package-invalid"
+            /bin/mv -- "$7/package-invalid" "$7/package"
+            ;;
+    esac
+fi
+if [[ ( "${3:-}" == kofmut.launch.RuntimeEntry && "${KOF_MUT_INSTALL_BARRIER:-}" == entry ) || ( "${3:-}" == kofmut.launch.ImageProbe && "${5:-}" == --help && "${KOF_MUT_INSTALL_BARRIER:-}" == probe ) ]]; then
+    printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+    : > "$KOF_MUT_TEST_READY"
+    while [[ ! -e "$KOF_MUT_TEST_READY.continue" ]]; do /bin/sleep 0.02; done
+fi
+exec "$KOF_MUT_TEST_JAVA" "$@"

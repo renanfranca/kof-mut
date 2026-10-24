@@ -1,5 +1,6 @@
 import java.io.RandomAccessFile
 import java.io.FileOutputStream
+import java.lang.Exception
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -8,6 +9,18 @@ import java.util.HexFormat
 
 record Installation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
 record SourceSnapshot(String path, ByteBuffer content, String hash)
+
+SourceSnapshot captureInput(String path, String expected, String mode) {
+    try {
+        var content = ByteBuffer.wrap(Files.readAllBytes(new java.io.File(path).toPath()))
+        var hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.array()))
+        if (hash != expected) { throw "changed input" }
+        return SourceSnapshot(path, content, hash)
+    } catch (Exception error) {
+        if (mode == "install") { throw "checkout changed during installation; retry" }
+        throw "launch input changed: " + path
+    }
+}
 
 String requiredText(String path) {
     var text = File(path).readText()
@@ -100,10 +113,8 @@ void prepare(String root, String kof, String mode, String context) {
     if (fields.length < 7 || fields[0] != "kofmut-request-v2" || fields[1] != mode || fields[2] != root || fields[3] != kof || fields[4] != raw || (fields.length - 5) % 2 != 0) { throw "invalid launch request" }
     var sources: List<SourceSnapshot> = listOf()
     for (var i = 5; i < fields.length; i = i + 2) {
-        var content = ByteBuffer.wrap(Files.readAllBytes(new java.io.File(fields[i]).toPath()))
-        var hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.array()))
-        if (hash != fields[i + 1]) { throw "launch input changed: " + fields[i] }
-        if (fields[i].startsWith(root + "/src/") && fields[i].endsWith(".kf")) { sources.add(SourceSnapshot(fields[i], content, hash)) }
+        var input = captureInput(fields[i], fields[i + 1], mode)
+        if (input.path.startsWith(root + "/src/") && input.path.endsWith(".kf")) { sources.add(input) }
     }
     var preliminary = crypto.sha256(request)
     var cache = root + "/build/cache/kof-launch-v2"
