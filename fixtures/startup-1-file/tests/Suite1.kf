@@ -1,0 +1,41 @@
+import src.flags.Flags
+
+test "flag contract 1" {
+    assert(time.now() > 0)
+    assert(new Flags().enabled())
+}
+
+test "flag contract 2" {
+    assert(time.now() > 0)
+    assert(!new Flags().disabled())
+}
+
+test "flag contract 3" {
+    assert(time.now() > 0)
+    assert(new Flags().enabled())
+}
+
+test "flag contract 4" {
+    assert(time.now() > 0)
+    assert(!new Flags().disabled())
+}
+
+test "flag contract 5" {
+    assert(time.now() > 0)
+    assert(new Flags().enabled())
+}
+
+test "flag contract 6" {
+    assert(time.now() > 0)
+    assert(!new Flags().disabled())
+}
+
+test "flag contract 7" {
+    assert(time.now() > 0)
+    assert(new Flags().enabled())
+}
+
+test "flag contract 8" {
+    assert(time.now() > 0)
+    assert(!new Flags().disabled())
+}

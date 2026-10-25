@@ -1,0 +1,71 @@
+package kofmut.launch
+
+import java.lang.Exception
+import java.lang.System
+import java.io.RandomAccessFile
+
+void runInstalled(String release, InstalledImage receipt, String[] arguments) {
+    if (System.getProperty("java.class.path") != release + "/classes:" + receipt.dependency.jar) { throw "invalid installed classpath" }
+    System.setProperty("kofmut.root", release)
+    System.setProperty("kofmut.logs", receipt.prefix + "/state/kof-mut/logs")
+    System.setProperty("kofmut.kof.version", receipt.dependency.version)
+    if (arguments.length == 0 || (arguments.length == 1 && (arguments[0] == "--help" || arguments[0] == "-h"))) { println("Installed management: kof-mut uninstall") }
+    invokeApplication(arguments)
+}
+
+class ImageProbe {
+    static void main(String[] arguments) {
+        try {
+            var release = arguments[0]
+            var receipt = validateInstalledImage(release)
+            var forwarded = new String[1]
+            forwarded[0] = arguments[1]
+            runInstalled(release, receipt, forwarded)
+        } catch (Exception error) { System.err.println("kof-mut: image probe failed: " + error); process.exit(2) }
+    }
+}
+
+class InstalledEntry {
+    static void guardState(String prefix) { CompatibilityState.installed(prefix) }
+
+    static void preflight(String release) {
+        var receipt = validateInstalledImage(release)
+        var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
+        if (prefix != receipt.prefix || release != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
+        var owner = readInstallationOwner(prefix)
+        var registered = false
+        for (var owned in owner.releases) { if (owned.id == receipt.id) { registered = true } }
+        if (!registered) { throw "installed image is not owned" }
+    }
+
+    static void main(String[] arguments) {
+        try {
+            if (arguments.length < 1) { throw "missing installed image" }
+            var release = arguments[0]
+            var receipt = readImageReceipt(release + "/image.json")
+            var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
+            if (prefix != receipt.prefix || release != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
+            for (var path in listOf("state/kof-mut", "state/kof-mut/usage.lock", "state/kof-mut/manage.lock")) { rejectInstallLinks(prefix, path) }
+            var applicationArgs = new String[arguments.length - 1]
+            for (var i = 0; i < applicationArgs.length; i++) { applicationArgs[i] = arguments[i + 1] }
+            if (applicationArgs.length > 0 && applicationArgs[0] == "uninstall") {
+                if (applicationArgs.length != 1) { throw "Usage: kof-mut uninstall" }
+                uninstallInstallation(prefix)
+                return
+            }
+            var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "r")
+            var channel = usage.getChannel()
+            try {
+                var lease = channel.lock(0 as Long, 9223372036854775807 as Long, true)
+                try {
+                    var owner = readInstallationOwner(prefix)
+                    var registered = false
+                    for (var owned in owner.releases) { if (owned.id == receipt.id) { registered = true } }
+                    if (!registered) { throw "installed image is not owned" }
+                    receipt = validateInstalledImage(release)
+                    runInstalled(release, receipt, applicationArgs)
+                } finally { lease.release() }
+            } finally { channel.close(); usage.close() }
+        } catch (Exception error) { System.err.println("kof-mut: installed execution failed: " + error); process.exit(2) }
+    }
+}

@@ -1,0 +1,3 @@
+[sources]
+app = "."
+test = "tests"

@@ -1,0 +1,1983 @@
+import java.lang.Process
+import java.lang.System
+import java.lang.Thread
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+
+record ActualKofVersion(String kof)
+
+record RunCounts(Int candidates, Int executed, Int killed, Int survived, Int compileError, Int timeout, Int testError, Int pending)
+record RunPhase(Int? exitCode, Long? durationMs, String? summary, Int? filesChecked, Int? executedTests, Int? failedTests)
+record RunBaseline(String status, RunPhase check, RunPhase test)
+record RunLocation(Int line, Int column, Int offset, Int length)
+record RunMutant(String id, String file, String operator, String original, String replacement, RunLocation location, String status, String phase, Long durationMs, String evidence)
+record RunReport(Int schemaVersion, String toolVersion, String kofVersion, String runId, String status, List<String> scope, RunBaseline baseline, RunCounts counts, List<RunMutant> mutants, List<RunDiscard> discardedCandidates, List<String> limitations, String startedAt, Long durationMs)
+
+RunReport readRun(String path) {
+    var text = File(path).readText()
+    assert(text != null, "current report must exist")
+    if (text != null) {
+        var report = json.decode<RunReport>(text)
+        assert(report.schemaVersion == 1)
+        assert(report.toolVersion == "0.1.0")
+        var selected = json.decode<ActualKofVersion>(process.run("kof", "info", "--json").stdout)
+        assert(report.kofVersion == selected.kof)
+        assert(report.runId.matches("[0-9a-fA-F-]{36}"))
+        assert(report.startedAt.endsWith("Z"))
+        assert(report.durationMs >= 0)
+        assert(report.discardedCandidates != null)
+        assert(report.counts.compileError == 0, "new executions must reserve CompileError for compatibility only")
+        assert(report.counts.candidates == report.mutants.size)
+        assert(report.counts.executed + report.counts.pending == report.counts.candidates)
+        assert(report.counts.executed == report.counts.killed + report.counts.survived + report.counts.compileError + report.counts.timeout + report.counts.testError)
+        assert(report.counts.killed == report.mutants.filter((m: RunMutant) -> m.status == "Killed").size)
+        assert(report.counts.survived == report.mutants.filter((m: RunMutant) -> m.status == "Survived").size)
+        assert(report.counts.timeout == report.mutants.filter((m: RunMutant) -> m.status == "Timeout").size)
+        assert(report.counts.testError == report.mutants.filter((m: RunMutant) -> m.status == "TestError").size)
+        assert(report.counts.pending == report.mutants.filter((m: RunMutant) -> m.status == "Pending").size)
+        return report
+    }
+    throw "missing report"
+}
+
+test "run detects a changed arithmetic result with compiler and suite evidence" {
+    Directory(".agent/tmp").createDirectories()
+    var report = ".agent/tmp/m3/reports/detected"
+    Directory(report).createDirectories()
+    File(report + "/previous.json").writeText("stale report")
+
+    var result = process.run("./bin/kof-mut", "run", "--project", "fixtures/detected", "--files", "fixtures/detected/scope.json", "--report-dir", report, "--run-id", "d7df680d-2304-43a3-9741-4b0ebd61686e")
+
+    if (result.exitCode != 0) { println(result.stdout + result.stderr) }
+    assert(result.exitCode == 0)
+    var observed = readRun(reportPath(result.stdout))
+    assert(observed.schemaVersion == 1)
+    assert(observed.runId == "d7df680d-2304-43a3-9741-4b0ebd61686e")
+    assert(observed.status == "complete")
+    assert(File(report + "/previous.json").readText() == "stale report")
+    assert(observed.baseline.status == "passed")
+    assert(observed.baseline.check.filesChecked == 1)
+    assert(observed.baseline.test.executedTests == 1)
+    assert(observed.counts.candidates == 1)
+    assert(observed.counts.executed == 1)
+    assert(observed.counts.killed == 1)
+    assert(observed.counts.pending == 0)
+    assert(observed.mutants.size == 1)
+    var mutant = observed.mutants.get(0)
+    assert(mutant.file == "src/math/Calc.kf")
+    assert(mutant.original == "+")
+    assert(mutant.replacement == "-")
+    assert(mutant.status == "Killed")
+    assert(mutant.phase == "test")
+    assert(mutant.evidence.contains("1 failed"))
+    assert(observed.limitations.size == 0)
+}
+
+test "run locates a survivor when tests accept both arithmetic results" {
+    var result = process.run("./bin/kof-mut", "run", "--project", "fixtures/survived", "--files", "fixtures/survived/scope.json", "--report-dir", ".agent/tmp/m3/reports/survived")
+
+    assert(result.exitCode == 1)
+    var report = readRun(reportPath(result.stdout))
+    assert(report.status == "complete")
+    assert(report.baseline.status == "passed")
+    assert(report.counts.candidates == 1)
+    assert(report.counts.survived == 1)
+    assert(report.counts.killed == 0)
+    assert(report.mutants.get(0).location.line == 4)
+    assert(report.mutants.get(0).location.column == 38)
+    assert(result.stdout.contains("Survived src/math/Calc.kf:4:38"))
+}
+
+test "a coherent compiler rejection is discarded without claiming test quality", "discard-check" {
+    var result = process.run("./bin/kof-mut", "run", "--project", "fixtures/invalid", "--files", "fixtures/invalid/scope.json", "--report-dir", ".agent/tmp/m3/reports/invalid")
+
+    assert(result.exitCode == 3)
+    var report = readRun(reportPath(result.stdout))
+    assert(report.status == "no_mutants", "all compiler rejected candidates must produce no_mutants")
+    assert(report.baseline.status == "passed")
+    assert(report.counts.candidates == 0)
+    assert(report.counts.compileError == 0)
+    assert(report.counts.executed == 0)
+    assert(report.counts.killed == 0)
+    assert(report.mutants.size == 0)
+    var discarded = readDiscards(reportPath(result.stdout))
+    assert(discarded.size == 1)
+    assert(discarded.get(0).original == "*")
+    assert(discarded.get(0).replacement == "/")
+    assert(discarded.get(0).phase == "check")
+    assert(discarded.get(0).evidence.contains("ARITH001"))
+    assert(discarded.get(0).evidence.contains("stdout:"))
+    assert(discarded.get(0).durationMs >= 0)
+}
+
+record FixtureConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs)
+
+String runProjectCopy() {
+    Directory(".agent/tmp").createDirectories()
+    var copied = process.run("mktemp", "-d", ".agent/tmp/mutation-XXXXXXXX")
+    assert(copied.exitCode == 0)
+    var root = new java.io.File(copied.stdout.trim()).getCanonicalPath()
+    var copy = process.run("cp", "-a", "fixtures/detected/.", root)
+    assert(copy.exitCode == 0)
+    return root
+}
+
+void fixtureConfig(String root, List<String> check, List<String> tests, Long timeout, Long budget) {
+    assert(File(root + "/kof-mut.json").writeText(json.encode(FixtureConfig(1, listOf("src"), listOf("tests"), listOf("kof.toml", "src", "tests", "runner"), check, tests, timeout, budget))))
+}
+
+test "all operator families are detected through real compiler and tests" {
+    var root = runProjectCopy()
+    assert(File(root + "/src/math/Calc.kf").writeText("package src.math\nclass Calc { Bool less(Int a, Int b) { return a < b } Bool equal(Int a, Int b) { return a == b } Bool both(Bool a, Bool b) { return a && b } Bool enabled() { return true } Int sum(Int a, Int b) { return a + b } }\n"))
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"families\" { var c = new Calc() assert(!c.less(2, 2)) assert(c.equal(2, 2)) assert(!c.both(true, false)) assert(c.enabled()) assert(c.sum(2, 3) == 5) }"))
+
+    try {
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        if (result.exitCode != 0) { println(result.stdout + result.stderr) }
+        assert(result.exitCode == 0)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.counts.candidates == 5)
+        assert(report.counts.killed == 5)
+        assert(report.mutants.get(0).operator == "boundary")
+        assert(report.mutants.get(1).operator == "equality")
+        assert(report.mutants.get(2).operator == "logical")
+        assert(report.mutants.get(3).operator == "boolean")
+        assert(report.mutants.get(4).operator == "arithmetic")
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "scope normalization and snapshot copies preserve independent variants and new imports", "isolation" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    var source = "package src.math\nimport src.math.New\nclass Calc { Int sum(Int a, Int b) { var helper = new New() return a + b + helper.zero() } }\n"
+    var extra = "package src.math\nclass New { Int zero() { return 1 - 1 } }\n"
+    assert(File(root + "/src/math/Calc.kf").writeText(source))
+    assert(File(root + "/src/math/New.kf").writeText(extra))
+    assert(File(root + "/scope.json").writeText("[\"src/math/./Calc.kf\",\"src/other/../math/Calc.kf\",\"src/math/Calc.kf\"]"))
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+
+    try {
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        if (result.exitCode != 1) { println(result.stdout + result.stderr) }
+        assert(result.exitCode == 1)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.scope.size == 1)
+        assert(report.scope.get(0) == "src/math/Calc.kf")
+        assert(report.counts.candidates == 2)
+        assert(report.counts.killed == 1)
+        assert(report.counts.survived == 1)
+        assert(File(log + "/0.source").readText() == source)
+        assert(File(log + "/1.source").readText() == "package src.math\nimport src.math.New\nclass Calc { Int sum(Int a, Int b) { var helper = new New() return a - b + helper.zero() } }\n")
+        assert(File(log + "/2.source").readText() == "package src.math\nimport src.math.New\nclass Calc { Int sum(Int a, Int b) { var helper = new New() return a + b - helper.zero() } }\n")
+        for (var i = 0; i < 3; i++) {
+            assert(File(log + "/" + i + ".state").readText() == "clean\n")
+            assert(File(log + "/" + i + ".new").readText() == extra)
+        }
+        assert(File(root + "/src/math/Calc.kf").readText() == source)
+        assert(File(root + "/src/math/New.kf").readText() == extra)
+        assert(!File(root + "/state").exists())
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "invalid scope is rejected in full before any project command" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copy = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copy.exitCode == 0)
+    assert(File(root + "/src/math/Calc.txt").writeText("source"))
+    assert(File(root + "/Other.kf").writeText("class Other { }"))
+    var linked = process.run("ln", "-s", "Calc.kf", root + "/src/math/Link.kf")
+    assert(linked.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+
+    try {
+        for (var invalid in listOf("tests/Suite.kf", "src/math/Missing.kf", "src/math/Calc.txt", "../escape.kf", "Other.kf", "src/math/Link.kf")) {
+            assert(File(root + "/scope.json").writeText(json.encode(listOf("src/math/Calc.kf", invalid))))
+            var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            runAssertEvidence(result.exitCode == 2, invalid)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.status == "error")
+            assert(report.counts.candidates == 0)
+            assert(report.baseline.check.exitCode == null)
+            assert(Directory(log).list().size == 0, "input errors must start no commands")
+        }
+        assert(File(root + "/scope.json").writeText("[]"))
+        var empty = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        assert(empty.exitCode == 3)
+        assert(readRun(reportPath(empty.stdout)).status == "no_scope")
+        assert(Directory(log).list().size == 0)
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "insufficient runner evidence never counts as a detected mutation" {
+    var root = runProjectCopy()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    var original = File(root + "/src/math/Calc.kf").readText()
+    assert(original != null)
+    if (original != null) { assert(File(root + "/src/math/original.txt").writeText(original)) }
+
+    try {
+        for (var mode in listOf("bad-json", "false-exit", "coerced-json", "false-rejection", "broken-check", "missing-summary", "truncated", "skipped", "zero", "contradiction", "header-mismatch", "runner-error")) {
+            fixtureConfig(root, listOf("./runner", "check", mode), listOf("./runner", "test", mode), 10000, 90000)
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            runAssertEvidence(result.exitCode == 3, mode + ": " + result.stdout + result.stderr)
+            var report = readRun(reportPath(result.stdout))
+            runAssertEvidence(report.baseline.status == "passed", mode)
+            runAssertEvidence(report.status == "incomplete", mode)
+            runAssertEvidence(report.counts.killed == 0, mode)
+            runAssertEvidence(report.counts.testError == 1, mode)
+            runAssertEvidence(report.mutants.get(0).status == "TestError", mode)
+            runAssertEvidence(report.discardedCandidates.size == 0, mode + " must never authorize discard")
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+Bool activePid(String text) {
+    var status = process.run("ps", "-o", "stat=", "-p", text.trim())
+    return status.exitCode == 0 && status.stdout.trim() != "" && !status.stdout.trim().startsWith("Z")
+}
+
+test "individual timeout and global budget stop active descendants and reconcile pending candidates", "timeout" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+
+    try {
+        for (var mode in listOf("individual", "global", "global-discard")) {
+            var source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a + b } }\n"
+            var timeout: Long = 3000
+            var budget: Long = 30000
+            if (mode == "global" || mode == "global-discard") { source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a + b + 0 } }\n"; timeout = 20000; budget = 8000 }
+            if (mode == "global-discard") {
+                source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return 7 * 0 + 1 + 0 } }\n"
+                assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"one\" { assert(new Calc().sum(2, 3) == 1) }"))
+            }
+            assert(File(root + "/src/math/Calc.kf").writeText(source))
+            assert(File(root + "/src/math/original.txt").writeText(source))
+            fixtureConfig(root, listOf("./runner", "check", "timeout"), listOf("./runner", "test", "timeout"), timeout, budget)
+            var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            runAssertEvidence(result.exitCode == 3, mode)
+            assert(File(log + "/ready").readText() == "ready\n", "descendant and parent must have started")
+            var parent = File(log + "/parent.pid").readText()
+            var child = File(log + "/child.pid").readText()
+            assert(parent != null && child != null)
+            if (parent != null && child != null) { assert(!activePid(parent)); assert(!activePid(child)) }
+            var report = readRun(reportPath(result.stdout))
+            assert(report.baseline.status == "passed")
+            assert(report.status == "incomplete")
+            assert(report.counts.timeout == 1)
+            assert(report.counts.killed == 0)
+            assert(report.mutants.get(0).status == "Timeout")
+            assert(report.mutants.get(0).phase == "test")
+            assert(report.mutants.get(0).evidence.contains("cleanup confirmed"))
+            if (mode == "individual") { assert(report.counts.candidates == 1); assert(report.counts.pending == 0) }
+            if (mode == "global") {
+                assert(report.counts.candidates == 2)
+                assert(report.counts.executed == 1)
+                assert(report.counts.pending == 1)
+                assert(report.mutants.get(1).status == "Pending")
+                assert(report.mutants.get(1).durationMs == 0)
+                assert(!File(log + "/2.source").exists(), "no next check may start after budget")
+                assert(report.durationMs >= 8000 && report.durationMs < 12000)
+            }
+            if (mode == "global-discard") {
+                assert(report.counts.candidates == 2)
+                assert(report.counts.executed == 1)
+                assert(report.counts.pending == 1)
+                assert(report.discardedCandidates.size == 1)
+                assert(report.discardedCandidates.get(0).evidence.contains("ARITH001"))
+                assert(report.mutants.get(0).evidence.contains("/1-test.stdout"))
+                assert(report.mutants.get(1).status == "Pending")
+                assert(report.mutants.get(1).phase == "parse")
+                assert(report.mutants.get(1).durationMs == 0)
+                assert(!File(log + "/3.source").exists())
+                assert(report.discardedCandidates.get(0).id != report.mutants.get(0).id)
+                assert(report.mutants.get(0).id != report.mutants.get(1).id)
+            }
+            assert(Directory(log).delete())
+            assert(Directory(log).createDirectories())
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "baseline failures preserve previous reports and stop before candidate generation" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    var source = readFixtureSource(root)
+
+    try {
+        for (var mode in listOf("import", "test")) {
+            assert(Directory(root + "/report.json").createDirectories())
+            assert(File(root + "/report.json/previous.json").writeText("previous report"))
+            if (mode == "import") {
+                assert(File(root + "/src/math/Calc.kf").writeText("package src.math\nimport src.math.Broken\nclass Calc { Int sum(Int a, Int b) { var broken = new Broken() return a + b } }"))
+                assert(File(root + "/src/math/Broken.kf").writeText("package src.math\nclass Broken { Int value() { return undefinedValue } }"))
+            } else {
+                assert(File(root + "/src/math/Calc.kf").writeText(source))
+                assert(File(root + "/src/math/Broken.kf").delete())
+                assert(File(root + "/tests/Suite.kf").writeText("test \"red baseline\" { assert(false) }"))
+            }
+            var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json", "--run-id", "248a229c-2c75-46d4-a802-ae69ac23376b")
+
+            assert(result.exitCode == 2)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.runId == "248a229c-2c75-46d4-a802-ae69ac23376b")
+            assert(report.status == "baseline_failed")
+            assert(File(root + "/report.json/previous.json").readText() == "previous report")
+            assert(report.baseline.status == "failed")
+            assert(report.counts.candidates == 0)
+            assert(report.mutants.size == 0)
+            assert(!File(log + "/1.source").exists())
+            if (mode == "import") {
+                assert(report.baseline.check.filesChecked == 1)
+                var summary = report.baseline.check.summary
+                assert(summary != null)
+                if (summary != null) { assert(summary.contains("undefinedValue")) }
+                assert(report.baseline.test.exitCode == null)
+            }
+            if (mode == "test") { assert(report.baseline.test.executedTests == 1); assert(report.baseline.test.failedTests == 1) }
+            assert(Directory(log).delete())
+            assert(Directory(log).createDirectories())
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+String readFixtureSource(String root) {
+    var source = File(root + "/src/math/Calc.kf").readText()
+    if (source != null) { return source }
+    throw "fixture source missing"
+}
+
+test "suite evidence counts executed cases and tag filters independently from files" {
+    var root = runProjectCopy()
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"sum\", \"selected\" { assert(new Calc().sum(2, 3) == 5) } test \"neutral\", \"other\" { assert(new Calc().sum(5, 0) == 5) }"))
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+
+    try {
+        for (var filter in listOf("all", "selected", "absent")) {
+            var command = listOf("kof", "test", "tests")
+            if (filter != "all") { command.add("--tag"); command.add(filter) }
+            fixtureConfig(root, listOf("kof", "check", "src/math/Calc.kf", "--json"), command, 10000, 90000)
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            var report = readRun(reportPath(result.stdout))
+            if (filter == "all") { assert(result.exitCode == 0); assert(report.baseline.test.executedTests == 2); assert(report.counts.killed == 1) }
+            if (filter == "selected") { assert(result.exitCode == 0); assert(report.baseline.test.executedTests == 1); assert(report.counts.killed == 1) }
+            if (filter == "absent") { assert(result.exitCode == 2); assert(report.baseline.status != "passed"); assert(report.counts.killed == 0) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "configuration and CLI input errors do not execute project commands", "inputs" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    var config = File(root + "/kof-mut.json").readText()
+    assert(config != null)
+
+    try {
+        if (config != null) {
+            for (var invalid in listOf(config.replace("\"schemaVersion\":1", "\"schemaVersion\":2"), config.replace("\"schemaVersion\":1", "\"schemaVersion\":4294967297"), config.replace("\"budgetMs\":90000", "\"budgetMs\":-1"), config.replace("\"commandTimeoutMs\":10000", "\"commandTimeoutMs\":1.5"), config.replace("\"sourceRoots\":[\"src\"]", "\"sourceRoots\":[4]"), "{}", "not json")) {
+                assert(File(root + "/kof-mut.json").writeText(invalid))
+                var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "-error.json")
+                assert(result.exitCode == 2)
+                assert(readRun(reportPath(result.stdout)).status == "error")
+                assert(Directory(log).list().size == 0)
+            }
+            assert(File(root + "/kof-mut.json").writeText(config))
+        }
+        for (var flag in listOf("--unknown", "--config", "--run-id")) {
+            var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "-error.json", flag)
+            assert(result.exitCode == 2)
+            assert(Directory(log).list().size == 0)
+        }
+        var id = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "-error.json", "--run-id", "not-a-uuid")
+        assert(id.exitCode == 2)
+        assert(File(root + "/scope.json").writeText("[12]"))
+        var scope = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "-error.json")
+        assert(scope.exitCode == 2)
+    } finally { if (File(root + "-error.json").exists()) { assert(Directory(root + "-error.json").delete()) } assert(Directory(root).delete()) }
+}
+
+test "unsupported production forms and absent applicable operators stay inconclusive" {
+    var root = runProjectCopy()
+    assert(File(root + "/tests/Suite.kf").writeText("test \"baseline\" { assert(true) }"))
+
+    try {
+        for (var mode in listOf("unsupported", "none")) {
+            var source = "package src.math\nrecord Point(Int x)"
+            if (mode == "none") { source = "package src.math\nString label(String prefix) { var text = prefix return text + \"!\" }" }
+            assert(File(root + "/src/math/Calc.kf").writeText(source))
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            assert(result.exitCode == 3)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.baseline.status == "passed")
+            assert(report.counts.candidates == 0)
+            if (mode == "unsupported") { assert(report.status == "incomplete"); assert(report.limitations.size == 1) }
+            if (mode == "none") { assert(report.status == "no_mutants"); assert(report.limitations.size == 0) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "snapshot materializes only internal links whose targets belong to inputs", "links" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    assert(File(root + "/src/math/data.txt").writeText("snapshot bytes\n"))
+    var linked = process.run("ln", "-s", "data.txt", root + "/src/math/alias.txt")
+    assert(linked.exitCode == 0)
+
+    try {
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        runAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+        assert(File(log + "/0.alias").readText() == "snapshot bytes\n")
+        assert(File(log + "/1.alias").readText() == "snapshot bytes\n")
+        assert(File(log + "/0.kind").readText() == "file\n")
+        assert(File(log + "/1.kind").readText() == "file\n")
+        var stillLinked = process.run("readlink", root + "/src/math/alias.txt")
+        assert(stillLinked.stdout.trim() == "data.txt")
+        assert(Directory(log).delete())
+        assert(Directory(log).createDirectories())
+        for (var target in listOf("alias.txt", root + "/kof-mut.json", "../../../outside.txt", "../..")) {
+            var unlinked = process.run("rm", root + "/src/math/alias.txt")
+            assert(unlinked.exitCode == 0)
+            var relinked = process.run("ln", "-s", target, root + "/src/math/alias.txt")
+            assert(relinked.exitCode == 0)
+            var rejected = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+            runAssertEvidence(rejected.exitCode == 2, target + ": " + rejected.stdout + rejected.stderr)
+            assert(Directory(log).list().size == 0)
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "reports expose per file states and cannot overwrite protected inputs through aliases", "report" {
+    var root = runProjectCopy()
+    var original = readFixtureSource(root)
+    var log = root + "/observed"
+    assert(Directory(log).createDirectories())
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    var alias = root + "-alias"
+    assert(process.run("ln", "-s", root, alias).exitCode == 0)
+
+    try {
+        for (var input in listOf("src/math/Calc.kf", "tests/Suite.kf", "kof.toml", "kof-mut.json", "scope.json", "runner")) {
+            var copiedInput = process.run("cp", root + "/" + input, root + "/expected-input")
+            assert(copiedInput.exitCode == 0)
+            var permissions = process.run("stat", "-c", "%a", root + "/" + input).stdout.trim()
+            var rejected = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", alias + "/" + input)
+            runAssertEvidence(rejected.exitCode == 2, input + " must be refused")
+            var bytes = process.run("cmp", root + "/" + input, root + "/expected-input")
+            runAssertEvidence(bytes.exitCode == 0, input + " bytes changed")
+            var observedPermissions = process.run("stat", "-c", "%a", root + "/" + input)
+            runAssertEvidence(observedPermissions.stdout.trim() == permissions, input + " permissions changed")
+            assert(Directory(log).list().size == 0)
+        }
+        var refused = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", alias + "/src/new/output.json")
+        assert(refused.exitCode == 2)
+        assert(!File(root + "/src/new").exists())
+        assert(Directory(log).list().size == 0)
+        assert(readFixtureSource(root) == original)
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        assert(result.exitCode == 0)
+        assert(result.stdout.contains("src/math/Calc.kf: candidates=1 Killed=1 Survived=0 CompileError=0 Timeout=0 TestError=0 Pending=0"))
+    } finally { assert(process.run("rm", alias).exitCode == 0); assert(Directory(root).delete()) }
+}
+
+
+test "configured argv environment cwd and closed stdin reach disposable commands", "process" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check", "real", "", "space value", "ação 😀", "line\nbreak", "$(touch INJECTED);*"), listOf("./runner", "test"), 10000, 90000)
+
+    try {
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        assert(result.exitCode == 0)
+        assert(File(log + "/argv").readText() == "check\0real\0\0space value\0ação 😀\0line\nbreak\0$(touch INJECTED);*\0")
+        assert(File(log + "/stdin").readText() == "closed\n")
+        var cwd = File(log + "/cwd").readText()
+        assert(cwd != null)
+        if (cwd != null) { assert(cwd.trim() != root); assert(!File(cwd.trim()).exists()) }
+        assert(!File(root + "/INJECTED").exists())
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "command side effects with dangling links are removed with their sandboxes", "cleanup" {
+    var root = runProjectCopy()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check", "broken-link"), listOf("./runner", "test", "broken-link"), 10000, 90000)
+
+    try {
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        runAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+        assert(readRun(reportPath(result.stdout)).status == "complete")
+        assert(!File(root + "/generated-link").exists())
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "UTF16 locations and token replacements preserve all other source and binary input bytes", "locations" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    Directory(log).createDirectories()
+    var copied = process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner")
+    assert(copied.exitCode == 0)
+    var source = "package src.math\r\nclass Calc {\r\n    Int sum(Int a, Int b) { var note = \"😀 + <= true\" return a + b }\r\n}\r\n"
+    var replacement = "package src.math\r\nclass Calc {\r\n    Int sum(Int a, Int b) { var note = \"😀 + <= true\" return a - b }\r\n}\r\n"
+    assert(File(root + "/src/math/Calc.kf").writeText(source))
+    assert(File(root + "/src/math/Unused.kf").writeText("package src.math\nclass Unused { Int value() { return 0 } }"))
+    assert(File(root + "/scope.json").writeText("[\"src/math/Unused.kf\",\"src/math/./Calc.kf\",\"src/math/Calc.kf\"]"))
+    var binary = new Int[4]
+    binary[0] = 0
+    binary[1] = 255
+    binary[2] = 13
+    binary[3] = 10
+    assert(File(root + "/src/math/data.bin").writeBytes(binary))
+    assert(File(root + "/expected-variant").writeText(replacement))
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+
+    try {
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        assert(result.exitCode == 0)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.scope.size == 2)
+        assert(report.scope.get(0) == "src/math/Calc.kf")
+        assert(report.scope.get(1) == "src/math/Unused.kf")
+        assert(report.counts.candidates == 1)
+        assert(report.mutants.get(0).location.offset == 95)
+        assert(report.mutants.get(0).location.line == 3)
+        assert(report.mutants.get(0).location.column == 64)
+        assert(report.mutants.get(0).location.length == 1)
+        var originalBytes = process.run("cmp", root + "/src/math/Calc.kf", log + "/0.source")
+        var variantBytes = process.run("cmp", root + "/expected-variant", log + "/1.source")
+        assert(originalBytes.exitCode == 0)
+        assert(variantBytes.exitCode == 0)
+        for (var i = 0; i < 2; i++) {
+            var binaryBytes = process.run("cmp", root + "/src/math/data.bin", log + "/" + i + ".binary")
+            assert(binaryBytes.exitCode == 0)
+        }
+        assert(readFixtureSource(root) == source)
+    } finally { assert(Directory(root).delete()) }
+}
+
+
+test "invalid configuration refuses every internal report before touching bytes or directories", "preservation" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    assert(Directory(log).createDirectories())
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    var bytes = new Int[4]
+    bytes[0] = 0; bytes[1] = 255; bytes[2] = 13; bytes[3] = 10
+    assert(File(root + "/src/math/data.bin").writeBytes(bytes))
+    assert(File(root + "/expected.bin").writeBytes(bytes))
+    assert(process.run("chmod", "640", root + "/src/math/data.bin").exitCode == 0)
+    var alias = root + "-alias"
+    var external = root + "-error.json"
+    assert(process.run("ln", "-s", root, alias).exitCode == 0)
+
+    try {
+        for (var invalid in listOf("{}", "not json")) {
+            assert(File(root + "/kof-mut.json").writeText(invalid))
+            for (var target in listOf(root + "/src/math/data.bin", root + "/new/output.json", alias + "/new/output.json", root + "/observed")) {
+                var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", target)
+
+                assert(result.exitCode == 2)
+                assert(process.run("cmp", root + "/src/math/data.bin", root + "/expected.bin").exitCode == 0, "invalid config must preserve binary input")
+                assert(process.run("stat", "-c", "%a", root + "/src/math/data.bin").stdout.trim() == "640")
+                assert(!File(root + "/new").exists(), "refusal must create no output directories")
+                assert(Directory(log).list().size == 0, "no project command may start")
+                runAssertEvidence(result.stdout.contains("Report destination"), result.stdout)
+            }
+            assert(Directory(external).createDirectories())
+            assert(File(external + "/previous.json").writeText("stale report"))
+            var allowed = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", external, "--run-id", "248a229c-2c75-46d4-a802-ae69ac23376b")
+            assert(allowed.exitCode == 2)
+            var report = readRun(reportPath(allowed.stdout))
+            assert(report.status == "error")
+            assert(report.runId == "248a229c-2c75-46d4-a802-ae69ac23376b")
+            assert(report.baseline.check.exitCode == null)
+            assert(Directory(log).list().size == 0)
+        }
+        var filesystemRoot = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", "/", "--config", root + "/kof-mut.json", "--files", root + "/scope.json", "--report-dir", root + "/src/math/data.bin")
+        assert(filesystemRoot.exitCode == 2)
+        assert(process.run("cmp", root + "/src/math/data.bin", root + "/expected.bin").exitCode == 0, "filesystem root project must classify every absolute destination as internal")
+        assert(process.run("stat", "-c", "%a", root + "/src/math/data.bin").stdout.trim() == "640")
+        assert(filesystemRoot.stdout.contains("Report destination"))
+        assert(Directory(log).list().size == 0)
+    } finally {
+        assert(process.run("rm", alias).exitCode == 0)
+        if (File(external).exists()) { assert(Directory(external).delete()) }
+        assert(Directory(root).delete())
+    }
+}
+
+
+test "numeric this field remains mutable when a String local has the same name", "fields" {
+    var root = runProjectCopy()
+    var source = "package src.math\nclass Calc { Int value = 0 Int sum(Int a, Int b) { String value = \"local\" return a + b + this.value } }\n"
+    assert(File(root + "/src/math/Calc.kf").writeText(source))
+
+    try {
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        runAssertEvidence(result.exitCode == 1, result.stdout + result.stderr)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.status == "complete")
+        assert(report.baseline.status == "passed")
+        assert(report.counts.candidates == 2)
+        assert(report.counts.killed == 1)
+        assert(report.counts.survived == 1)
+        assert(report.counts.compileError == 0)
+        assert(report.discardedCandidates.size == 0)
+        assert(report.mutants.get(0).status == "Killed")
+        assert(report.mutants.get(1).status == "Survived")
+        assert(readFixtureSource(root) == source)
+        var textSource = "package src.math\nclass Calc { String value = \"x\" String parameter(Int value) { return this.value + value } String local() { Int value = 2 return this.value + value } }\n"
+        assert(File(root + "/src/math/Calc.kf").writeText(textSource))
+        assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"text fields\" { var c = new Calc() assert(c.parameter(1) == \"x1\") assert(c.local() == \"x2\") }"))
+        var textRun = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        assert(textRun.exitCode == 3)
+        var textReport = readRun(reportPath(textRun.stdout))
+        assert(textReport.status == "no_mutants")
+        assert(textReport.baseline.status == "passed")
+        assert(textReport.counts.candidates == 0)
+        assert(textReport.discardedCandidates.size == 0)
+        assert(readFixtureSource(root) == textSource)
+    } finally { assert(Directory(root).delete()) }
+}
+
+
+record CounterInput(String field, String value, String verdict)
+
+test "check counters are validated before narrowing on baseline and variants", "counters" {
+    var root = runProjectCopy()
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    assert(File(root + "/src/math/original.txt").writeText(readFixtureSource(root)))
+    var invalid = listOf(CounterInput("filesChecked", "4294967297", "pass"), CounterInput("filesChecked", "4294967296", "pass"), CounterInput("filesChecked", "-4294967295", "pass"), CounterInput("filesChecked", "0", "pass"), CounterInput("filesChecked", "2147483648", "pass"), CounterInput("filesChecked", "1.5", "pass"), CounterInput("filesChecked", "\"1\"", "pass"), CounterInput("errorCount", "4294967296", "pass"), CounterInput("errorCount", "-4294967296", "pass"), CounterInput("errorCount", "4294967297", "reject"), CounterInput("errorCount", "-4294967295", "reject"), CounterInput("errorCount", "-1", "reject"), CounterInput("errorCount", "0.5", "pass"), CounterInput("errorCount", "null", "pass"))
+
+    try {
+        for (var stage in listOf("mutant", "baseline")) {
+            for (var value in invalid) {
+                fixtureConfig(root, listOf("./runner", "check", "counter", value.field, value.value, stage, value.verdict), listOf("./runner", "test"), 10000, 90000)
+                var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+                var report = readRun(reportPath(result.stdout))
+                runAssertEvidence(report.counts.killed == 0, stage + ": " + value.field + "=" + value.value)
+                runAssertEvidence(report.counts.compileError == 0, stage + ": " + value.field + "=" + value.value)
+                assert(report.discardedCandidates.size == 0)
+                if (stage == "mutant") {
+                    assert(result.exitCode == 3)
+                    assert(report.baseline.status == "passed")
+                    assert(report.status == "incomplete")
+                    assert(report.counts.testError == 1)
+                    assert(report.mutants.get(0).status == "TestError")
+                    assert(report.mutants.get(0).phase == "check")
+                    assert(report.mutants.get(0).evidence.contains("Invalid check"))
+                } else {
+                    assert(result.exitCode == 2)
+                    assert(report.status == "baseline_failed")
+                    assert(report.baseline.status != "passed")
+                    assert(report.baseline.test.exitCode == null)
+                    assert(report.counts.candidates == 0)
+                }
+            }
+        }
+        fixtureConfig(root, listOf("./runner", "check", "counter", "filesChecked", "2147483647", "baseline", "pass"), listOf("./runner", "test"), 10000, 90000)
+        var boundary = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+        assert(boundary.exitCode == 0)
+        assert(readRun(reportPath(boundary.stdout)).baseline.check.filesChecked == 2147483647)
+    } finally { assert(Directory(root).delete()) }
+}
+
+
+record RunDiscard(String id, String file, String operator, String original, String replacement, RunLocation location, String phase, Long durationMs, String evidence)
+record DiscardReport(List<RunDiscard> discardedCandidates)
+List<RunDiscard> readDiscards(String path) {
+    var text = File(path).readText()
+    if (text != null) { return json.decode<DiscardReport>(text).discardedCandidates }
+    throw "missing report"
+}
+
+
+test "comment collisions are discarded before check and later candidates remain isolated", "discard-parse" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    assert(Directory(log).createDirectories())
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"product plus one\" { assert(new Calc().sum(2, 3) == 7) }"))
+
+    try {
+        for (var mode in listOf("parser", "tokens", "lexer")) {
+            var source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a*/* comment */b + 1 } }\n"
+            var expected = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a*/* comment */b - 1 } }\n"
+            if (mode == "tokens") {
+                source = "package src.math\nclass Calc {\n Int sum(Int a, Int b) {\n return a*/* comment */b + 1\n }\n}\n"
+                expected = "package src.math\nclass Calc {\n Int sum(Int a, Int b) {\n return a*/* comment */b - 1\n }\n}\n"
+            }
+            if (mode == "lexer") {
+                source = "package src.math\nclass Calc {\n Int sum(Int a, Int b) {\n return a*/* comment\n\"*/b + 1\n }\n}\n"
+                expected = "package src.math\nclass Calc {\n Int sum(Int a, Int b) {\n return a*/* comment\n\"*/b - 1\n }\n}\n"
+            }
+            assert(File(root + "/src/math/Calc.kf").writeText(source))
+            var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+            runAssertEvidence(result.exitCode == 0, mode + ": " + result.stdout + result.stderr)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.status == "complete")
+            assert(report.baseline.status == "passed")
+            assert(report.counts.candidates == 1)
+            assert(report.counts.killed == 1)
+            assert(report.counts.compileError == 0)
+            assert(report.counts.pending == 0)
+            assert(report.mutants.get(0).original == "+")
+            assert(report.mutants.get(0).status == "Killed")
+            var discarded = readDiscards(reportPath(result.stdout))
+            assert(discarded.size == 1)
+            var item = discarded.get(0)
+            assert(item.file == "src/math/Calc.kf")
+            assert(item.operator == "arithmetic")
+            assert(item.original == "*")
+            assert(item.replacement == "/")
+            assert(item.location.length == 1)
+            assert(item.phase == "parse")
+            assert(item.durationMs >= 0)
+            assert(item.id != report.mutants.get(0).id)
+            if (mode == "parser") { assert(item.evidence.contains("PARSE")) }
+            if (mode == "lexer") { assert(item.evidence.contains("LEX002")) }
+            if (mode == "tokens") { assert(item.evidence.contains("Variant changes tokens other than the selected token")) }
+            assert(item.evidence.contains("log:"))
+            assert(File(log + "/0.source").readText() == source)
+            assert(File(log + "/1.source").readText() == expected)
+            assert(!File(log + "/2.source").exists(), "discarded parse candidate must start no check")
+            assert(report.mutants.get(0).evidence.contains("/1-test.stdout"), "logs must retain the candidate index after a discard")
+            assert(readFixtureSource(root) == source)
+            assert(Directory(log).delete())
+            assert(Directory(log).createDirectories())
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+
+test "compiler rejection permits a later detected mutant with independent check logs", "discard-check" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    assert(Directory(log).createDirectories())
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    var source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return 7 * 0 + 1 } }\n"
+    assert(File(root + "/src/math/Calc.kf").writeText(source))
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"one\" { assert(new Calc().sum(2, 3) == 1) }"))
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), 10000, 90000)
+
+    try {
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        assert(result.exitCode == 0)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.status == "complete")
+        assert(report.counts.candidates == 1)
+        assert(report.counts.executed == 1)
+        assert(report.counts.killed == 1)
+        assert(report.counts.pending == 0)
+        assert(report.discardedCandidates.size == 1)
+        var rejected = report.discardedCandidates.get(0)
+        assert(rejected.phase == "check")
+        assert(rejected.evidence.contains("ARITH001"))
+        assert(rejected.evidence.contains("/0-check.stdout"))
+        assert(report.mutants.get(0).evidence.contains("/1-test.stdout"))
+        assert(rejected.id != report.mutants.get(0).id)
+        assert(File(log + "/0.source").readText() == source)
+        assert(File(log + "/1.source").readText() == "package src.math\nclass Calc { Int sum(Int a, Int b) { return 7 / 0 + 1 } }\n")
+        assert(File(log + "/2.source").readText() == "package src.math\nclass Calc { Int sum(Int a, Int b) { return 7 * 0 - 1 } }\n")
+        assert(!File(log + "/3.source").exists())
+        assert(readFixtureSource(root) == source)
+    } finally { assert(Directory(root).delete()) }
+}
+
+String reportPath(String output) {
+    var found = ""
+    var count = 0
+    for (var line in output.split("\n")) {
+        if (line.startsWith("reportPath=")) {
+            found = json.decode<String>(line.substring(11))
+            count++
+        }
+    }
+    runAssertEvidence(count == 1, "one report path announcement required: " + output)
+    assert(new java.io.File(found).isAbsolute())
+    return found
+}
+
+test "each invocation reserves and announces its own report with canonical project identity", "m3" {
+    var root = runProjectCopy()
+    assert(File(root + "/scope.json").writeText("[]"))
+    var alias = root + "-alias"
+    assert(process.run("ln", "-s", root, alias).exitCode == 0)
+    var custom = root + "/artifacts ação \"😀\"\nline"
+    var id = "248a229c-2c75-46d4-a802-ae69ac23376b"
+    try {
+        var first = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--run-id", id)
+
+        runAssertEvidence(first.exitCode == 3, first.stdout + first.stderr)
+        var firstPath = reportPath(first.stdout)
+        assert(firstPath.startsWith(root + "/.kof-mut/reports/"))
+        var original = reportText(firstPath)
+        var firstReport = readRun(firstPath)
+        assert(firstReport.status == "no_scope")
+        assert(firstReport.runId == id)
+        assert(File(root + "/canonical-path").writeText(root))
+        var hash = process.run("sha256sum", root + "/canonical-path").stdout.split(" ")[0]
+        assert(new java.io.File(firstPath).getParentFile().getParentFile().getName() == hash)
+        for (var project in listOf(root, alias)) {
+            var next = process.run("./bin/kof-mut", "run", "--project", project, "--files", root + "/scope.json", "--report-dir", custom, "--run-id", id)
+            runAssertEvidence(next.exitCode == 3, next.stdout + next.stderr)
+            var nextPath = reportPath(next.stdout)
+            assert(nextPath.startsWith(custom + "/" + hash + "/" + id + "-"))
+            assert(nextPath != firstPath)
+            assert(readRun(nextPath).runId == id)
+            assert(reportText(firstPath) == original)
+            firstPath = nextPath
+            original = reportText(firstPath)
+        }
+        assert(File(root + "/scope.json").writeText("[\"src/math/Calc.kf\"]"))
+        assert(File(root + "/kof-mut.json").writeText(json.encode(FixtureConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf("touch", root + "/legacy-command"), listOf("kof", "test", "tests"), 10000, 30000))))
+        var legacy = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report", root + "/forbidden")
+        assert(legacy.exitCode == 2)
+        assert(legacy.stdout.contains("--report-dir"))
+        assert(!legacy.stdout.contains("reportPath="))
+        assert(!File(root + "/forbidden").exists())
+        assert(!File(root + "/legacy-command").exists(), "legacy flag must be rejected before project commands")
+    } finally { assert(process.run("rm", alias).exitCode == 0); assert(Directory(root).delete()) }
+}
+
+String reportText(String path) {
+    var value = File(path).readText()
+    if (value != null) { return value }
+    throw "Missing file: " + path
+}
+
+test "whole project snapshots omit both report namespaces and preserve input inventory", "m3" {
+    var root = runProjectCopy()
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    assert(Directory(root + "/.kof-mut/reports").createDirectories())
+    assert(Directory(root + "/artifacts").createDirectories())
+    assert(File(root + "/.kof-mut/reports/old.json").writeText("previous default"))
+    assert(File(root + "/artifacts/old.json").writeText("previous custom"))
+    assert(File(root + "/kof-mut.json").writeText(json.encode(FixtureConfig(1, listOf("src"), listOf("tests"), listOf("."), listOf("./runner", "check", "no-reports"), listOf("./runner", "test", "no-reports"), 10000, 90000))))
+    var before = process.run("find", root + "/src", root + "/tests", "-type", "f", "-exec", "sha256sum", "{}", ";").stdout
+    try {
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/artifacts")
+
+        runAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+        assert(readRun(reportPath(result.stdout)).counts.killed == 1)
+        assert(File(root + "/.kof-mut/reports/old.json").readText() == "previous default")
+        assert(File(root + "/artifacts/old.json").readText() == "previous custom")
+        assert(process.run("find", root + "/src", root + "/tests", "-type", "f", "-exec", "sha256sum", "{}", ";").stdout == before)
+    } finally { assert(Directory(root).delete()) }
+}
+
+void waitReady(String path) {
+    var start = System.nanoTime()
+    while (!File(path).exists() && (System.nanoTime() - start) / 1000000 < 15000) { Thread.sleep(20 as Long) }
+    runAssertEvidence(File(path).exists(), "readiness missing: " + path)
+}
+
+Process startRun(String root, String log, String reports) {
+    return startRunPath(root, log, reports, System.getenv("PATH"))
+}
+
+Process startRunPath(String root, String log, String reports, String path) {
+    assert(Directory(log).createDirectories())
+    var argv = new String[13]
+    argv[0] = "env"; argv[1] = "KOF_MUT_OBSERVATIONS=" + log
+    argv[2] = "PATH=" + path
+    argv[3] = "./bin/kof-mut"; argv[4] = "run"; argv[5] = "--project"; argv[6] = root
+    argv[7] = "--files"; argv[8] = root + "/scope.json"
+    argv[9] = "--report-dir"; argv[10] = reports
+    argv[11] = "--run-id"; argv[12] = "248a229c-2c75-46d4-a802-ae69ac23376b"
+    var builder = new java.lang.ProcessBuilder(argv)
+    builder.redirectOutput(new java.io.File(log + "/stdout"))
+    builder.redirectError(new java.io.File(log + "/stderr"))
+    var child = builder.start()
+    child.getOutputStream().close()
+    return child
+}
+
+void prepareControlled(String root, String mode, Long timeout, Long budget) {
+    assert(process.run("cp", "-a", "src/test/fixtures/m3-runner", root + "/runner").exitCode == 0)
+    assert(File(root + "/src/math/original.txt").writeText(readFixtureSource(root)))
+    fixtureConfig(root, listOf("./runner", "check", mode), listOf("./runner", "test", mode), timeout, budget)
+}
+
+void assertStopped(String log) {
+    assert(!activePid(reportText(log + "/parent.pid")), "command parent remains active")
+    assert(!activePid(reportText(log + "/child.pid")), "command descendant remains active")
+    var sandbox = new java.io.File(reportText(log + "/cwd").trim()).getParent()
+    assert(!File(sandbox).exists(), "execution sandbox remains")
+}
+
+test "INT and TERM clean their execution while a simultaneous run remains active and recoverable", "m3" {
+    var root = runProjectCopy()
+    prepareControlled(root, "baseline-check", 30000, 60000)
+    try {
+        for (var signal in listOf("INT", "TERM")) {
+            var firstLog = root + "/" + signal + "-first"
+            var secondLog = root + "/" + signal + "-second"
+            var first = startRun(root, firstLog, root + "/artifacts")
+            var second = startRun(root, secondLog, root + "/artifacts")
+            try {
+                waitReady(firstLog + "/ready"); waitReady(secondLog + "/ready")
+                assert(first.isAlive() && second.isAlive(), "both invocations must overlap")
+                var firstPath = reportPath(reportText(firstLog + "/stdout"))
+                var secondPath = reportPath(reportText(secondLog + "/stdout"))
+                assert(firstPath != secondPath, "same project and UUID require different reservations")
+                assert(!File(firstPath).exists() && !File(secondPath).exists())
+
+                assert(process.run("kill", "-" + signal, "" + first.pid()).exitCode == 0)
+                assert(first.waitFor(5000 as Long, TimeUnit.MILLISECONDS))
+                var expected = 130
+                if (signal == "TERM") { expected = 143 }
+                assert(first.exitValue() == expected)
+                assertStopped(firstLog)
+                assert(!File(firstPath).exists(), "interrupted execution must not publish complete")
+                assert(second.isAlive())
+                assert(activePid(reportText(secondLog + "/parent.pid")))
+                assert(activePid(reportText(secondLog + "/child.pid")))
+                assert(File(secondLog + "/release").writeText("continue"))
+                assert(second.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+                runAssertEvidence(second.exitValue() == 0, reportText(secondLog + "/stdout") + reportText(secondLog + "/stderr"))
+                assert(readRun(secondPath).status == "complete")
+                assertStopped(secondLog)
+            } finally {
+                first.destroyForcibly(); second.destroyForcibly()
+                for (var log in listOf(firstLog, secondLog)) {
+                    if (File(log + "/parent.pid").exists()) { var killed = process.run("kill", "-KILL", "--", "-" + reportText(log + "/parent.pid").trim()) }
+                }
+            }
+        }
+        prepareControlled(root, "none", 10000, 30000)
+        var recovered = startRun(root, root + "/recovered", root + "/artifacts")
+        assert(recovered.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(recovered.exitValue() == 0)
+        assert(readRun(reportPath(reportText(root + "/recovered/stdout"))).status == "complete")
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "a filesystem publication failure preserves earlier reports and the next run recovers", "m3", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 30000
+        if (unbounded) { budget = 0 }
+
+        var root = runProjectCopy()
+        prepareControlled(root, "none", 10000, budget)
+        try {
+            var first = startRun(root, root + "/first", root + "/artifacts")
+            assert(first.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+            assert(first.exitValue() == 0)
+            var previous = reportPath(reportText(root + "/first/stdout"))
+            var previousBytes = reportText(previous)
+            prepareControlled(root, "baseline-check", 10000, budget)
+            var log = root + "/failure"
+            var failing = startRun(root, log, root + "/artifacts")
+            try {
+                waitReady(log + "/ready")
+                var announced = reportPath(reportText(log + "/stdout"))
+                var reserved = new java.io.File(announced).getParent()
+                runAssertEvidence(Directory(reserved).delete(), "reservation could not be removed: " + reserved)
+                assert(File(reserved).writeText("filesystem obstruction"))
+
+                assert(File(log + "/release").writeText("continue"))
+                assert(failing.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+                runAssertEvidence(failing.exitValue() == 2, "publication exit=" + failing.exitValue() + ": " + reportText(log + "/stdout") + reportText(log + "/stderr"))
+                assert(!File(announced).exists(), "a failed publication must expose no final JSON")
+                assert(!reportText(log + "/stdout").contains(": complete"))
+                assert(reportText(previous) == previousBytes)
+                assertStopped(log)
+            } finally { failing.destroyForcibly() }
+            prepareControlled(root, "none", 10000, budget)
+            var next = startRun(root, root + "/next", root + "/artifacts")
+            assert(next.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+            runAssertEvidence(next.exitValue() == 0, reportText(root + "/next/stdout") + reportText(root + "/next/stderr"))
+            var nextPath = reportPath(reportText(root + "/next/stdout"))
+            assert(nextPath != previous)
+            assert(readRun(nextPath).counts.killed == 1)
+            assert(reportText(previous) == previousBytes)
+        } finally { assert(Directory(root).delete()) }
+    }
+}
+
+
+test "the global budget stops baseline check baseline test and variant phases without later commands", "m3" {
+    var root = runProjectCopy()
+    assert(File(root + "/src/math/Calc.kf").writeText("package src.math\nclass Calc { Int sum(Int a, Int b) { return a + b + 0 } }\n"))
+    try {
+        for (var mode in listOf("baseline-check", "baseline-test", "variant-check", "variant-test")) {
+            prepareControlled(root, mode, 10000, 1500)
+            var log = root + "/" + mode
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                waitReady(log + "/ready")
+                assert(child.waitFor(7000 as Long, TimeUnit.MILLISECONDS))
+                runAssertEvidence(child.exitValue() == 3, reportText(log + "/stdout") + reportText(log + "/stderr"))
+                assertStopped(log)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                assert(report.status == "incomplete")
+                assert(report.durationMs >= 1500 && report.durationMs < 5000)
+                var commands = reportText(log + "/commands")
+                if (mode == "baseline-check") {
+                    assert(commands == "baseline:check\n")
+                    assert(report.baseline.check.summary != null)
+                    assert(report.baseline.test.exitCode == null)
+                    assert(report.counts.candidates == 0)
+                }
+                if (mode == "baseline-test") {
+                    assert(commands == "baseline:check\nbaseline:test\n")
+                    assert(report.baseline.check.exitCode == 0)
+                    assert(report.baseline.test.summary != null)
+                    assert(report.counts.candidates == 0)
+                }
+                if (mode.startsWith("variant")) {
+                    var expected = "baseline:check\nbaseline:test\nvariant:check\n"
+                    var phase = "check"
+                    if (mode == "variant-test") { expected = expected + "variant:test\n"; phase = "test" }
+                    assert(commands == expected)
+                    assert(report.baseline.status == "passed")
+                    assert(report.counts.candidates == 2)
+                    assert(report.counts.timeout == 1)
+                    assert(report.counts.pending == 1)
+                    assert(report.mutants.get(0).phase == phase)
+                    assert(report.mutants.get(1).status == "Pending")
+                    assert(report.mutants.get(1).durationMs == 0)
+                    assert(report.discardedCandidates.size == 0)
+                }
+            } finally { child.destroyForcibly() }
+        }
+        prepareControlled(root, "none", 10000, 1)
+        var exhausted = startRun(root, root + "/preparation", root + "/artifacts")
+        assert(exhausted.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(exhausted.exitValue() == 3)
+        var preparation = readRun(reportPath(reportText(root + "/preparation/stdout")))
+        assert(preparation.baseline.check.exitCode == null)
+        assert(!File(root + "/preparation/commands").exists(), "preparation consumes the same global budget")
+        prepareControlled(root, "none", 10000, 30000)
+        var recovered = startRun(root, root + "/recovered", root + "/artifacts")
+        assert(recovered.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+        assert(recovered.exitValue() == 0)
+        assert(readRun(reportPath(reportText(root + "/recovered/stdout"))).counts.killed == 2)
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "caller relative paths and projects with the same basename have independent identities", "m3" {
+    var root = runProjectCopy()
+    var executable = new java.io.File("bin/kof-mut").getCanonicalPath()
+    try {
+        for (var parent in listOf("one", "two")) {
+            assert(Directory(root + "/" + parent + "/same").createDirectories())
+            assert(process.run("cp", "-a", "fixtures/detected/.", root + "/" + parent + "/same").exitCode == 0)
+            assert(File(root + "/" + parent + "/same/scope.json").writeText("[]"))
+        }
+        var first = process.run("env", "--chdir=" + root, executable, "run", "--project", "one/same", "--files", "one/same/scope.json", "--config", "kof-mut.json", "--report-dir", "reports")
+        var second = process.run("env", "--chdir=" + root, executable, "run", "--project", "two/same", "--files", "two/same/scope.json", "--report-dir", "reports")
+
+        assert(first.exitCode == 3 && second.exitCode == 3)
+        var firstPath = reportPath(first.stdout)
+        var secondPath = reportPath(second.stdout)
+        assert(firstPath.startsWith(root + "/reports/") && secondPath.startsWith(root + "/reports/"))
+        assert(new java.io.File(firstPath).getParentFile().getParent() != new java.io.File(secondPath).getParentFile().getParent())
+        assert(readRun(firstPath).status == "no_scope")
+        assert(readRun(secondPath).status == "no_scope")
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "clamping negatives has one equivalent boundary survivor across negative zero and positive inputs", "m3" {
+    var result = process.run("./bin/kof-mut", "run", "--project", "fixtures/equivalent", "--files", "fixtures/equivalent/scope.json", "--report-dir", ".agent/tmp/m3/equivalent")
+
+    runAssertEvidence(result.exitCode == 1, result.stdout + result.stderr)
+    var report = readRun(reportPath(result.stdout))
+    assert(report.status == "complete")
+    assert(report.baseline.status == "passed")
+    assert(report.baseline.test.executedTests == 3)
+    assert(report.counts.candidates == 1)
+    assert(report.counts.survived == 1)
+    assert(report.counts.killed == 0)
+    assert(report.discardedCandidates.size == 0)
+    assert(report.limitations.size == 0)
+    assert(report.mutants.get(0).operator == "boundary")
+    assert(report.mutants.get(0).original == "<")
+    assert(report.mutants.get(0).replacement == "<=")
+    assert(report.mutants.get(0).location.line == 5)
+    assert(report.mutants.get(0).location.column == 15)
+}
+
+
+test "parallel limit rejects original incompatible JSON values before project commands and internal output", "parallel-config" {
+    var root = runProjectCopy()
+    fixtureConfig(root, listOf("touch", root + "/executed"), listOf("touch", root + "/executed"), 10000, 30000)
+    var original = reportText(root + "/kof-mut.json")
+    var source = readFixtureSource(root)
+    var bytes = new Int[4]; bytes[0] = 0; bytes[1] = 255; bytes[2] = 13; bytes[3] = 10
+    assert(File(root + "/src/math/data.bin").writeBytes(bytes))
+    assert(process.run("chmod", "640", root + "/src/math/data.bin").exitCode == 0)
+    try {
+        for (var value in listOf("0", "5", "-1", "1.5", "1.0", "1e0", "4294967297", "9223372036854775808", "true", "false", "\"2\"", "[]", "{}")) {
+            assert(File(root + "/kof-mut.json").writeText(original.substring(0, original.length() - 1) + ",\"maxParallelMutants\":" + value + "}"))
+
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json")
+
+            runAssertEvidence(result.exitCode == 2, value + ": " + result.stdout + result.stderr)
+            runAssertEvidence(!result.stdout.contains("reportPath="), value)
+            runAssertEvidence(!File(root + "/executed").exists(), value)
+            runAssertEvidence(!File(root + "/.kof-mut").exists(), value)
+            assert(readFixtureSource(root) == source)
+            var observed = File(root + "/src/math/data.bin").readBytes()
+            assert(observed.length == 4 && observed[0] == 0 && observed[1] == 255 && observed[2] == 13 && observed[3] == 10)
+            assert(process.run("stat", "-c", "%a", root + "/src/math/data.bin").stdout.trim() == "640")
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+void parallelLimit(String root, String value) {
+    var original = reportText(root + "/kof-mut.json")
+    assert(File(root + "/kof-mut.json").writeText(original.substring(0, original.length() - 1) + ",\"maxParallelMutants\":" + value + "}"))
+}
+
+test "parallel configuration accepts supported limits and defaults to one without changing JSON v1", "parallel-config" {
+    var root = runProjectCopy()
+    try {
+        for (var value in listOf("absent", "null", "1", "2", "3", "4")) {
+            prepareControlled(root, "none", 10000, 30000)
+            if (value != "absent") { parallelLimit(root, value) }
+            var log = root + "/accepted-" + value
+
+            var child = startRun(root, log, root + "/artifacts")
+
+            assert(child.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
+            runAssertEvidence(child.exitValue() == 0, reportText(log + "/stdout") + reportText(log + "/stderr"))
+            var expected = value
+            if (value == "absent" || value == "null") { expected = "1" }
+            assert(reportText(log + "/stdout").contains("maxParallelMutants=" + expected))
+            var report = readRun(reportPath(reportText(log + "/stdout")))
+            assert(report.status == "complete" && report.counts.killed == 1)
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+List<String> parallelSources() {
+    return listOf(
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return true } Bool c() { return true } Bool d() { return true } Bool e() { return true } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return false } Bool b() { return true } Bool c() { return true } Bool d() { return true } Bool e() { return true } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return false } Bool c() { return true } Bool d() { return true } Bool e() { return true } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return true } Bool c() { return false } Bool d() { return true } Bool e() { return true } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return true } Bool c() { return true } Bool d() { return false } Bool e() { return true } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return true } Bool c() { return true } Bool d() { return true } Bool e() { return false } Bool f() { return true } }\n",
+        "package src.math\nclass Calc { Bool a() { return true } Bool b() { return true } Bool c() { return true } Bool d() { return true } Bool e() { return true } Bool f() { return false } }\n")
+}
+
+void prepareParallel(String root, String limit, String mode, Long timeout, Long budget) {
+    var sources = parallelSources()
+    assert(File(root + "/src/math/Calc.kf").writeText(sources.get(0)))
+    assert(File(root + "/src/math/original.txt").writeText(sources.get(0)))
+    for (var i = 0; i < 6; i++) { assert(File(root + "/src/math/expected-" + i + ".txt").writeText(sources.get(i + 1))) }
+    var bytes = new Int[4]; bytes[0] = 0; bytes[1] = 255; bytes[2] = 10; bytes[3] = 65
+    assert(File(root + "/src/math/data.bin").writeBytes(bytes))
+    assert(process.run("chmod", "640", root + "/src/math/data.bin").exitCode == 0)
+    assert(process.run("cp", "-a", "src/test/fixtures/parallel-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check", mode), listOf("./runner", "test", mode), timeout, budget)
+    if (limit != "absent") { parallelLimit(root, limit) }
+}
+
+String readyEvent(String log, Int candidate, String phase) {
+    var path = log + "/ready-" + candidate + "-" + phase
+    waitReady(path)
+    var event = reportText(path).trim()
+    assert(activePid(reportText(event + "/pid")), "ready parent must be alive")
+    assert(activePid(reportText(event + "/child")), "ready child must be alive")
+    return event
+}
+
+void assertParallelStopped(String log) {
+    for (var name in Directory(log + "/events").list()) {
+        var event = log + "/events/" + name
+        runAssertEvidence(!activePid(reportText(event + "/pid")), "command remains alive: " + event)
+        if (File(event + "/child").exists()) { runAssertEvidence(!activePid(reportText(event + "/child")), "descendant remains alive: " + event) }
+        var sandbox = new java.io.File(reportText(event + "/cwd").trim()).getParent()
+        runAssertEvidence(!File(sandbox).exists(), "sandbox remains: " + sandbox)
+    }
+}
+
+void stopParallel(Process child, String log) {
+    if (child.isAlive()) { var sent = process.run("kill", "-TERM", "" + child.pid()); child.waitFor(5000 as Long, TimeUnit.MILLISECONDS); child.destroyForcibly() }
+    if (!File(log + "/events").isDirectory()) { return }
+    for (var name in Directory(log + "/events").list()) {
+        var event = log + "/events/" + name
+        if (File(event + "/pid").exists()) { var killed = process.run("kill", "-KILL", "--", "-" + reportText(event + "/pid").trim()) }
+    }
+}
+
+RunReport cleanupReport(String log, String name) {
+    var evidence = ".agent/tmp/m3f/cleanup-reports"
+    assert(Directory(evidence).createDirectories())
+    keepBudgetEvidence(log, name)
+    var path = reportPath(reportText(log + "/stdout"))
+    assert(File(evidence + "/" + name + ".json").writeText(reportText(path)))
+    assert(File(evidence + "/" + name + ".stdout").writeText(reportText(log + "/stdout")))
+    return readRun(path)
+}
+
+void assertParallelCandidates(RunReport report) {
+    assert(report.mutants.size + report.discardedCandidates.size == 6, "every selected candidate must appear exactly once, including on error")
+    var sources = parallelSources()
+    for (var i = 0; i < 6; i++) {
+        var offset = sources.get(i + 1).indexOf("false")
+        var expectedId = "src/math/Calc.kf:" + offset + ":false"
+        var occurrences = 0
+        for (var mutant in report.mutants) {
+            if (mutant.id == expectedId) {
+                occurrences++
+                assert(mutant.file == "src/math/Calc.kf" && mutant.operator == "boolean")
+                assert(mutant.original == "true" && mutant.replacement == "false")
+                assert(mutant.location.offset == offset && mutant.location.length == 4)
+                assert(mutant.location.line == 2 && mutant.location.column == offset - sources.get(0).indexOf("\n"))
+                assert(mutant.durationMs >= 0)
+            }
+        }
+        for (var discarded in report.discardedCandidates) {
+            if (discarded.id == expectedId) {
+                occurrences++
+                assert(discarded.file == "src/math/Calc.kf" && discarded.operator == "boolean")
+                assert(discarded.original == "true" && discarded.replacement == "false")
+                assert(discarded.location.offset == offset && discarded.location.length == 4)
+                assert(discarded.location.line == 2 && discarded.location.column == offset - sources.get(0).indexOf("\n"))
+                assert(discarded.durationMs >= 0)
+            }
+        }
+        runAssertEvidence(occurrences == 1, "candidate missing or duplicated: " + expectedId)
+    }
+    for (var i = 1; i < report.mutants.size; i++) { assert(report.mutants.get(i - 1).location.offset < report.mutants.get(i).location.offset) }
+}
+
+String ineffectiveSignals(String root) {
+    assert(Directory(root + "/tools").createDirectories())
+    assert(File(root + "/tools/kill").writeText("#!/usr/bin/env bash\nexit 0\n"))
+    assert(process.run("chmod", "+x", root + "/tools/kill").exitCode == 0)
+    return root + "/tools:" + System.getenv("PATH")
+}
+
+void assertCompletedLog(String evidence, Int index, String phase, String expected) {
+    var start = evidence.indexOf("stdout: ")
+    var end = evidence.indexOf("; stderr: ")
+    assert(start >= 0 && end > start, "completed evidence must reference its command logs")
+    var path = evidence.substring(start + 8, end)
+    assert(path.endsWith("/" + index + "-" + phase + ".stdout"))
+    assert(reportText(path).contains(expected), "referenced log must retain the completed command evidence")
+}
+
+test "configured parallelism reaches its limit with independent variants and replaces each free slot immediately", "parallel" {
+    var root = runProjectCopy()
+    var sources = parallelSources()
+    var tests = reportText(root + "/tests/Suite.kf")
+    try {
+        for (var value in listOf("absent", "null", "1", "2", "3", "4")) {
+            var limit = 1
+            if (value == "2") { limit = 2 }
+            if (value == "3") { limit = 3 }
+            if (value == "4") { limit = 4 }
+            prepareParallel(root, value, "check", 30000, 60000)
+            var log = root + "/limit-" + value
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                waitReady(log + "/stdout")
+                for (var i = 0; i < limit; i++) { readyEvent(log, i, "check") }
+                assert(!File(log + "/ready-" + limit + "-check").exists(), "limit exceeded before release")
+                assert(reportText(log + "/maximum").trim() == "" + limit)
+                var released = 0
+                if (limit > 1) { released = 1 }
+
+                assert(File(log + "/release-" + released + "-check").writeText("continue"))
+                readyEvent(log, limit, "check")
+
+                if (limit > 1) { readyEvent(log, 0, "check") }
+                assert(File(log + "/release").writeText("continue"))
+                assert(child.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+                runAssertEvidence(child.exitValue() == 0, reportText(log + "/stdout") + reportText(log + "/stderr"))
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                assert(report.counts.candidates == 6 && report.counts.killed == 6)
+                assert(reportText(log + "/maximum").trim().toInt() <= limit, "process overlap exceeds limit")
+                var baselineChecks = 0
+                var baselineTests = 0
+                for (var name in Directory(log + "/events").list()) {
+                    var event = log + "/events/" + name
+                    var candidate = reportText(event + "/candidate").trim()
+                    var expected = sources.get(0)
+                    if (candidate == "baseline") {
+                        if (reportText(event + "/phase").trim() == "check") { baselineChecks++ } else { baselineTests++ }
+                    } else { expected = sources.get(candidate.toInt() + 1) }
+                    assert(reportText(event + "/source") == expected, "variant has more than its single mutation")
+                    assert(reportText(event + "/test") == tests, "tests must be intact")
+                    assert(reportText(event + "/state") == "clean", "side effects crossed snapshots")
+                    var binary = File(event + "/binary").readBytes()
+                    assert(binary.length == 4 && binary[0] == 0 && binary[1] == 255 && binary[2] == 10 && binary[3] == 65)
+                    assert(reportText(event + "/mode").trim() == "640")
+                }
+                assert(baselineChecks == 1 && baselineTests == 1)
+                assert(readFixtureSource(root) == sources.get(0))
+                assert(reportText(root + "/tests/Suite.kf") == tests)
+                assert(!File(root + "/state").exists())
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "parallel candidates wait for the single complete baseline", "parallel" {
+    var root = runProjectCopy()
+    try {
+        for (var phase in listOf("check", "test")) {
+            prepareParallel(root, "4", "baseline-" + phase, 30000, 60000)
+            var log = root + "/baseline-" + phase
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                waitReady(log + "/ready-baseline-" + phase)
+                for (var name in Directory(log + "/events").list()) { assert(reportText(log + "/events/" + name + "/candidate").trim() == "baseline") }
+                assert(!File(reportPath(reportText(log + "/stdout"))).exists())
+
+                assert(File(log + "/release").writeText("continue"))
+
+                assert(child.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+                assert(child.exitValue() == 0)
+                var checks = 0; var tests = 0
+                for (var name in Directory(log + "/events").list()) {
+                    var event = log + "/events/" + name
+                    if (reportText(event + "/candidate").trim() == "baseline") {
+                        if (reportText(event + "/phase").trim() == "check") { checks++ } else { tests++ }
+                    }
+                }
+                assert(checks == 1 && tests == 1)
+                assert(readRun(reportPath(reportText(log + "/stdout"))).counts.killed == 6)
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+void waitFinished(String log, String candidate, String phase) {
+    waitReady(log + "/events")
+    var began = System.nanoTime()
+    var finished = false
+    while (!finished && (System.nanoTime() - began) / 1000000 < 15000) {
+        for (var name in Directory(log + "/events").list()) {
+            var event = log + "/events/" + name
+            if (File(event + "/finished").exists() && reportText(event + "/candidate").trim() == candidate && reportText(event + "/phase").trim() == phase) { finished = true }
+        }
+        if (!finished) { Thread.sleep(20 as Long) }
+    }
+    runAssertEvidence(finished, "command failed to finish: " + candidate + ":" + phase)
+}
+
+test "out of order completion keeps candidate identities evidence states and discard order deterministic", "parallel" {
+    var root = runProjectCopy()
+    var previous: List<RunMutant> = listOf()
+    var previousDiscards: List<RunDiscard> = listOf()
+    try {
+        for (var limit in listOf("1", "4")) {
+            prepareParallel(root, limit, "mixed", 30000, 60000)
+            var log = root + "/mixed-" + limit
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                readyEvent(log, 0, "check")
+                if (limit == "4") { waitFinished(log, "3", "test"); readyEvent(log, 0, "check") }
+
+                assert(File(log + "/release").writeText("continue"))
+
+                assert(child.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+                assert(child.exitValue() == 3)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                assert(report.status == "incomplete" && report.baseline.status == "passed")
+                assert(report.counts.candidates == 5 && report.counts.executed == 5)
+                assert(report.counts.killed == 3 && report.counts.survived == 1 && report.counts.testError == 1)
+                assert(report.counts.timeout == 0 && report.counts.pending == 0)
+                assert(report.discardedCandidates.size == 1)
+                var discard = report.discardedCandidates.get(0)
+                assert(discard.evidence.contains("SYNTHETIC") && discard.evidence.contains("/0-check.stdout"))
+                assert(discard.phase == "check" && discard.location.offset < report.mutants.get(0).location.offset)
+                for (var i = 0; i < 5; i++) {
+                    var mutant = report.mutants.get(i)
+                    var expected = "Killed"
+                    if (i == 1) { expected = "Survived" }
+                    if (i == 2) { expected = "TestError" }
+                    assert(mutant.status == expected && mutant.phase == "test")
+                    assert(mutant.evidence.contains("/" + (i + 1) + "-test.stdout"))
+                    if (i > 0) { assert(mutant.location.offset > report.mutants.get(i - 1).location.offset) }
+                    if (limit == "4") {
+                        var serial = previous.get(i)
+                        assert(mutant.id == serial.id && mutant.status == serial.status && mutant.phase == serial.phase)
+                        assert(json.encode(mutant.location) == json.encode(serial.location))
+                    }
+                }
+                if (limit == "4") { assert(discard.id == previousDiscards.get(0).id) }
+                previous = report.mutants
+                previousDiscards = report.discardedCandidates
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+        prepareParallel(root, "4", "all-discard", 10000, 30000)
+        var all = startRun(root, root + "/all-discard", root + "/artifacts")
+        assert(all.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+        assert(all.exitValue() == 3)
+        var rejected = readRun(reportPath(reportText(root + "/all-discard/stdout")))
+        assert(rejected.status == "no_mutants" && rejected.counts.candidates == 0)
+        assert(rejected.discardedCandidates.size == 6)
+        for (var i = 1; i < 6; i++) { assert(rejected.discardedCandidates.get(i).location.offset > rejected.discardedCandidates.get(i - 1).location.offset) }
+        assertParallelStopped(root + "/all-discard")
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "an unexpected worker log access failure cancels active siblings drains tasks and publishes error with recovery", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 60000
+        if (unbounded) { budget = 0 }
+
+        var root = runProjectCopy()
+        try {
+            prepareParallel(root, "2", "none", 10000, budget)
+            var first = startRun(root, root + "/previous", root + "/artifacts")
+            assert(first.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+            assert(first.exitValue() == 0)
+            var previous = reportPath(reportText(root + "/previous/stdout"))
+            var bytes = reportText(previous)
+            prepareParallel(root, "2", "test", 30000, budget)
+            var log = root + "/worker-failure"
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                var broken = readyEvent(log, 0, "test")
+                readyEvent(log, 1, "test")
+                assert(!File(log + "/ready-2-test").exists())
+                var link = process.run("readlink", "/proc/" + reportText(broken + "/pid").trim() + "/fd/1")
+                assert(link.exitCode == 0)
+                var output = link.stdout.trim()
+                assert(output.endsWith("/0-test.stdout"))
+                assert(File(output).delete())
+                assert(Directory(output).createDirectories(), "log obstruction must be a real filesystem failure")
+
+                assert(File(log + "/release-0-test").writeText("continue"))
+
+                assert(child.waitFor(5000 as Long, TimeUnit.MILLISECONDS), "failed task left coordinator waiting on a sibling")
+                assert(child.exitValue() == 2)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                keepBudgetEvidence(log, "contract")
+                assert(report.status == "error" && report.limitations.size > 0)
+                assert(report.mutants.size == 6, "error reports must account for every selected candidate")
+                assertParallelCandidates(report)
+                assert(report.counts.testError == 2 && report.counts.pending == 4)
+                for (var i = 2; i < 6; i++) {
+                    assert(report.mutants.get(i).status == "Pending" && report.mutants.get(i).phase == "parse" && report.mutants.get(i).durationMs == 0)
+                    assert(report.mutants.get(i).evidence.contains("error"))
+                }
+                assert(report.mutants.get(0).status == "TestError" && report.mutants.get(0).phase == "test")
+                assert(report.mutants.get(0).evidence.contains("0-test.stdout"))
+                assert(!reportText(log + "/stdout").contains(": complete"))
+                assert(!File(log + "/ready-2-test").exists(), "failure must close admission")
+                assert(reportText(previous) == bytes)
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+            prepareParallel(root, "4", "none", 10000, budget)
+            var next = startRun(root, root + "/recovery", root + "/artifacts")
+            assert(next.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && next.exitValue() == 0)
+            assert(readRun(reportPath(reportText(root + "/recovery/stdout"))).counts.killed == 6)
+            assert(reportText(previous) == bytes)
+            assertParallelStopped(root + "/recovery")
+        } finally { assert(Directory(root).delete()) }
+    }
+}
+
+test "individual deadlines leave siblings and the queue running while the global budget stops all active phases", "parallel", "budget" {
+    var root = runProjectCopy()
+    try {
+        prepareParallel(root, "2", "individual", 1500, 15000)
+        var log = root + "/individual"
+        var child = startRun(root, log, root + "/artifacts")
+        try {
+            readyEvent(log, 0, "test")
+            waitFinished(log, "5", "test")
+            assert(child.waitFor(7000 as Long, TimeUnit.MILLISECONDS))
+            assert(child.exitValue() == 3)
+            var report = readRun(reportPath(reportText(log + "/stdout")))
+            keepBudgetEvidence(log, "contract")
+            assert(report.counts.timeout == 1 && report.counts.killed == 5 && report.counts.pending == 0)
+            assert(report.mutants.get(0).status == "Timeout" && report.mutants.get(0).phase == "test")
+            assert(report.durationMs < 10000)
+            assertParallelStopped(log)
+        } finally { stopParallel(child, log) }
+        for (var phase in listOf("check", "test")) {
+            prepareParallel(root, "4", phase, 20000, 2500)
+            log = root + "/global-" + phase
+            child = startRun(root, log, root + "/artifacts")
+            try {
+                for (var i = 0; i < 4; i++) { readyEvent(log, i, phase) }
+
+                assert(child.waitFor(6500 as Long, TimeUnit.MILLISECONDS))
+
+                assert(child.exitValue() == 3)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                keepBudgetEvidence(log, "contract")
+                assert(report.status == "incomplete" && report.baseline.status == "passed")
+                assert(report.durationMs >= 2500 && report.durationMs < 5500)
+                assert(report.counts.candidates == 6 && report.counts.timeout == 4 && report.counts.pending == 2)
+                assert(report.counts.testError == 0 && report.counts.killed == 0)
+                var events = 6
+                if (phase == "test") { events = 10 }
+                assert(Directory(log + "/events").list().size == events, "a phase started after budget expiry")
+                for (var i = 0; i < 6; i++) {
+                    var mutant = report.mutants.get(i)
+                    if (i < 4) { assert(mutant.status == "Timeout" && mutant.phase == phase) }
+                    else { assert(mutant.status == "Pending" && mutant.phase == "parse" && mutant.durationMs == 0) }
+                }
+                assert(!File(log + "/ready-4-" + phase).exists())
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "INT and TERM terminate four owned groups and descendants while another invocation remains live", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 60000
+        if (unbounded) { budget = 0 }
+
+        var root = runProjectCopy()
+        try {
+            for (var signal in listOf("INT", "TERM")) {
+                prepareParallel(root, "4", "test", 30000, budget)
+                var firstLog = root + "/" + signal + "-owned"
+                var otherLog = root + "/" + signal + "-other"
+                var first = startRun(root, firstLog, root + "/artifacts")
+                var other = startRun(root, otherLog, root + "/artifacts")
+                try {
+                    for (var i = 0; i < 4; i++) { readyEvent(firstLog, i, "test"); readyEvent(otherLog, i, "test") }
+                    var interruptedPath = reportPath(reportText(firstLog + "/stdout"))
+                    var otherPath = reportPath(reportText(otherLog + "/stdout"))
+                    assert(interruptedPath != otherPath)
+                    var clock = System.nanoTime()
+
+                    assert(process.run("kill", "-" + signal, "" + first.pid()).exitCode == 0)
+
+                    assert(first.waitFor(4500 as Long, TimeUnit.MILLISECONDS))
+                    var expected = 130
+                    if (signal == "TERM") { expected = 143 }
+                    assert(first.exitValue() == expected)
+                    assert((System.nanoTime() - clock) / 1000000 < 3500, "group cleanup must have a shared deadline")
+                    assertParallelStopped(firstLog)
+                    assert(!File(interruptedPath).exists())
+                    assert(other.isAlive())
+                    for (var i = 0; i < 4; i++) { readyEvent(otherLog, i, "test") }
+                    assert(File(otherLog + "/release").writeText("continue"))
+                    assert(other.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && other.exitValue() == 0)
+                    assert(readRun(otherPath).status == "complete")
+                    assertParallelStopped(otherLog)
+                } finally { stopParallel(first, firstLog); stopParallel(other, otherLog) }
+            }
+            prepareParallel(root, "4", "none", 10000, budget)
+            var next = startRun(root, root + "/after-signals", root + "/artifacts")
+            assert(next.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && next.exitValue() == 0)
+            assert(readRun(reportPath(reportText(root + "/after-signals/stdout"))).counts.killed == 6)
+            assertParallelStopped(root + "/after-signals")
+        } finally { assert(Directory(root).delete()) }
+    }
+}
+
+test "parallel admission requires valid baseline evidence and preserves no scope no mutants and survivor exits", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 30000
+        if (unbounded) { budget = 0 }
+
+        var root = runProjectCopy()
+        try {
+            for (var mode in listOf("invalid-check", "red", "zero", "survivor", "no-mutants", "no-scope")) {
+                prepareParallel(root, "4", mode, 10000, budget)
+                if (mode == "no-scope") { assert(File(root + "/scope.json").writeText("[]")) }
+                else { assert(File(root + "/scope.json").writeText("[\"src/math/Calc.kf\"]")) }
+                if (mode == "no-mutants") {
+                    var source = "package src.math\nclass Calc { String name() { return \"fixture\" } }\n"
+                    assert(File(root + "/src/math/Calc.kf").writeText(source))
+                    assert(File(root + "/src/math/original.txt").writeText(source))
+                }
+                var log = root + "/contract-" + mode
+                var child = startRun(root, log, root + "/artifacts")
+
+                assert(child.waitFor(15000 as Long, TimeUnit.MILLISECONDS))
+
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                keepBudgetEvidence(log, "contract")
+                if (mode == "survivor") {
+                    assert(child.exitValue() == 1 && report.status == "complete")
+                    assert(report.counts.survived == 1 && report.counts.killed == 4 && report.discardedCandidates.size == 1)
+                    assert(report.mutants.get(1).status == "Survived")
+                    assert(reportText(log + "/stdout").contains(": complete") && reportText(log + "/stdout").contains("Survived src/math/Calc.kf:2:"))
+                } else {
+                    assert(report.counts.candidates == 0)
+                    if (mode == "no-scope") { assert(child.exitValue() == 3 && report.status == "no_scope"); assert(!File(log + "/events").exists()) }
+                    else {
+                        if (mode == "no-mutants") { assert(child.exitValue() == 3 && report.status == "no_mutants" && report.baseline.status == "passed") }
+                        else { assert(child.exitValue() == 2 && report.status == "baseline_failed") }
+                        for (var name in Directory(log + "/events").list()) { assert(reportText(log + "/events/" + name + "/candidate").trim() == "baseline") }
+                    }
+                }
+                if (mode != "no-scope") { assertParallelStopped(log) }
+            }
+        } finally { assert(Directory(root).delete()) }
+    }
+}
+
+test "persistent cleanup failure shares one deadline across concurrent callers and cannot approve", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 2500
+        var timeout: Long = 20000
+        if (unbounded) { budget = 0; timeout = 2500 }
+
+        var root = runProjectCopy()
+        prepareParallel(root, "4", "test", timeout, budget)
+        var log = root + "/failed-cleanup"
+        var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
+        var events: List<String> = listOf()
+        try {
+            for (var i = 0; i < 4; i++) { events.add(readyEvent(log, i, "test")) }
+
+            assert(child.waitFor(6500 as Long, TimeUnit.MILLISECONDS), "cleanup retries restarted the shared deadline")
+
+            runAssertEvidence(child.exitValue() == 2, reportText(log + "/stdout") + reportText(log + "/stderr"))
+            var report = cleanupReport(log, "four-active")
+            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 2500 && report.durationMs < 5500)
+            assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+            assert(json.encode(report.limitations).contains("Cancellation failed:"), "retain cancellation diagnostics alongside task failures")
+            assert(!reportText(log + "/stdout").contains(": complete"))
+            for (var event in events) { assert(activePid(reportText(event + "/child")), "the ineffective signal fixture must leave a real cleanup failure") }
+            assertParallelCandidates(report)
+            assert(report.mutants.size == 6 && report.discardedCandidates.size == 0)
+            assert(report.counts.executed == 4 && report.counts.testError == 4 && report.counts.pending == 2)
+            assert(report.counts.killed == 0 && report.counts.survived == 0 && report.counts.timeout == 0)
+            for (var i = 0; i < 6; i++) {
+                var mutant = report.mutants.get(i)
+                if (i < 4) {
+                    assert(mutant.status == "TestError" && mutant.phase == "test")
+                    assert(mutant.evidence.contains("Cannot confirm process group cleanup"))
+                } else {
+                    assert(mutant.status == "Pending" && mutant.phase == "parse" && mutant.durationMs == 0)
+                    assert(mutant.evidence.contains("error"), "unstarted candidates need explicit error interruption evidence")
+                    assert(!File(log + "/ready-" + i + "-test").exists())
+                }
+            }
+            assert(Directory(log + "/events").list().size == 10, "queued candidates must not start any command")
+        } finally {
+            stopParallel(child, log)
+            for (var event in events) { assert(!activePid(reportText(event + "/child")), "fixture residual must be terminated by the test") }
+            assertParallelStopped(log)
+            assert(Directory(".agent/tmp/m3f/cleanup-observations").createDirectories())
+            assert(process.run("cp", "-a", log, ".agent/tmp/m3f/cleanup-observations/").exitCode == 0)
+            assert(Directory(root).delete())
+        }
+    }
+}
+
+test "cleanup failure preserves five completed kills while the first candidate is still blocked", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 5000
+        var timeout: Long = 20000
+        if (unbounded) { budget = 0; timeout = 5000 }
+
+        var root = runProjectCopy()
+        prepareParallel(root, "4", "individual", timeout, budget)
+        var log = root + "/completed-kills"
+        var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
+        try {
+            var event = readyEvent(log, 0, "test")
+            for (var i = 1; i < 6; i++) { waitFinished(log, "" + i, "test") }
+            readyEvent(log, 0, "test")
+            assert(!File(reportPath(reportText(log + "/stdout"))).exists(), "completed commands must precede timeout and publication")
+
+            assert(child.waitFor(8500 as Long, TimeUnit.MILLISECONDS), "cleanup restarted its shared deadline")
+
+            assert(child.exitValue() == 2)
+            var report = cleanupReport(log, "five-kills")
+            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+            assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+            assert(!reportText(log + "/stdout").contains(": complete"))
+            assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
+            assertParallelCandidates(report)
+            assert(report.mutants.size == 6 && report.discardedCandidates.size == 0)
+            assert(report.counts.executed == 6 && report.counts.killed == 5 && report.counts.testError == 1 && report.counts.pending == 0)
+            assert(report.counts.survived == 0 && report.counts.timeout == 0)
+            for (var i = 0; i < 6; i++) {
+                var mutant = report.mutants.get(i)
+                var expected = "Killed"
+                if (i == 0) { expected = "TestError" }
+                assert(mutant.status == expected && mutant.phase == "test")
+                if (i == 0) { assert(mutant.evidence.contains("Cannot confirm process group cleanup")) }
+                else {
+                    assert(mutant.evidence.contains("1 failed of 1 executed tests") && mutant.durationMs > 0)
+                    assertCompletedLog(mutant.evidence, i, "test", "FAIL fixture: changed result")
+                }
+            }
+        } finally {
+            stopParallel(child, log)
+            assertParallelStopped(log)
+            assert(Directory(root).delete())
+        }
+    }
+}
+
+test "cleanup failure preserves a prior discard survivor and kills with original identities and permits recovery", "parallel", "budget" {
+    for (var unbounded in listOf(false, true)) {
+        var budget: Long = 5000
+        var timeout: Long = 20000
+        var recoveryBudget: Long = 30000
+        if (unbounded) { budget = 0; timeout = 5000; recoveryBudget = 0 }
+
+        var root = runProjectCopy()
+        try {
+            prepareParallel(root, "4", "none", 10000, recoveryBudget)
+            var seedLog = root + "/seed"
+            var seed = startRun(root, seedLog, root + "/artifacts")
+            try { assert(seed.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && seed.exitValue() == 0) }
+            finally { stopParallel(seed, seedLog) }
+            var previous = reportPath(reportText(seedLog + "/stdout"))
+            var previousBytes = reportText(previous)
+            var reference = readRun(previous)
+            prepareParallel(root, "4", "cleanup-mixed", timeout, budget)
+            var log = root + "/completed-mixed"
+            var child = startRunPath(root, log, root + "/artifacts", ineffectiveSignals(root))
+            try {
+                var event = readyEvent(log, 5, "test")
+                waitFinished(log, "0", "check")
+                for (var i = 1; i < 5; i++) { waitFinished(log, "" + i, "test") }
+                readyEvent(log, 5, "test")
+                assert(!File(reportPath(reportText(log + "/stdout"))).exists(), "prior results must finish before the cleanup failure")
+
+                assert(child.waitFor(8500 as Long, TimeUnit.MILLISECONDS), "cleanup restarted its shared deadline")
+
+                assert(child.exitValue() == 2)
+                var report = cleanupReport(log, "discard-survivor")
+                assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+                assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
+                assert(!reportText(log + "/stdout").contains(": complete"))
+                assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
+                assertParallelCandidates(report)
+                assert(report.discardedCandidates.size == 1 && report.mutants.size == 5)
+                assert(report.counts.executed == 5 && report.counts.killed == 3 && report.counts.survived == 1 && report.counts.testError == 1 && report.counts.pending == 0)
+                assert(report.counts.timeout == 0)
+                var discarded = report.discardedCandidates.get(0)
+                assert(discarded.id == reference.mutants.get(0).id && discarded.phase == "check")
+                assert(discarded.evidence.contains("SYNTHETIC") && discarded.evidence.contains("/0-check.stdout"))
+                assertCompletedLog(discarded.evidence, 0, "check", "fixture rejection")
+                for (var i = 0; i < 5; i++) {
+                    var mutant = report.mutants.get(i)
+                    var expected = "Killed"
+                    if (i == 1) { expected = "Survived" }
+                    if (i == 4) { expected = "TestError" }
+                    assert(mutant.id == reference.mutants.get(i + 1).id)
+                    assert(json.encode(mutant.location) == json.encode(reference.mutants.get(i + 1).location))
+                    assert(mutant.status == expected && mutant.phase == "test")
+                    if (i == 4) { assert(mutant.evidence.contains("Cannot confirm process group cleanup")) }
+                    else {
+                        assert(mutant.evidence.contains("/" + (i + 1) + "-test.stdout"))
+                        var failures = "1 failed of 1 executed tests"
+                        if (i == 1) { failures = "0 failed of 1 executed tests" }
+                        assert(mutant.evidence.contains(failures))
+                        var expectedLog = "FAIL fixture: changed result"
+                        if (i == 1) { expectedLog = "PASS fixture" }
+                        assert(mutant.durationMs > 0)
+                        assertCompletedLog(mutant.evidence, i + 1, "test", expectedLog)
+                    }
+                }
+                assert(reportText(previous) == previousBytes)
+            } finally { stopParallel(child, log); assertParallelStopped(log) }
+            prepareParallel(root, "4", "none", 10000, recoveryBudget)
+            var recoveredLog = root + "/recovered"
+            var recovered = startRun(root, recoveredLog, root + "/artifacts")
+            try {
+                assert(recovered.waitFor(15000 as Long, TimeUnit.MILLISECONDS) && recovered.exitValue() == 0)
+                var report = readRun(reportPath(reportText(recoveredLog + "/stdout")))
+                assert(report.status == "complete" && report.counts.killed == 6)
+                assertParallelCandidates(report)
+                assert(reportText(previous) == previousBytes)
+                assertParallelStopped(recoveredLog)
+            } finally { stopParallel(recovered, recoveredLog) }
+        } finally { assert(Directory(root).delete()) }
+    }
+}
+
+void keepBudgetEvidence(String log, String name) {
+    var root = new java.io.File(".agent/tmp/m3f/observations")
+    assert(root.mkdirs() || root.isDirectory())
+    var target = Files.createTempDirectory(root.toPath(), name + "-").toString()
+    assert(process.run("cp", "-a", log + "/.", target).exitCode == 0)
+    var project = new java.io.File(log).getParent()
+    assert(File(target + "/config.json").writeText(reportText(project + "/kof-mut.json")))
+    assert(File(target + "/scope.json").writeText(reportText(project + "/scope.json")))
+    var path = reportPath(reportText(log + "/stdout"))
+    if (File(path).exists()) { assert(File(target + "/report.json").writeText(reportText(path))) }
+    println("budgetEvidence=" + target)
+}
+
+test "zero budget requires explicit integer configuration and reaches baseline and all candidates", "budget", "budget-config" {
+    var root = runProjectCopy()
+    var external = root + "-errors"
+    fixtureConfig(root, listOf("touch", root + "/executed"), listOf("touch", root + "/executed"), 10000, 90000)
+    var config = reportText(root + "/kof-mut.json")
+    var source = readFixtureSource(root)
+    var tests = reportText(root + "/tests/Suite.kf")
+    var bytes = new Int[4]; bytes[0] = 0; bytes[1] = 255; bytes[2] = 13; bytes[3] = 10
+    assert(File(root + "/src/math/data.bin").writeBytes(bytes))
+    assert(process.run("chmod", "640", root + "/src/math/data.bin").exitCode == 0)
+    try {
+        var invalid: List<String> = listOf()
+        for (var value in listOf("-1", "null", "true", "false", "\"0\"", "0.0", "0e0", "[]", "{}", "9223372036854775808")) {
+            invalid.add(config.replace("\"budgetMs\":90000", "\"budgetMs\":" + value))
+        }
+        invalid.add(config.replace(",\"budgetMs\":90000", ""))
+        for (var value in listOf("0", "-1", "null", "false", "\"10\"", "0.0")) {
+            invalid.add(config.replace("\"commandTimeoutMs\":10000", "\"commandTimeoutMs\":" + value))
+        }
+        invalid.add(config.replace("\"commandTimeoutMs\":10000,", ""))
+        for (var text in invalid) {
+            assert(File(root + "/kof-mut.json").writeText(text))
+            var denied = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json")
+            runAssertEvidence(denied.exitCode == 2 && !denied.stdout.contains("reportPath="), text)
+            var published = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", external)
+            runAssertEvidence(published.exitCode == 2 && readRun(reportPath(published.stdout)).status == "error", text)
+            runAssertEvidence(!File(root + "/executed").exists() && !File(root + "/.kof-mut").exists(), "invalid config must preserve outputs: " + text)
+            assert(readFixtureSource(root) == source && reportText(root + "/tests/Suite.kf") == tests)
+            assert(reportText(root + "/kof-mut.json") == text)
+            var observed = File(root + "/src/math/data.bin").readBytes()
+            assert(observed.length == 4 && observed[0] == 0 && observed[1] == 255 && observed[2] == 13 && observed[3] == 10)
+            assert(process.run("stat", "-c", "%a", root + "/src/math/data.bin").stdout.trim() == "640")
+        }
+        prepareParallel(root, "absent", "none", 20000, 0)
+        var log = root + "/accepted-zero"
+        var child = startRun(root, log, external)
+        try {
+            assert(child.waitFor(10000 as Long, TimeUnit.MILLISECONDS), "zero config invocation must finish")
+            runAssertEvidence(child.exitValue() == 0, "explicit zero must reach baseline and candidates: " + reportText(log + "/stdout"))
+            var report = readRun(reportPath(reportText(log + "/stdout")))
+            keepBudgetEvidence(log, "budget")
+            assert(report.status == "complete" && report.baseline.status == "passed")
+            assert(report.counts.killed == 6 && report.counts.pending == 0 && report.limitations.size == 0)
+            assertParallelCandidates(report)
+            assert(reportText(log + "/stdout").contains("maxParallelMutants=1"))
+            assertParallelStopped(log)
+        } finally { stopParallel(child, log) }
+    } finally { assert(Directory(root).delete(), "remove config fixture"); if (File(external).exists()) { assert(Directory(external).delete(), "remove external reports") } }
+}
+
+test "zero budget continues baseline and queued candidates beyond a bounded run deadline", "budget" {
+    var root = runProjectCopy()
+    try {
+        for (var phase in listOf("check", "test")) {
+            for (var limit in listOf("1", "4")) {
+                prepareParallel(root, limit, phase, 20000, 0)
+                var log = root + "/unbounded-" + phase + "-" + limit
+                var child = startRun(root, log, root + "/artifacts")
+                try {
+                    var active = 1
+                    if (limit == "4") { active = 4 }
+                    for (var i = 0; i < active; i++) { readyEvent(log, i, phase) }
+                    assert(!File(log + "/ready-" + active + "-" + phase).exists())
+                    var events = Directory(log + "/events").list().size
+                    Thread.sleep(2700 as Long)
+                    assert(child.isAlive(), "zero budget must not stop at the bounded run deadline")
+                    for (var i = 0; i < active; i++) { readyEvent(log, i, phase) }
+                    assert(Directory(log + "/events").list().size == events, "queued commands started before a slot was released")
+                    assert(File(log + "/release").writeText("continue"))
+                    assert(child.waitFor(10000 as Long, TimeUnit.MILLISECONDS) && child.exitValue() == 0)
+                    var report = readRun(reportPath(reportText(log + "/stdout")))
+                    keepBudgetEvidence(log, "budget")
+                    assert(report.status == "complete" && report.baseline.status == "passed" && report.durationMs > 2500)
+                    assert(report.counts.candidates == 6 && report.counts.killed == 6 && report.counts.pending == 0 && report.counts.timeout == 0)
+                    assertParallelCandidates(report)
+                    for (var i = 0; i < 6; i++) { waitFinished(log, "" + i, "test") }
+                    assert(reportText(log + "/stdout").contains(": complete"))
+                    assertParallelStopped(log)
+                } finally { stopParallel(child, log) }
+            }
+            prepareParallel(root, "4", "baseline-" + phase, 20000, 0)
+            var log = root + "/unbounded-baseline-" + phase
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                waitReady(log + "/ready-baseline-" + phase)
+                var event = reportText(log + "/ready-baseline-" + phase).trim()
+                Thread.sleep(2700 as Long)
+                assert(child.isAlive() && activePid(reportText(event + "/pid")) && activePid(reportText(event + "/child")))
+                for (var name in Directory(log + "/events").list()) { assert(reportText(log + "/events/" + name + "/candidate").trim() == "baseline") }
+                assert(File(log + "/release").writeText("continue"))
+                assert(child.waitFor(10000 as Long, TimeUnit.MILLISECONDS) && child.exitValue() == 0)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                keepBudgetEvidence(log, "budget")
+                assert(report.status == "complete" && report.baseline.status == "passed" && report.counts.killed == 6)
+                assertParallelCandidates(report)
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "zero global budget preserves individual check and test deadlines and drains the remaining queue", "budget", "parallel" {
+    var root = runProjectCopy()
+    try {
+        for (var phase in listOf("check", "test")) {
+            prepareParallel(root, "4", "individual-" + phase, 1500, 0)
+            var log = root + "/individual-zero-" + phase
+            var child = startRun(root, log, root + "/artifacts")
+            try {
+                readyEvent(log, 0, phase)
+                for (var i = 1; i < 6; i++) { waitFinished(log, "" + i, "test") }
+                assert(child.waitFor(6000 as Long, TimeUnit.MILLISECONDS) && child.exitValue() == 3)
+                var report = readRun(reportPath(reportText(log + "/stdout")))
+                keepBudgetEvidence(log, "budget")
+                assert(report.status == "incomplete" && report.baseline.status == "passed")
+                assertParallelCandidates(report)
+                assert(report.counts.candidates == 6 && report.counts.timeout == 1 && report.counts.killed == 5 && report.counts.pending == 0 && report.counts.testError == 0)
+                assert(report.mutants.get(0).status == "Timeout" && report.mutants.get(0).phase == phase)
+                assert(report.mutants.get(0).durationMs >= 1500 && report.mutants.get(0).durationMs < 4500)
+                for (var i = 1; i < 6; i++) {
+                    assert(report.mutants.get(i).status == "Killed" && report.mutants.get(i).phase == "test")
+                    assertCompletedLog(report.mutants.get(i).evidence, i, "test", "FAIL fixture: changed result")
+                }
+                assert(reportText(log + "/stdout").contains(": incomplete") && reportText(log + "/stdout").contains("timeout=1"))
+                assertParallelStopped(log)
+            } finally { stopParallel(child, log) }
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+void runAssertEvidence(Bool condition, String evidence) {
+    if (!condition) { println(evidence) }
+    assert(condition, "behavior failed; see evidence above")
+}

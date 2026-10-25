@@ -1,0 +1,11 @@
+import src.flags.Flags
+
+test "flag contract 7" {
+    assert(time.now() > 0)
+    assert(new Flags().enabled())
+}
+
+test "flag contract 8" {
+    assert(time.now() > 0)
+    assert(!new Flags().disabled())
+}

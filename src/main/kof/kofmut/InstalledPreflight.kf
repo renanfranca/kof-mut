@@ -1,0 +1,57 @@
+package kofmut
+
+import kofmut.launch.InstalledEntry
+import dev.kof.compiler.KofVersion
+import java.lang.Exception
+import java.lang.System
+import java.time.Instant
+
+class InstalledPreflight {
+    static RunConfig guardedConfig(RunOptions options, String root) {
+        try { return loadConfig(options) }
+        catch (Exception error) {
+            // Reuse the existing error report contract without admitting project commands.
+            System.setProperty("kofmut.root", root)
+            System.setProperty("kofmut.kof.version", KofVersion.version())
+            var execution = MutationRun(options, System.nanoTime(), Instant.now().toString())
+            execution.canPublish = !underPath(options.reportDir, options.project)
+            execution.limitations.add(error.toString())
+            process.exit(execution.finish())
+            throw "Invalid configuration"
+        }
+    }
+
+    static void main(String[] arguments) {
+        try {
+            if (arguments.length != 3) { throw "invalid installed preflight context" }
+            InstalledEntry.guardState(arguments[1])
+            InstalledEntry.preflight(arguments[0])
+        }
+        catch (Exception error) {
+            var detail = "kof-mut: Kof " + KofVersion.version() + "; preparation package integrity failed: " + error
+            if (arguments.length == 3) {
+                var context = new java.io.File(arguments[2]).getParent()
+                File(context + "/preflight.stderr").writeText(detail + "\n")
+            }
+            System.err.println(detail)
+            process.exit(2)
+        }
+        try {
+            if (arguments.length != 3) { throw "invalid installed preflight context" }
+            var raw = readRequired(arguments[2])
+            var parts = raw.split("\0")
+            if (parts.length < 2 || parts[0] != "kofmut-arguments-v1" || parts[parts.length - 1] != "end") { throw "invalid installed arguments" }
+            var forwarded = new String[parts.length - 2]
+            for (var i = 0; i < forwarded.length; i++) { forwarded[i] = parts[i + 1] }
+            if (forwarded.length == 0 || forwarded[0] != "run") { return }
+            var options = runOptions(forwarded)
+            var state = arguments[1] + "/state/kof-mut"
+            protectRunOutput(options)
+            var config = InstalledPreflight.guardedConfig(options, arguments[0])
+            for (var destination in listOf(state + "/logs", state + "/compatibility")) {
+                System.setProperty("kofmut.logs", destination)
+                protectInstalledLogs(options, config)
+            }
+        } catch (Exception error) { println("kof-mut: " + error); process.exit(2) }
+    }
+}

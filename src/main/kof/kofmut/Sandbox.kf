@@ -1,0 +1,84 @@
+package kofmut
+
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
+
+record InputEntry(String path, Int[] bytes, String permissions, Bool directory)
+
+Bool excludedInput(String relative) {
+    for (var segment in relative.split("/")) { if (segment == ".git") { return true } }
+    return underPath(relative, ".kof-mut/reports") || underPath(relative, ".agent/tmp") || underPath(relative, "build/cache/kof-launch-v2") || underPath(relative, "build/cache/compatibility")
+}
+
+List<InputEntry> captureInputs(RunOptions options, RunConfig config) {
+    var entries: List<InputEntry> = listOf()
+    var paths: List<String> = listOf()
+    var ancestors: List<String> = listOf()
+    for (var input in config.inputs) { collectInput(options, config, relativeInput(input), entries, paths, ancestors) }
+    return entries
+}
+
+void collectInput(RunOptions options, RunConfig config, String relative, List<InputEntry> entries, List<String> paths, List<String> ancestors) {
+    if (paths.contains(relative) || excludedInput(relative)) { return }
+    var path = options.project + "/" + relative
+    if (underPath(new java.io.File(path).getCanonicalPath(), options.reportDir)) { return }
+    var file = new java.io.File(path)
+    var physical = file.getCanonicalPath()
+    var root = new java.io.File(options.project).getCanonicalPath()
+    if (!underPath(physical, root)) { throw "Input link escapes project: " + relative }
+    var physicalRelative = "."
+    if (physical != root) { physicalRelative = physical.substring(root.length() + 1) }
+    if (physical != absolutePath(path)) {
+        var included = false
+        for (var input in config.inputs) { if (underPath(physicalRelative, relativeInput(input))) { included = true } }
+        if (!included || excludedInput(physicalRelative) || underPath(physical, options.reportDir)) { throw "Input link target is outside inputs: " + relative }
+    }
+    if (Files.isSymbolicLink(new java.io.File(physical).toPath()) || ancestors.contains(physical)) { throw "Cyclic input link: " + relative }
+    if (!file.exists()) { throw "Missing input or unresolved link: " + relative }
+    paths.add(relative)
+    var permissions = PosixFilePermissions.toString(Files.getPosixFilePermissions(file.toPath()))
+    if (file.isDirectory()) {
+        entries.add(InputEntry(relative, new Int[0], permissions, true))
+        ancestors.add(physical)
+        try {
+            for (var name in Directory(path).list()) { collectInput(options, config, relativeInput(relative + "/" + name), entries, paths, ancestors) }
+        } finally { ancestors.remove(ancestors.size - 1) }
+    } else {
+        if (!file.isFile()) { throw "Input is not a regular file: " + relative }
+        entries.add(InputEntry(relative, File(path).readBytes(), permissions, false))
+    }
+}
+
+void materializeInputs(List<InputEntry> entries, String target) {
+    for (var entry in entries) {
+        var path = target + "/" + entry.path
+        var file = new java.io.File(path)
+        if (entry.directory) {
+            if (!file.mkdirs() && !file.isDirectory()) { throw "Cannot create sandbox directory" }
+        } else {
+            if (!file.getParentFile().mkdirs() && !file.getParentFile().isDirectory()) { throw "Cannot create sandbox parent" }
+            if (!File(path).writeBytes(entry.bytes)) { throw "Cannot copy input: " + entry.path }
+            var changed = Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString(entry.permissions))
+        }
+    }
+    var i = entries.size - 1
+    while (i >= 0) {
+        var entry = entries.get(i)
+        if (entry.directory) {
+            var changed = Files.setPosixFilePermissions(new java.io.File(target + "/" + entry.path).toPath(), PosixFilePermissions.fromString(entry.permissions))
+        }
+        i--
+    }
+}
+
+Bool removeSandbox(String path) {
+    var file = new java.io.File(path)
+    if (!Files.isSymbolicLink(file.toPath()) && file.isDirectory()) {
+        file.setReadable(true, true)
+        file.setWritable(true, true)
+        file.setExecutable(true, true)
+        for (var name in Directory(path).list()) { removeSandbox(path + "/" + name) }
+    }
+    if (!file.exists() && !Files.isSymbolicLink(file.toPath())) { return true }
+    return file.delete()
+}

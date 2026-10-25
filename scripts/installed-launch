@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+KOF_MUT_RELEASE="$(readlink -f -- "${BASH_SOURCE[0]}")"
+KOF_MUT_RELEASE="${KOF_MUT_RELEASE%/*}"
+KOF_MUT_PREFIX="$(dirname -- "$(dirname -- "$(dirname -- "$(dirname -- "$KOF_MUT_RELEASE")")")")"
+KOF_MUT_USAGE="$KOF_MUT_PREFIX/state/kof-mut/usage.lock"
+KOF_MUT_COMPONENT="$KOF_MUT_USAGE"
+while [[ "$KOF_MUT_COMPONENT" != / && -n "$KOF_MUT_COMPONENT" ]]; do
+    if [[ -L "$KOF_MUT_COMPONENT" ]]; then
+        KOF_MUT_EVIDENCE="$(mktemp -d)"
+        printf 'managed path contains a symbolic link: %s\n' "$KOF_MUT_COMPONENT" > "$KOF_MUT_EVIDENCE/launch-failure"
+        echo "kof-mut: managed path contains a symbolic link: $KOF_MUT_COMPONENT; evidence: $KOF_MUT_EVIDENCE" >&2
+        exit 2
+    fi
+    KOF_MUT_COMPONENT="${KOF_MUT_COMPONENT%/*}"
+done
+[[ -f "$KOF_MUT_USAGE" && ! -L "$KOF_MUT_USAGE" ]] || { echo 'kof-mut: missing or invalid installation coordination file: usage.lock' >&2; exit 2; }
+# This descriptor protects the entire invocation, including preparation and evaluation.
+exec 7<"$KOF_MUT_USAGE"
+if [[ "${1:-}" == uninstall ]]; then
+    flock --nonblock --exclusive 7 || { echo 'kof-mut: installed execution is active; no files removed' >&2; exit 2; }
+else
+    flock --nonblock --shared 7 || { echo 'kof-mut: installation management is active; try again later' >&2; exit 2; }
+fi
+exec "$KOF_MUT_RELEASE/scripts/supervise" "$KOF_MUT_RELEASE/scripts/launch" app "$@"

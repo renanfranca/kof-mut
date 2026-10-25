@@ -1,0 +1,16 @@
+import java.lang.System
+import java.lang.Thread
+
+record LiveLaunch(String processDirectory, String command, Int contexts, String children)
+
+main() {
+    if (args.length == 1 && args[0] == "--prepare") { process.exit(23) }
+    var processDirectory = new java.io.File("/proc/self").getCanonicalPath()
+    var pid = processDirectory.substring(6)
+    var children = File("/proc/self/task/" + pid + "/children").readText()
+    assert(children != null)
+    if (children != null) {
+        assert(File(args[0]).writeText(json.encode(LiveLaunch(processDirectory, System.getProperty("sun.java.command"), Directory(System.getenv("TMPDIR")).list().size(), children.trim()))))
+    }
+    while (true) { Thread.sleep(100) }
+}

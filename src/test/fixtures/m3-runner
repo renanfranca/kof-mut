@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+phase="$1"
+mode="${2:-none}"
+: "${KOF_MUT_OBSERVATIONS:?}"
+log="$KOF_MUT_OBSERVATIONS"
+IFS= read -r discovery < "$log/stdout"
+[[ "$discovery" == reportPath=\"* ]] || { printf 'discovery must precede commands\n' >&2; exit 127; }
+variant=baseline
+if ! cmp -s src/math/Calc.kf src/math/original.txt; then variant=variant; fi
+printf '%s:%s\n' "$variant" "$phase" >> "$log/commands"
+if [[ "$variant-$phase" == "$mode" ]]; then
+    printf '%s\n' "$PWD" > "$log/cwd"
+    printf '%s\n' "$BASHPID" > "$log/parent.pid"
+    (printf '%s\n' "$BASHPID" > "$log/child.pid"; exec sleep 120) &
+    child=$!
+    while [[ ! -s "$log/child.pid" ]]; do sleep 0.01; done
+    kill -0 "$child"
+    printf 'ready\n' > "$log/ready"
+    while [[ ! -e "$log/release" ]]; do sleep 0.01; done
+    kill -KILL "$child"
+    wait "$child" 2>/dev/null || true
+fi
+if [[ "$phase" == check ]]; then
+    printf '{"success":true,"filesChecked":1,"errorCount":0,"diagnostics":[]}\n'
+    exit 0
+fi
+printf 'SUITE tests/Suite.kf (1 tests)\n'
+if [[ "$variant" == variant ]]; then
+    printf 'FAIL sum: changed result\n1 failed of 1 tests\n0 passed, 1 failed\n'
+    exit 1
+fi
+printf 'PASS sum\n0 failed of 1 tests\n1 passed, 0 failed\n'

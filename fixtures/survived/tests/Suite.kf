@@ -1,0 +1,5 @@
+import src.math.Calc
+
+test "sum contract" {
+    assert(new Calc().sum(5, 0) == 5)
+}

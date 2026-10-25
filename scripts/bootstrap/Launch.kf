@@ -1,0 +1,199 @@
+import java.io.RandomAccessFile
+import java.io.FileOutputStream
+import java.lang.Exception
+import java.nio.ByteBuffer
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+
+record Installation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
+record SourceSnapshot(String path, ByteBuffer content, String hash)
+
+SourceSnapshot captureInput(String path, String expected, String mode) {
+    try {
+        var content = ByteBuffer.wrap(Files.readAllBytes(new java.io.File(path).toPath()))
+        var hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.array()))
+        if (hash != expected) { throw "changed input" }
+        return SourceSnapshot(path, content, hash)
+    } catch (Exception error) {
+        if (mode == "install") { throw "checkout changed during installation; retry" }
+        throw "launch input changed: " + path
+    }
+}
+
+String requiredText(String path) {
+    var text = File(path).readText()
+    if (text != null) { return text }
+    throw "cannot read " + path
+}
+
+String fileHash(String path) {
+    var bytes = Files.readAllBytes(new java.io.File(path).toPath())
+    return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+}
+
+String jarHash(String jar) {
+    var result = process.run("b2sum", "--", jar)
+    if (result.exitCode != 0 || result.stdout.length() < 128) { throw "cannot hash Kof jar" }
+    return result.stdout.substring(0, 128)
+}
+
+List<String> classFiles(String directory) {
+    var result: List<String> = listOf()
+    for (var name in Directory(directory).list()) {
+        var path = directory + "/" + name
+        if (File(path).isDirectory()) {
+            for (var nested in classFiles(path)) { result.add(nested) }
+        } else if (path.endsWith(".class")) { result.add(path) }
+    }
+    return result
+}
+
+Bool complete(String image, String identity) {
+    if (!File(image + "/classes/kofmut/launch/CompatibilityEntry.class").isFile() || !File(image + "/identity").isFile() || requiredText(image + "/identity") != identity || !File(image + "/checksums").isFile()) { return false }
+    var checked = shell.runWith(listOf("sha256sum", "--check", "--status", image + "/checksums"), image + "/classes", mapOf())
+    return checked.exitCode == 0
+}
+
+void writeChecksums(String image) {
+    var files = classFiles(image + "/classes")
+    files.sort()
+    var checksums = ""
+    for (var file in files) { checksums = checksums + fileHash(file) + "  " + file.substring((image + "/classes/").length()) + "\n" }
+    if (!File(image + "/checksums").writeText(checksums)) { throw "cannot write image checksums" }
+}
+
+void compileSources(String root, String kof, String jar, List<SourceSnapshot> sources, String temporary, Bool bounded) {
+    for (var source in sources) {
+        var relative = "kofmut/Main.kf"
+        var prefix = root + "/src/main/kof/"
+        if (source.path.startsWith(prefix)) { relative = source.path.substring(prefix.length()) }
+        var target = new java.io.File(temporary + "/sources/" + relative)
+        if (!target.getParentFile().mkdirs() && !target.getParentFile().isDirectory()) { throw "cannot create source directory" }
+        var output = new FileOutputStream(target)
+        try { output.write(source.content.array(), 0, source.content.remaining()) } finally { output.close() }
+    }
+    if (!File(temporary + "/kof.toml").writeText("[sources]\napp = \"sources\"\n")) { throw "cannot write build manifest" }
+    var command: List<String> = listOf()
+    if (bounded) { command = listOf("timeout", "--foreground", "--kill-after=2", "10") }
+    for (var argument in listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", temporary + "/classes")) { command.add(argument) }
+    var result = shell.runWith(command, temporary, mapOf())
+    if (bounded && result.exitCode == 124) { throw "Kof compilation command exceeded 10000 ms" }
+    if (result.exitCode != 0) { throw "Kof compilation failed (exit " + result.exitCode + "):\n" + result.stdout + result.stderr }
+    if (!File(temporary + "/classes/kofmut/launch/CompatibilityEntry.class").isFile()) { throw "Kof did not emit both verified entry points" }
+}
+
+void publishImage(String root, String kof, String jar, List<SourceSnapshot> sources, String cache, String image, String identity, String expectedJar, Bool bounded) {
+    if (complete(image, identity)) { return }
+    var temporaryPath = Files.createTempDirectory(new java.io.File(cache + "/images").toPath(), "compile-")
+    var temporary = temporaryPath.toString()
+    try {
+        if (jarHash(jar) != expectedJar) { throw "Kof jar changed before compilation" }
+        compileSources(root, kof, jar, sources, temporary, bounded)
+        if (jarHash(jar) != expectedJar) { throw "Kof jar changed during compilation" }
+        writeChecksums(temporary)
+        if (!File(temporary + "/identity").writeText(identity)) { throw "cannot write image identity" }
+        guardStatePath(image)
+        if (File(image).exists() && !Directory(image).delete()) { throw "cannot remove incomplete cache entry" }
+        var published = Files.move(temporaryPath, new java.io.File(image).toPath(), StandardCopyOption.ATOMIC_MOVE)
+    } finally {
+        guardStatePath(temporary)
+        if (File(temporary).exists() && !Directory(temporary).delete()) { throw "cannot clean compilation directory" }
+    }
+}
+
+void guardStatePath(String path) {
+    var current = new java.io.File(path).getAbsolutePath()
+    while (current != "") {
+        if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+        var separator = current.lastIndexOf("/")
+        if (separator <= 0) { break }
+        current = current.substring(0, separator)
+    }
+    if (File(path).isDirectory()) {
+        for (var name in Directory(path).list()) { guardStatePath(path + "/" + name) }
+    }
+}
+
+void prepare(String root, String kof, String mode, String context) {
+    if (mode != "app" && mode != "contracts" && mode != "install" && mode != "management") { throw "unknown launch mode" }
+    var raw = requiredText(context + "/info.json")
+    var installation = json.decode<Installation>(raw)
+    File(context + "/preparation-detail").writeText(installation.kof + "\0bootstrap\0" + context + "\0")
+    if (installation.kof == "" || installation.compiler != installation.kof || installation.runtime != installation.kof || installation.stdlib != installation.kof) { throw "incoherent Kof/compiler/runtime/stdlib versions" }
+    if (installation.os != "linux" || !installation.embeddedJdk) { throw "this build requires the Linux distribution with its embedded JDK" }
+    var distribution = new java.io.File(installation.install).getCanonicalPath()
+    var jar = distribution + "/lib/kof.jar"
+    var java = distribution + "/jdk/bin/java"
+    if (!File(jar).isFile() || !File(java).isFile() || !new java.io.File(java).canExecute()) { throw "incomplete Kof distribution: lib/kof.jar or jdk/bin/java missing" }
+    if (File(root + "/image.json").isFile()) {
+        File(context + "/preparation-detail").writeText(installation.kof + "\0package integrity\0" + context + "\0")
+        var checked = shell.runWith(listOf("timeout", "--foreground", "--kill-after=2", "10", "sha256sum", "--check", "--quiet", root + "/classes.sha256"), root + "/classes", mapOf())
+        if (checked.exitCode != 0) {
+            File(context + "/package-check.stdout").writeText(checked.stdout)
+            File(context + "/package-check.stderr").writeText(checked.stderr)
+            throw "invalid installed image; reinstall from a checkout to repair; see package-check.stdout and package-check.stderr"
+        }
+        File(context + "/preparation-detail").writeText(installation.kof + "\0bootstrap\0" + context + "\0")
+    }
+    if (mode == "app" && File(root + "/image.json").isFile()) {
+        var prefix = new java.io.File(root).getParentFile().getParentFile().getParentFile().getParent()
+        var probe = process.run(java, "-cp", root + "/classes:" + jar, "kofmut.InstalledPreflight", root, prefix, context + "/arguments")
+        if (probe.exitCode != 0) {
+            File(context + "/preflight.stdout").writeText(probe.stdout)
+            File(context + "/preflight.stderr").writeText(probe.stderr)
+            File(context + "/preflight-refused").writeText("refused")
+            throw "installed preflight refused"
+        }
+    }
+    var request = requiredText(context + "/request")
+    var fields = request.split("\0")
+    if (fields.length < 7 || fields[0] != "kofmut-request-v2" || fields[1] != mode || fields[2] != root || fields[3] != kof || fields[4] != raw || (fields.length - 5) % 2 != 0) { throw "invalid launch request" }
+    var sources: List<SourceSnapshot> = listOf()
+    for (var i = 5; i < fields.length; i = i + 2) {
+        var input = captureInput(fields[i], fields[i + 1], mode)
+        if (input.path.startsWith(root + "/src/") && input.path.endsWith(".kf")) { sources.add(input) }
+    }
+    var preliminary = crypto.sha256(request)
+    var cache = requiredText(context + "/cache").trim()
+    guardStatePath(cache)
+    guardStatePath(requiredText(context + "/compatibility-state").trim())
+    if (!Directory(cache + "/locations").createDirectories() && !File(cache + "/locations").isDirectory()) { throw "cannot create location cache" }
+    if (!Directory(cache + "/images").createDirectories() && !File(cache + "/images").isDirectory()) { throw "cannot create image cache" }
+    var expectedJar = jarHash(jar)
+    var key = crypto.sha256(preliminary + "\0" + jar + "\0" + expectedJar + "\0")
+    var image = cache + "/images/" + key
+    var identity = "kofmut-image-v2\0" + root + "\0" + kof + "\0" + mode + "\0" + preliminary + "\0" + expectedJar + "\0" + key + "\0" + java + "\0" + jar + "\0"
+    var lockFile = new RandomAccessFile(cache + "/build.lock", "rw")
+    var channel = lockFile.getChannel()
+    try {
+        var lock = channel.lock()
+        try {
+            if (mode != "management") { publishImage(root, kof, jar, sources, cache, image, identity, expectedJar, mode == "app") }
+            var location = cache + "/locations/" + preliminary
+            var temporaryDirectory = Files.createTempDirectory(new java.io.File(cache + "/locations").toPath(), "location-").toString()
+            var temporary = new java.io.File(temporaryDirectory + "/descriptor").toPath()
+            try {
+                if (!File(temporary.toString()).writeText("kofmut-location-v1\0" + java + "\0" + jar + "\0")) { throw "cannot write installation descriptor" }
+                var published = Files.move(temporary, new java.io.File(location).toPath(), StandardCopyOption.ATOMIC_MOVE)
+            } finally {
+                if (File(temporaryDirectory).exists()) { Directory(temporaryDirectory).delete() }
+            }
+        } finally { lock.release() }
+    } finally {
+        channel.close()
+        lockFile.close()
+    }
+}
+
+main() {
+    try {
+        if (args.length != 4) { throw "expected root, Kof executable, mode and context" }
+        if (!File(args[3] + "/bootstrap-running").writeText("running\n")) { throw "cannot publish bootstrap readiness" }
+        prepare(args[0], args[1], args[2], args[3])
+    } catch (String error) {
+        println("kof-mut: " + error)
+        process.exit(2)
+    }
+}

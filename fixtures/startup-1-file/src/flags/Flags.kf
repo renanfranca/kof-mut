@@ -1,0 +1,7 @@
+package src.flags
+
+class Flags {
+    Bool enabled() { return true }
+    Bool disabled() { return false }
+    Bool unobserved() { return true }
+}

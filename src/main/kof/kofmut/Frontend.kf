@@ -1,6 +1,32 @@
 package kofmut
 
+import dev.kof.compiler.MethodCallExpr
+import dev.kof.compiler.FormalParameterNode
+import dev.kof.compiler.FieldAccessExpr
+import dev.kof.compiler.NewExpr
+import dev.kof.compiler.NewArrayExpr
+import dev.kof.compiler.ArrayAccessExpr
+import dev.kof.compiler.IfExpr
+import dev.kof.compiler.SwitchExpr
+import dev.kof.compiler.SwitchExprCase
 import dev.kof.compiler.AstNode
+import dev.kof.compiler.IfStmt
+import dev.kof.compiler.WhileStmt
+import dev.kof.compiler.DoWhileStmt
+import dev.kof.compiler.ForStmt
+import dev.kof.compiler.ForInStmt
+import dev.kof.compiler.SwitchStmt
+import dev.kof.compiler.SwitchCase
+import dev.kof.compiler.TryStmt
+import dev.kof.compiler.CatchClause
+import dev.kof.compiler.BlockStmt
+import dev.kof.compiler.ExpressionStmt
+import dev.kof.compiler.AssignmentExpr
+import dev.kof.compiler.UnaryExpr
+import dev.kof.compiler.BreakStmt
+import dev.kof.compiler.ContinueStmt
+import dev.kof.compiler.ThrowStmt
+import dev.kof.compiler.AssertStmt
 import dev.kof.compiler.BinaryExpr
 import dev.kof.compiler.CompilationUnitNode
 import dev.kof.compiler.ClassDeclarationNode
@@ -12,7 +38,6 @@ import dev.kof.compiler.FieldDeclarationNode
 import dev.kof.compiler.IdentifierExpr
 import dev.kof.compiler.LiteralExpr
 import dev.kof.compiler.LambdaExpr
-import dev.kof.compiler.MethodCallExpr
 import dev.kof.compiler.MethodDeclarationNode
 import dev.kof.compiler.ReturnStmt
 import dev.kof.compiler.Token
@@ -22,7 +47,8 @@ import dev.kof.compiler.parser.Parser
 
 record MutationSite(String operator, String original, String replacement, Int line, Int column, Int offset, Int length)
 record SourceScan(List<MutationSite> sites, List<String> limitations, List<String> errors)
-record SourceExtent(Int start, Int end)
+record SourceExtent(Int start, Int end, Bool text)
+record TextBinding(String name, Bool text)
 
 SourceScan scanFile(String file) {
     var source = File(file).readText()
@@ -43,6 +69,12 @@ SourceScan scanSource(String source, String file) {
         }
         return SourceScan(listOf(), listOf(), errors)
     }
+    var sourceTokens: List<Token> = listOf()
+    var tokenIndex = 0
+    while (tokenIndex < tokens.size()) {
+        sourceTokens.add(tokens.get(tokenIndex) as Token)
+        tokenIndex++
+    }
     var unit = new Parser(tokens, diagnostics, file).parse()
     var i = 0
     while (i < diagnostics.getDiagnostics().size()) {
@@ -53,12 +85,6 @@ SourceScan scanSource(String source, String file) {
     if (errors.size > 0) {
         return SourceScan(listOf(), listOf(), errors)
     }
-    var sourceTokens: List<Token> = listOf()
-    i = 0
-    while (i < tokens.size()) {
-        sourceTokens.add(tokens.get(i) as Token)
-        i++
-    }
     var frontend = SourceFrontend(sourceTokens)
     frontend.visit(unit)
     return SourceScan(frontend.sites, frontend.limitations, errors)
@@ -68,6 +94,8 @@ class SourceFrontend {
     List<Token> tokens
     List<MutationSite> sites = listOf()
     List<String> limitations = listOf()
+    List<TextBinding> bindings = listOf()
+    List<TextBinding> fieldBindings = listOf()
 
     constructor(List<Token> sourceTokens) {
         tokens = sourceTokens
@@ -87,62 +115,333 @@ class SourceFrontend {
         }
         if (node instanceof FunctionDeclarationNode) {
             var function = node as FunctionDeclarationNode
+            var bindingStart = bindings.size
+            var parameterIndex = 0
+            while (parameterIndex < function.parameters().size()) {
+                var parameter = function.parameters().get(parameterIndex) as FormalParameterNode
+                visit(parameter.defaultExpression())
+                bindings.add(TextBinding(parameter.name(), parameter.type() == "String"))
+                parameterIndex++
+            }
             var i = 0
             while (i < function.body().size()) {
                 visit(function.body().get(i) as AstNode)
                 i++
             }
+            trimBindings(bindingStart)
             return null
         }
         if (node instanceof ClassDeclarationNode) {
             var declaration = node as ClassDeclarationNode
+            var outerFields = fieldBindings
+            fieldBindings = listOf()
+            var bindingStart = bindings.size
+            var seed = 0
+            while (seed < declaration.members().size()) {
+                var member = declaration.members().get(seed) as AstNode
+                if (member instanceof FieldDeclarationNode) {
+                    var field = member as FieldDeclarationNode
+                    bindings.add(TextBinding(field.name(), field.type() == "String"))
+                    fieldBindings.add(TextBinding(field.name(), field.type() == "String"))
+                }
+                seed++
+            }
             var i = 0
             while (i < declaration.members().size()) {
                 visit(declaration.members().get(i) as AstNode)
                 i++
             }
+            trimBindings(bindingStart)
+            fieldBindings = outerFields
             return null
         }
         if (node instanceof MethodDeclarationNode) {
             var declaration = node as MethodDeclarationNode
+            var bindingStart = bindings.size
+            var parameterIndex = 0
+            while (parameterIndex < declaration.parameters().size()) {
+                var parameter = declaration.parameters().get(parameterIndex) as FormalParameterNode
+                visit(parameter.defaultExpression())
+                bindings.add(TextBinding(parameter.name(), parameter.type() == "String"))
+                parameterIndex++
+            }
             var i = 0
             while (i < declaration.body().size()) {
                 visit(declaration.body().get(i) as AstNode)
                 i++
             }
+            trimBindings(bindingStart)
             return null
         }
         if (node instanceof ConstructorDeclarationNode) {
             var declaration = node as ConstructorDeclarationNode
+            var bindingStart = bindings.size
+            var parameterIndex = 0
+            while (parameterIndex < declaration.parameters().size()) {
+                var parameter = declaration.parameters().get(parameterIndex) as FormalParameterNode
+                visit(parameter.defaultExpression())
+                bindings.add(TextBinding(parameter.name(), parameter.type() == "String"))
+                parameterIndex++
+            }
             var i = 0
             while (i < declaration.body().size()) {
                 visit(declaration.body().get(i) as AstNode)
                 i++
             }
+            trimBindings(bindingStart)
             return null
         }
         if (node instanceof FieldDeclarationNode) {
-            return visit((node as FieldDeclarationNode).initializer())
+            var declaration = node as FieldDeclarationNode
+            var extent = visit(declaration.initializer())
+            var text = declaration.type() == "String"
+            if (extent != null && extent.text) { text = true }
+            bindings.add(TextBinding(declaration.name(), text))
+            fieldBindings.add(TextBinding(declaration.name(), text))
+            return extent
         }
         if (node instanceof VarDeclStmt) {
-            return visit((node as VarDeclStmt).initializer())
+            var declaration = node as VarDeclStmt
+            var extent = visit(declaration.initializer())
+            var text = declaration.type() == "String"
+            if (extent != null && extent.text) { text = true }
+            bindings.add(TextBinding(declaration.name(), text))
+            return extent
         }
         if (node instanceof LambdaExpr) {
             var expression = node as LambdaExpr
+            var bindingStart = bindings.size
+            var parameterIndex = 0
+            while (parameterIndex < expression.parameters().size()) {
+                var parameter = expression.parameters().get(parameterIndex) as FormalParameterNode
+                visit(parameter.defaultExpression())
+                bindings.add(TextBinding(parameter.name(), parameter.type() == "String"))
+                parameterIndex++
+            }
             var i = 0
             while (i < expression.body().size()) {
                 visit(expression.body().get(i) as AstNode)
                 i++
             }
+            trimBindings(bindingStart)
             return null
         }
         if (node instanceof MethodCallExpr) {
             var expression = node as MethodCallExpr
-            visit(expression.receiver())
+            var receiver = visit(expression.receiver())
             var i = 0
             while (i < expression.arguments().size()) {
                 visit(expression.arguments().get(i) as AstNode)
                 i++
+            }
+            return callExtent(expression.position().offset(), expression.methodName(), receiver)
+        }
+        if (node instanceof IfStmt) {
+            var form = node as IfStmt
+            visit(form.condition())
+            visit(form.thenBranch())
+            visit(form.elseBranch())
+            return null
+        }
+        if (node instanceof WhileStmt) {
+            var form = node as WhileStmt
+            visit(form.condition())
+            visit(form.body())
+            return null
+        }
+        if (node instanceof DoWhileStmt) {
+            var form = node as DoWhileStmt
+            visit(form.body())
+            visit(form.condition())
+            return null
+        }
+        if (node instanceof ForStmt) {
+            var bindingStart = bindings.size
+            var form = node as ForStmt
+            visit(form.init())
+            visit(form.condition())
+            visit(form.update())
+            visit(form.body())
+            trimBindings(bindingStart)
+            return null
+        }
+        if (node instanceof ForInStmt) {
+            var bindingStart = bindings.size
+            var form = node as ForInStmt
+            visit(form.collection())
+            bindings.add(TextBinding(form.varName(), false))
+            visit(form.body())
+            trimBindings(bindingStart)
+            return null
+        }
+        if (node instanceof SwitchStmt) {
+            var form = node as SwitchStmt
+            visit(form.expression())
+            var i0 = 0
+            while (i0 < form.cases().size()) {
+                visit(form.cases().get(i0) as AstNode)
+                i0++
+            }
+            var i1 = 0
+            while (i1 < form.defaultBody().size()) {
+                visit(form.defaultBody().get(i1) as AstNode)
+                i1++
+            }
+            return null
+        }
+        if (node instanceof SwitchCase) {
+            var form = node as SwitchCase
+            visit(form.value())
+            var i0 = 0
+            while (i0 < form.body().size()) {
+                visit(form.body().get(i0) as AstNode)
+                i0++
+            }
+            return null
+        }
+        if (node instanceof TryStmt) {
+            var form = node as TryStmt
+            var i0 = 0
+            while (i0 < form.tryBody().size()) {
+                visit(form.tryBody().get(i0) as AstNode)
+                i0++
+            }
+            var i1 = 0
+            while (i1 < form.catchClauses().size()) {
+                visit(form.catchClauses().get(i1) as AstNode)
+                i1++
+            }
+            var i2 = 0
+            while (i2 < form.finallyBody().size()) {
+                visit(form.finallyBody().get(i2) as AstNode)
+                i2++
+            }
+            return null
+        }
+        if (node instanceof CatchClause) {
+            var bindingStart = bindings.size
+            var form = node as CatchClause
+            bindings.add(TextBinding(form.exceptionName(), form.exceptionType() == "String"))
+            var i0 = 0
+            while (i0 < form.body().size()) {
+                visit(form.body().get(i0) as AstNode)
+                i0++
+            }
+            trimBindings(bindingStart)
+            return null
+        }
+        if (node instanceof BlockStmt) {
+            var bindingStart = bindings.size
+            var form = node as BlockStmt
+            var i0 = 0
+            while (i0 < form.statements().size()) {
+                visit(form.statements().get(i0) as AstNode)
+                i0++
+            }
+            trimBindings(bindingStart)
+            return null
+        }
+        if (node instanceof ExpressionStmt) { return visit((node as ExpressionStmt).expression()) }
+        if (node instanceof ThrowStmt) { return visit((node as ThrowStmt).expression()) }
+        if (node instanceof AssertStmt) { return visit((node as AssertStmt).condition()) }
+        if (node instanceof BreakStmt || node instanceof ContinueStmt) { return null }
+        if (node instanceof AssignmentExpr) {
+            var expression = node as AssignmentExpr
+            var left = visit(expression.target())
+            var right = visit(expression.value())
+            if (left != null && right != null) { return SourceExtent(left.start, right.end, false) }
+            return null
+        }
+        if (node instanceof UnaryExpr) {
+            var expression = node as UnaryExpr
+            var operand = visit(expression.operand())
+            if (operand != null) {
+                var start = operand.start
+                var end = operand.end
+                if (expression.prefix()) {
+                    var token = tokenBefore(start)
+                    if (token != null && token.value() == expression.operator()) { start = token.offset() }
+                } else {
+                    var token = tokenAt(end)
+                    if (token != null && token.value() == expression.operator()) { end = token.offset() + token.length() }
+                }
+                return SourceExtent(start, end, false)
+            }
+            return null
+        }
+        if (node instanceof ArrayAccessExpr) {
+            var expression = node as ArrayAccessExpr
+            var receiver = visit(expression.receiver())
+            visit(expression.index())
+            var end = arrayEnd(expression.position().offset())
+            if (receiver != null && end >= 0) { return SourceExtent(receiver.start, end, false) }
+            return null
+        }
+        if (node instanceof NewArrayExpr) {
+            var expression = node as NewArrayExpr
+            visit(expression.size())
+            var i = 0
+            while (i < expression.moreDims().size()) { visit(expression.moreDims().get(i) as AstNode); i++ }
+            var end = arrayEnd(expression.position().offset())
+            if (end >= 0) { return SourceExtent(expression.position().offset(), end, false) }
+            return null
+        }
+        if (node instanceof IfExpr) {
+            var expression = node as IfExpr
+            var condition = visit(expression.condition())
+            var yes = visit(expression.thenExpr())
+            var no = visit(expression.elseExpr())
+            if (condition != null && yes != null && no != null) { return SourceExtent(condition.start, no.end, yes.text && no.text) }
+            return null
+        }
+        if (node instanceof SwitchExpr) {
+            var expression = node as SwitchExpr
+            var selector = visit(expression.expression())
+            var i = 0
+            var text = true
+            while (i < expression.cases().size()) {
+                var clause = expression.cases().get(i) as SwitchExprCase
+                visit(clause.value())
+                var body = visit(clause.body())
+                if (body == null) { text = false }
+                if (body != null && !body.text) { text = false }
+                i++
+            }
+            var fallback = visit(expression.defaultValue())
+            if (selector != null && fallback != null) { return SourceExtent(selector.start, fallback.end, text && fallback.text) }
+            return null
+        }
+        if (node instanceof FieldAccessExpr) {
+            var expression = node as FieldAccessExpr
+            var receiver = visit(expression.receiver())
+            var text = false
+            var owner = expression.receiver()
+            if (owner instanceof IdentifierExpr) {
+                var identifier = owner as IdentifierExpr
+                if (identifier.name() == "this") { text = knownFieldText(expression.fieldName()) }
+            }
+            var field = tokenBefore(expression.position().offset())
+            if (receiver != null && field != null) { return SourceExtent(receiver.start, field.offset() + field.length(), text) }
+            return null
+        }
+        if (node instanceof NewExpr) {
+            var expression = node as NewExpr
+            var i = 0
+            while (i < expression.arguments().size()) { visit(expression.arguments().get(i) as AstNode); i++ }
+            var startToken = tokenAt(expression.position().offset())
+            if (startToken != null) {
+                var depth = 0
+                var opened = false
+                i = 0
+                while (i < tokens.size) {
+                    var token = tokens.get(i)
+                    if (token.offset() >= startToken.offset()) {
+                        if (token.type().toString() == "LPAREN") { depth++; opened = true }
+                        if (token.type().toString() == "RPAREN") { depth-- }
+                        if (opened && depth == 0) { return SourceExtent(startToken.offset(), token.offset() + token.length(), false) }
+                    }
+                    i++
+                }
             }
             return null
         }
@@ -153,7 +452,7 @@ class SourceFrontend {
             var expression = node as IdentifierExpr
             var token = tokenAt(expression.position().offset())
             if (token != null) {
-                return SourceExtent(token.offset(), token.offset() + token.length())
+                return SourceExtent(token.offset(), token.offset() + token.length(), knownText(expression.name()))
             }
             limitations.add("Identifier has no matching lexer token")
             return null
@@ -162,7 +461,12 @@ class SourceFrontend {
             var expression = node as LiteralExpr
             var token = tokenBefore(expression.position().offset())
             if (token != null) {
-                return SourceExtent(token.offset(), token.offset() + token.length())
+                if (token.type().toString() == "BOOLEAN_LITERAL") {
+                    var replacement = "true"
+                    if (token.value() == "true") { replacement = "false" }
+                    sites.add(MutationSite("boolean", token.value(), replacement, token.line(), token.column(), token.offset(), token.length()))
+                }
+                return SourceExtent(token.offset(), token.offset() + token.length(), token.type().toString() == "STRING_LITERAL")
             }
             limitations.add("Literal has no matching lexer token")
             return null
@@ -181,20 +485,95 @@ class SourceFrontend {
                     }
                     i++
                 }
-                if (expression.operator() == "<") {
+                var replacement = replacementFor(expression.operator())
+                if (replacement != "" && !(expression.operator() == "+" && (left.text || right.text))) {
                     if (matches.size == 1) {
                         var token = matches.get(0)
-                        sites.add(MutationSite("boundary", "<", "<=", token.line(), token.column(), token.offset(), token.length()))
+                        sites.add(MutationSite(familyFor(expression.operator()), expression.operator(), replacement, token.line(), token.column(), token.offset(), token.length()))
                     } else {
                         limitations.add("Binary operator cannot be associated with exactly one lexer token")
                     }
                 }
-                return SourceExtent(left.start, right.end)
+                return SourceExtent(left.start, right.end, expression.operator() == "+" && (left.text || right.text))
             }
             limitations.add("Unsupported operand extent for binary expression")
             return null
         }
         limitations.add("Unsupported AST node: " + kind)
+        return null
+    }
+
+    Int arrayEnd(Int from) {
+        var depth = 0
+        var opened = false
+        var end = -1
+        var i = 0
+        while (i < tokens.size) {
+            var token = tokens.get(i)
+            if (token.offset() >= from) {
+                if (token.type().toString() == "LBRACKET") { depth++; opened = true }
+                if (token.type().toString() == "RBRACKET") {
+                    depth--
+                    if (opened && depth == 0) {
+                        end = token.offset() + token.length()
+                        if (i + 1 >= tokens.size || tokens.get(i + 1).type().toString() != "LBRACKET") { return end }
+                    }
+                }
+            }
+            i++
+        }
+        return end
+    }
+
+    Bool knownFieldText(String name) {
+        var i = fieldBindings.size - 1
+        while (i >= 0) {
+            var binding = fieldBindings.get(i)
+            if (binding.name == name) { return binding.text }
+            i--
+        }
+        return false
+    }
+
+    Bool knownText(String name) {
+        var i = bindings.size - 1
+        while (i >= 0) {
+            var binding = bindings.get(i)
+            if (binding.name == name) { return binding.text }
+            i--
+        }
+        return false
+    }
+
+    void trimBindings(Int start) { while (bindings.size > start) { bindings.remove(bindings.size - 1) } }
+
+    SourceExtent? callExtent(Int after, String name, SourceExtent? receiver) {
+        var end = tokenBefore(after)
+        if (end == null) { return null }
+        if (end != null && end.type().toString() == "RPAREN") {
+            var depth = 0
+            var i = tokens.size - 1
+            while (i >= 0) {
+                var token = tokens.get(i)
+                if (token.offset() <= end.offset()) {
+                    if (token.type().toString() == "RPAREN") { depth++ }
+                    if (token.type().toString() == "LPAREN") {
+                        depth--
+                        if (depth == 0) {
+                            if (receiver != null) { return SourceExtent(receiver.start, end.offset() + end.length(), false) }
+                            var j = i - 1
+                            while (j >= 0) {
+                                var callee = tokens.get(j)
+                                if (callee.value() == name && callee.type().toString() == "IDENTIFIER") { return SourceExtent(callee.offset(), end.offset() + end.length(), false) }
+                                j--
+                            }
+                            return null
+                        }
+                    }
+                }
+                i--
+            }
+        }
         return null
     }
 
@@ -217,4 +596,69 @@ class SourceFrontend {
         }
         return null
     }
+}
+
+String replacementFor(String operator) {
+    var replacements = mapOf("<", "<=", "<=", "<", ">", ">=", ">=", ">", "==", "!=", "!=", "==", "&&", "||", "||", "&&", "+", "-", "-", "+", "*", "/", "/", "*")
+    return replacements.getOrDefault(operator, "")
+}
+String familyFor(String operator) {
+    if (operator == "<" || operator == "<=" || operator == ">" || operator == ">=") { return "boundary" }
+    if (operator == "==" || operator == "!=") { return "equality" }
+    if (operator == "&&" || operator == "||") { return "logical" }
+    return "arithmetic"
+}
+
+
+record VariantValidation(Bool accepted, String evidence)
+
+String frontendDiagnostics(DiagnosticCollector diagnostics) {
+    var evidence = ""
+    var i = 0
+    while (i < diagnostics.getDiagnostics().size()) {
+        var diagnostic = diagnostics.getDiagnostics().get(i) as Diagnostic
+        evidence = evidence + diagnostic.format() + "\n"
+        i++
+    }
+    return evidence
+}
+
+VariantValidation validateVariantTokens(String original, String changed, String file, Int offset, Int length, String before, String after) {
+    var originalDiagnostics = new DiagnosticCollector()
+    var originalTokens = new Lexer(original, file, originalDiagnostics).tokenize()
+    if (originalDiagnostics.getDiagnostics().size() > 0) { throw "Snapshot failed lexing: " + frontendDiagnostics(originalDiagnostics) }
+    var selected = -1
+    var i = 0
+    while (i < originalTokens.size()) {
+        var token = originalTokens.get(i) as Token
+        if (token.offset() == offset && token.length() == length && token.value() == before) { selected = i }
+        i++
+    }
+    if (selected < 0) { throw "Mutation token does not match snapshot lexer token" }
+    var diagnostics = new DiagnosticCollector()
+    var tokens = new Lexer(changed, file, diagnostics).tokenize()
+    if (diagnostics.getDiagnostics().size() > 0) { return VariantValidation(false, frontendDiagnostics(diagnostics)) }
+    var preserved = tokens.size() == originalTokens.size()
+    var shift = after.length() - length
+    i = 0
+    while (preserved && i < originalTokens.size()) {
+        var token = originalTokens.get(i) as Token
+        var modified = tokens.get(i) as Token
+        if (i == selected) {
+            preserved = modified.offset() == offset && modified.length() == after.length() && modified.value() == after && modified.line() == token.line() && modified.column() == token.column()
+        } else {
+            var expectedOffset = token.offset()
+            var expectedColumn = token.column()
+            if (i > selected) {
+                expectedOffset = expectedOffset + shift
+                if (token.line() == (originalTokens.get(selected) as Token).line()) { expectedColumn = expectedColumn + shift }
+            }
+            preserved = modified.type().toString() == token.type().toString() && modified.value() == token.value() && modified.offset() == expectedOffset && modified.length() == token.length() && modified.line() == token.line() && modified.column() == expectedColumn
+        }
+        i++
+    }
+    var unit = new Parser(tokens, diagnostics, file).parse()
+    if (diagnostics.getDiagnostics().size() > 0) { return VariantValidation(false, frontendDiagnostics(diagnostics)) }
+    if (!preserved) { return VariantValidation(false, "Variant changes tokens other than the selected token") }
+    return VariantValidation(true, "")
 }

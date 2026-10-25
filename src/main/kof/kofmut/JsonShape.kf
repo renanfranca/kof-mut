@@ -1,0 +1,50 @@
+package kofmut
+
+record ConfigShape(Object schemaVersion, List<Object> sourceRoots, List<Object> testRoots, List<Object> inputs, List<Object> checkCommand, List<Object> testCommand, Object commandTimeoutMs, Object budgetMs, Object maxParallelMutants)
+record CheckShape(Object success, Object filesChecked, Object errorCount, List<DiagnosticShape> diagnostics)
+record DiagnosticShape(Object code, Object severity, Object message)
+
+Bool jsonInteger(Object value) {
+    if (value == null) { return false }
+    return value.getClass().getName() == "java.lang.Integer" || value.getClass().getName() == "java.lang.Long"
+}
+
+Bool checkIntegerInRange(Object value, Long minimum) {
+    if (!jsonInteger(value)) { return false }
+    var number = value.toString().toLong()
+    return number >= minimum && number <= 2147483647
+}
+
+void requireStrings(List<Object> values) {
+    if (values == null) { throw "Expected a JSON string array" }
+    for (var value in values) {
+        if (value == null) { throw "Expected a JSON string" }
+        if (value.getClass().getName() != "java.lang.String") { throw "Expected a JSON string" }
+    }
+}
+
+void validateConfigShape(String jsonText) {
+    var shape = json.decode<ConfigShape>(jsonText)
+    var parallel = shape.maxParallelMutants
+    if (parallel != null) {
+        if (!jsonInteger(parallel)) { throw "maxParallelMutants must be a JSON integer between 1 and 4" }
+        var value = parallel.toString().toLong()
+        if (value < 1 || value > 4) { throw "maxParallelMutants must be a JSON integer between 1 and 4" }
+    }
+    if (!jsonInteger(shape.schemaVersion) || shape.schemaVersion.toString() != "1" || !jsonInteger(shape.commandTimeoutMs) || !jsonInteger(shape.budgetMs)) { throw "Configuration versions and time limits must be JSON integers" }
+    requireStrings(shape.sourceRoots)
+    requireStrings(shape.testRoots)
+    requireStrings(shape.inputs)
+    requireStrings(shape.checkCommand)
+    requireStrings(shape.testCommand)
+}
+
+void validateCheckShape(String jsonText) {
+    var shape = json.decode<CheckShape>(jsonText)
+    if (shape.success == null || shape.success.getClass().getName() != "java.lang.Boolean" || !checkIntegerInRange(shape.filesChecked, 1) || !checkIntegerInRange(shape.errorCount, 0) || shape.diagnostics == null) { throw "Invalid check JSON field types or counter range" }
+    for (var diagnostic in shape.diagnostics) {
+        if (diagnostic.code == null || diagnostic.message == null || diagnostic.severity == null || diagnostic.code.getClass().getName() != "java.lang.String" || diagnostic.message.getClass().getName() != "java.lang.String" || diagnostic.severity.getClass().getName() != "java.lang.String") { throw "Invalid check diagnostic" }
+    }
+}
+
+void validateScopeShape(String jsonText) { requireStrings(json.decode<List<Object>>(jsonText)) }

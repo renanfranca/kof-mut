@@ -1,0 +1,127 @@
+package kofmut.launch
+
+import java.io.RandomAccessFile
+import java.lang.Exception
+import java.lang.System
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
+
+String installationPrefix(String[] arguments, String root) {
+    var value = ""
+    if (arguments.length != 0) {
+        if (arguments.length != 2 || arguments[0] != "--prefix" || arguments[1] == "" || arguments[1].startsWith("--")) { throw "Usage: ./install.sh [--prefix PATH] | --help" }
+        value = arguments[1]
+    } else {
+        var home = System.getenv("HOME")
+        if (home == null || home == "" || !new java.io.File(home).isAbsolute()) { throw "HOME must be a non-empty absolute path when --prefix is omitted" }
+        value = home + "/.local"
+    }
+    var prefix = new java.io.File(value).getCanonicalPath()
+    if (prefix.contains(":") || prefix == root || prefix.startsWith(root + "/") || root.startsWith(prefix + "/") || prefix == "/") { throw "prefix overlaps the checkout or is incompatible with the JVM classpath" }
+    return prefix
+}
+
+void publishCheckout(String prefix, InstallationOwner owner, CheckoutManifest manifest) {
+    var root = System.getProperty("kofmut.root")
+    var classes = System.getProperty("kofmut.image") + "/classes"
+    var dependency = pinInstallation()
+    var identity = "kofmut-install-v2\0"
+    for (var entry in manifest.files) { identity = identity + entry.path + "\0" + entry.hash + "\0" }
+    var inputs = crypto.sha256(identity)
+    var home = prefix + "/share/kof-mut"
+    var releases = home + "/releases"
+    installDirectory(releases)
+    installDirectory(prefix + "/bin")
+    installDirectory(prefix + "/state/kof-mut")
+    if (owner.releases.size == 0) {
+        var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "rw")
+        usage.close()
+    }
+    var temporary = Files.createTempDirectory(new java.io.File(releases).toPath(), ".prepare-").toString()
+    try {
+        for (var source in installedFiles(classes)) { installCopy(source, temporary + "/classes/" + source.substring(classes.length() + 1)) }
+        for (var name in listOf("VERSION", "LICENSE", "NOTICE", "README.md", "README.pt_BR.md")) { copyCheckoutInput(root, name, temporary + "/" + name, manifest) }
+        for (var entry in manifest.files) {
+            if (entry.path.startsWith("docs/") || entry.path.startsWith("src/main/kof/") || entry.path == "scripts/launch" || entry.path == "scripts/supervise" || entry.path == "scripts/bootstrap/Launch.kf" || entry.path == "scripts/installed-launch" || entry.path == "kof.toml") { copyCheckoutInput(root, entry.path, temporary + "/" + entry.path, manifest) }
+        }
+        for (var executable in listOf("scripts/launch", "scripts/supervise")) {
+            if (!new java.io.File(temporary + "/" + executable).setExecutable(true, true)) { throw "cannot make installed script executable" }
+        }
+        copyCheckoutInput(root, "scripts/installed-launch", temporary + "/launch.sh", manifest)
+        if (!new java.io.File(temporary + "/launch.sh").setExecutable(true, true)) { throw "cannot make launcher executable" }
+        var descriptor = "kofmut-installed-v2\0" + prefix + "\0"
+        if (!File(temporary + "/launch.bin").writeText(descriptor)) { throw "cannot write installed descriptor" }
+        var checksums = ""
+        for (var path in installedFiles(temporary + "/classes")) { checksums = checksums + installedHash(path) + "  " + path.substring((temporary + "/classes/").length()) + "\n" }
+        if (!File(temporary + "/classes.sha256").writeText(checksums)) { throw "cannot write installed class checksums" }
+        var files: List<InstalledFile> = listOf()
+        for (var path in installedFiles(temporary)) { files.add(InstalledFile(path.substring(temporary.length() + 1), installedHash(path))) }
+        var id = crypto.sha256(inputs + json.encode(files) + json.encode(dependency))
+        var release = releases + "/" + id
+        var reusable = false
+        for (var owned in owner.releases) {
+            var candidatePath = releases + "/" + owned.id
+            var candidate = readImageReceipt(candidatePath + "/image.json")
+            if (candidate.inputs == inputs && json.encode(candidate.dependency) == json.encode(dependency) && json.encode(candidate.files) == json.encode(files)) {
+                try {
+                    validateInstalledImage(candidatePath)
+                    id = owned.id
+                    release = candidatePath
+                    reusable = true
+                    break
+                } catch (Exception error) { reusable = false }
+            }
+        }
+        if (!reusable && installPathExists(release)) { id = id + "-" + UUID.randomUUID().toString(); release = releases + "/" + id }
+        var runtimeSources: List<InstalledFile> = listOf()
+        for (var file in files) {
+            if (file.path.startsWith("src/main/kof/") || file.path.startsWith("scripts/") || file.path == "kof.toml" || file.path == "VERSION") { runtimeSources.add(file) }
+        }
+        var receipt = InstalledImageV2(2, prefix, id, inputs, dependency, runtimeSources, files)
+        if (!File(temporary + "/image.json").writeText(json.encode(receipt))) { throw "cannot write image receipt" }
+        validateInstalledImage(temporary)
+        for (var argument in listOf("--version", "--help")) {
+            var probe = process.run(dependency.java, "-cp", temporary + "/classes:" + dependency.jar, "kofmut.launch.ImageProbe", temporary, argument)
+            if (probe.exitCode != 0 || !probe.stdout.contains("KofMut")) { throw "installed image probe failed: " + probe.stdout + probe.stderr }
+        }
+        validateCheckout(manifest, root)
+        if (File(release).exists()) { validateInstalledImage(release) }
+        else { var published = Files.move(new java.io.File(temporary).toPath(), new java.io.File(release).toPath(), StandardCopyOption.ATOMIC_MOVE) }
+        var registered = false
+        for (var owned in owner.releases) { if (owned.id == id) { registered = true } }
+        if (!registered) {
+            owner.releases.add(OwnedRelease(id, installedHash(release + "/image.json")))
+            writeInstallationOwner(owner)
+        }
+        var current = new java.io.File(home + "/current").toPath()
+        if (!Files.isSymbolicLink(current) || Files.readSymbolicLink(current).toString() != "releases/" + id) { installAtomicLink("releases/" + id, home + "/current") }
+        if (!installPathExists(prefix + "/bin/kof-mut")) { installAtomicLink("../share/kof-mut/current/launch.sh", prefix + "/bin/kof-mut") }
+        println("Installed kof-mut: " + prefix + "/bin/kof-mut")
+        println("Add " + prefix + "/bin to PATH if needed; shell profiles were not edited.")
+    } finally { if (File(temporary).exists()) { Directory(temporary).delete() } }
+}
+
+void installCheckout(String prefix, CheckoutManifest manifest) {
+    readInstallationOwner(prefix)
+    installDirectory(prefix + "/state/kof-mut")
+    var management = new RandomAccessFile(prefix + "/state/kof-mut/manage.lock", "rw")
+    var channel = management.getChannel()
+    try {
+        var lease = channel.lock()
+        try {
+            var owner = readInstallationOwner(prefix)
+            publishCheckout(prefix, owner, manifest)
+        } finally { lease.release() }
+    } finally { channel.close(); management.close() }
+}
+
+class InstallEntry {
+    static void main(String[] arguments, CheckoutManifest manifest) {
+        try {
+            if (arguments.length == 1 && arguments[0] == "--help") { println("Usage: ./install.sh [--prefix PATH] | --help\nDefault prefix: $HOME/.local; requires installed Kof for Linux/JVM, no sudo."); return }
+            var prefix = installationPrefix(arguments, System.getProperty("kofmut.root"))
+            installCheckout(prefix, manifest)
+        } catch (Exception error) { System.err.println("kof-mut: installation failed: " + error); process.exit(2) }
+    }
+}

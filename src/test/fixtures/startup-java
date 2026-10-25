@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${KOF_MUT_JVM_LOG:-}" ]]; then
+    for argument in "$@"; do
+        if [[ "$argument" == kofmut.* ]]; then
+            printf '%s\n' "$argument" >> "$KOF_MUT_JVM_LOG"
+            break
+        fi
+    done
+fi
+if [[ "${3:-}" == kofmut.launch.PreparedEntry && -n "${KOF_MUT_PREPARED_BARRIER:-}" ]]; then
+    printf '%s\n' "$$" > "$KOF_MUT_PREPARED_BARRIER.pid"
+    printf '%s\n' "$7" > "$KOF_MUT_PREPARED_BARRIER.context"
+    : > "$KOF_MUT_PREPARED_BARRIER"
+    while [[ ! -f "$KOF_MUT_PREPARED_BARRIER.continue" ]]; do /bin/sleep 0.02; done
+fi
+exec "$KOF_MUT_TEST_JAVA" "$@"

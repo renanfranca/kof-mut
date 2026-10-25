@@ -1,0 +1,188 @@
+c5bd1cf4b9be241dd4afa6230a982b8f990b4ef05787210d3d1553469eec69bd  .agent/README.md
+c9a60a5501f30c7a09d75ad1d3b91f539813b3f67e09f41c54e6b5d3f348680c  .agent/history/public-docs-before-m7.md
+934659712543f0f13729098c5f162f1cbe650dd61dfc71d969c7b847a4859a7e  .agent/tmp/m7/audit-docs.py
+2739024d33456840f887d774330a6f57adbf96ceb1737bf654f4526b2e2469e8  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/EXECPLAN.initial.md
+11411d6675108dfad5951205ba99b6c7987a35a91976febe6d17e0e195ac817a  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/check-result.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/check.stderr
+74c91715d5ed1d94c5bce2de051ff28d8881d971c0c644fc5a91f3d57401475e  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/check.stdout
+9b5daf74925f7c39450cfc082b4ed85db9aa5a86d54ca4caf42c1a01a44f12fa  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/claim-evidence.md
+04a09b04ce33879642a3409f0a7ae52a5cdbdd7edce784ed9f1df10472db51e7  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/concept-order-audit.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/decision-validation.stderr
+ee26168cca7b9c48243e812070da5f0a217e472577bbedfea4e024a964c58193  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/decision-validation.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/diff-check.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/diff-check.stdout
+610eb86626c1b1ec96b96680d1ad7d2ce1b1b88e8e208564e8341e703f498435  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/doc-audit-initial.txt
+97229a450cf591fa48b25b2a076a8c726725de66d3f03f4394822510178934b1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/document-interface-audit.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-detected.stderr
+920693dd3f2abc5e9705b1963c25dd8fbbc6e07c6ec54b0844b6507e1f1fe7fe  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-detected.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-equivalent.stderr
+96da9a434709c1daf976b43cf2951424daa5f1fbc92ae60d5360356459c9a7c3  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-equivalent.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-invalid.stderr
+8455da299591ef6ab31fefe27693169ddb12420c171d214dd02f180240283749  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-invalid.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-survived.stderr
+d30cc6f8344826d059fb22de4cb843bc57cd58b908fbf2452522f31457f0e043  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/example-survived.stdout
+413e49171cb775abaeb17958adcb22c67609a0f93b62777993ae9bd3bfd7c816  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/examples.json
+8dab57e22e2a38a371db8ebaf596b7701060d8d7b296f825bd276dd0b82bc157  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adopt-0.6.4.stderr
+a2153143460a20d6361ebd035cc9af538a64eb9403f2759d43cb8d1cbadd931f  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adopt-0.6.4.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adopt-0.6.6.stderr
+148ea45570709ba2e995e651c03643428d5a6e215b5c7a23935d297f3fe556d3  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adopt-0.6.6.stdout
+3ac3a97419db18ba068d3572243fab3fd35f76f736358107d4b12ec6874e9c3b  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adoption reports/5c19bc420b5dcf51993dc95a838c55a7a8c9d9735c38b601b5d8a2a13322e329/1c007058-e974-4bb1-bd10-fae4c205a3c8-6351223881085026526/report.json
+1cc824feb3194083119060de752b7edc86f5abd3de0a85be7b4f15395ad94b08  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/adoption reports/5c19bc420b5dcf51993dc95a838c55a7a8c9d9735c38b601b5d8a2a13322e329/ae9b254b-fb7e-4dff-8f65-a71a65c267bc-12257659169570021985/report.json
+44262c4d6b2a51a48119500e93e59309d1023536ba356953ac32effd4388a8be  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-bad-count.json
+3bc1973f5f95aba22616ee6c58e407604c0889e2a996da9f30c422cc51ab1179  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-bad-discovery.json
+3bc1973f5f95aba22616ee6c58e407604c0889e2a996da9f30c422cc51ab1179  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-contradictory-exit.json
+3bc1973f5f95aba22616ee6c58e407604c0889e2a996da9f30c422cc51ab1179  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-duplicate-discovery.json
+7ccfa1fbf3940e6f0c0375d87c0f9235a50514e14cb427bdfaf5077987b26ccf  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-malformed-json.json
+aa5845ba0c8868850dd3a0027e6000f94bd4d43769edf585e9ec967880bbf917  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-wrong-id.json
+860d3551287cde33c76fb24d23ebaf04331571bce8472d25b1a2bead070e4f77  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/consumer-wrong-scope.json
+162404eb037a393202afa9f1919d8c77346ddcbd2e3211af0428d917c6ed1bf9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision reports/18529ac228fbdc4f4673f68b90f0657235851b909abda2b40923a6b42def99aa/a2e7de44-ac6d-464d-baaa-993407536c70-17529504606563050751/report.json
+ecc0f80a0fbbffbbac9911b019537e5afa5ee45420b2bd0def89be42c0e364e9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision reports/2fbe5cc7d67988e9ed66b95d14af0dbf6fef9c91487dfa100ecb214daae45b1d/fa3ce37c-6f8c-4024-9665-ceff97bfdec3-3326741619585314384/report.json
+dbd07119e28fdace153467032a764f19e9c62eb1e31b83aa63e1a89320fce6c5  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision reports/807d6c83f073d22bdb1fd5b47d1b8ed50a50276244feb910aec692f110e791ed/28c0e73c-4a94-403e-819d-6d034e6ab079-3798308657928281356/report.json
+00bc9db570c1f6cce06b64c5267710e1b132bff0abc2b6ab4a0a6cca67614e71  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision reports/8cac3f714a263c413f6606596e95e52c55cf93d277ab186422b22f3efddc7f09/d64e3dd0-0b15-46ce-b1b2-97229a584a2a-399567069367702847/report.json
+a89569cf9b9fa7d5ea745b3fd947ea036e5e07772627893f1739253d05a73f26  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-baseline-failed.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-baseline-failed.stderr
+68a9c187f627e3c6b34b52aa2c390d00cd4d23ab67b4c04db68a59c416dd81f0  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-baseline-failed.stdout
+9d1752ab98532fe1fcc35d8984edfdf129aaa741310e24036d332259aea567e1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-empty-scope.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-empty-scope.stderr
+8b6a7155aa15163601f3483634747b6e5407ec9cdbdf787cd1c37c520ede03f2  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-empty-scope.stdout
+d71e1c5e0545055ea9f607a24fb42f0fd5449d0114e90857202990ac60e3a7ba  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-invalid-config.json
+6acc5bdcf0f6d1aabff3f23945b2761ed66afd45f77e7a997c0fd36033db6bb4  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-invalid-config.stderr
+d6eec438c91b38544227aaa0036c773ba500ed27448f23109421941907840d6c  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-invalid-config.stdout
+0c71490f4d03c2285470737f196fa3462050dbc58803dd52a20df0c4b1cfd0ad  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-timeout.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-timeout.stderr
+d7a8729e897983d3fdc85773bc386c1993ee13823e3433f0b07ca311b28b61fd  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/decision-timeout.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/docs-update.stderr
+b2e234f4262a6dbc9ad2f18ce7b604ac09d4d9d00dc9832345981ef8ae5703f1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/docs-update.stdout
+5108ae6a70eebaa6d91478013ad5a5ee7f2c11bae3935ee3f131ed4bb4124990  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/documentation-update-audit.json
+9b18d5edcdea0756f6e3521b76deee8e7c1340c2d841d99fa9e43edbb083606d  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example reports/0b9ffef44b07b406255113eb12e92011aad51adffb51cd7b4f62b786aa136c7f/95ebaffd-d1d3-4925-9044-c4f0644c104b-17310271751356957521/report.json
+1c51add81b49657742e3dee8d28ee7c61cc4b008a24b98b6784e39cba4cfa140  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example reports/148c235543d7a9d90f64408a2fe0de73907b228c46c7ca9920bb20b7e800fb31/2395dd32-de0f-4aee-a417-d62d9aed8d95-15894180107746848402/report.json
+e0fe3c988ed1dd46490e54d97ef9168d976ae2f15f69b763f89c587cbb100b39  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example reports/219583854458372515ae2c047a3093d7ccbcb91220facda563f51b1a5f2aca25/158fd76a-4ccf-429f-8699-faac7c95c5e7-13928075524121367212/report.json
+b222064386dfa443622e18e0ce8dadcda4c587cf4f900623eb2e3c7e58aadf21  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example reports/7bbf3760e9dd47ac02029409e3196df23c539407b2d41b1b2f7fa9f28f897b31/4c45acc2-b292-4692-bcf8-68d1568d1031-12116048113287584428/report.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-detected.stderr
+5f271f1f50c8d6936a6ef4e6d7a30e7b4b5b82f1862d421562f30cfda0b86e0e  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-detected.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-equivalent.stderr
+093a0d913e6c966c67d39efc8cca02665347f747a37a1f421fb0f093ef29f778  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-equivalent.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-invalid.stderr
+78337c2787ad2fa8a7bcb49f26efe9738c7599023d10407815635b09093c0f01  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-invalid.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-survived.stderr
+15f7e5397840f3b12533a935a441a5b0c84e18f4fbf0082a13c2b802d9054bcd  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/example-survived.stdout
+76014a3dfb41e43f57b0d884f70117f29748481df66d58100ff8cc0f38e105b7  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/examples.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/final-installed-links.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/final-installed-links.stdout
+486aec2a08dd75b2ddae068466fe683226c85777241062c9e0155398a08af54b  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/independent-evidence.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/install.stderr
+b2e234f4262a6dbc9ad2f18ce7b604ac09d4d9d00dc9832345981ef8ae5703f1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/install.stdout
+bc32579e33bfd69f7c4abf5ef5ec98697146758e0a4f88221ab7e889aaf95a0b  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-documents-before-cli-limit.json
+1e1d7376c10c51d491d4deaca374a1fa9174d347449ebda1218fcea5a388f11d  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-documents.json
+c8f1158970be171d0a944af80ca9e93b638d21cebdbc57e0d73ab63598e1df8c  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-final-llm.evidence
+d2af20710647b355f21c80a96c49512e733e74c7d80db2106865806abed56336  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-final-llm.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-final-llm.stderr
+f6586b1758d42e085ccaa3ad801c528682fed0dc0e7ed4652d222af3b864b2db  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-final-llm.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-links.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-links.stdout
+ac7e3eb63b52bb7e74dfc5d9ee643a6f74df0aac042a731f0754527f8c6fbdaf  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-llm.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-llm.stderr
+72683393d5db446e51547cc2fbdf7d76140251dbdd98e8cecc8f9953c4081642  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-llm.stdout
+6cc95b7e86e027f42f9464e78908a65b018130b0c57b81eca1779cbac7666be8  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.evidence
+1b660a3c2fcaa13445bb212f7722aa5a49ea5ba991dd4a85e09a81f8499367c9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.json
+e4e1ec3db8d6b345c1e5186ff98e8267c6df2c526510026110f68c600c6758bf  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.project
+53eae10b117063a2d0573ccb245af4b5b06d351524aed501c9c983ddb16338e9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.stderr
+ae176e79d1d229b08e2cdc8d402add2d9b5265f988ddb7d0a1804fd4027ecc3a  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/installed-tutorial.stdout
+9bd95e31426cbce45118fdf94a656dcc7d9c6ae69de95f452656ab9996b461d5  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/journey-results.json
+ee26168cca7b9c48243e812070da5f0a217e472577bbedfea4e024a964c58193  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/llm-decision-audit.json
+584e2dccd40cca5425e19f34014758a51339c1bdbf934a6451a3065360d45732  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/management-audit.json
+b96f7095bc8bbff9a483bbd9832b3eae1b706328970011e642f24101004f040d  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication reports/3eeb46abc4e73a3b597f79ac12736cd08ad40ae0d5ad633f35e9fc52d76e75ea/56ee7d95-91f7-4418-8dc5-05b64ddf9b64-4499478571276059164/report.json
+acb9ea066e1d8a65535b599f66b2f3e95a075f2c31e6bcb09941fc3f8f6515a9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication reports/3eeb46abc4e73a3b597f79ac12736cd08ad40ae0d5ad633f35e9fc52d76e75ea/979204d4-6e02-4bcd-87a2-82cb2ed72520-16647808662478116611/report.json
+db0f26179726ff7c5b6251e1e973a5e67cfd5f06ebf598fce979e31fb19bcef7  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-audit.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-before.stderr
+632c2700b6d62cdbde5c4e583275d86aff2def6102a79574af30d3ead371085c  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-before.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-failure.stderr
+17b9d2b5e1b4c40123d77ef001e7251dc6d30ca992fa4a0895fe31e14b3c6961  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-failure.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-recovery.stderr
+c7281f306da3abd5fcb1531af593f35cafb21cc94d2880cd570d87669ff6b4d1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/publication-recovery.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/reinstall.stderr
+b2e234f4262a6dbc9ad2f18ce7b604ac09d4d9d00dc9832345981ef8ae5703f1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/reinstall.stdout
+5469e7cf91708ddbea73cc78477ab290fc82270f47b4be0090771cd8a3a55700  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.evidence
+445cfe223d03ad58ead7d54ee71f8730a7094ea8d53c8863833e9a782e55d78e  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.json
+cdc49ee0efae8ccc61a96996f11d945953812831039bcd05342837fdbb8ca2e2  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.project
+41dcc94d60810269513dd62b7d83bf1a727712622e2cac9426748fc6948ac4bc  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.stderr
+44a5d40679e6f0959b86cb26217ad75fb1ad16d0a52c5286d9aeadaea4115353  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/source-tutorial.stdout
+bff8999b0f1a0271a921fe6b19960bd877149afc495ac97f544e3d23191b6e52  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/reports/5c19bc420b5dcf51993dc95a838c55a7a8c9d9735c38b601b5d8a2a13322e329/1627c6e0-247d-48f6-860b-5329e62ed07c-13888857256583075833/report.json
+f5915901c7562cc5c1e9d327c9341ea0d5b5a69d6653afb8b0919795fc88a243  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/reports/5c19bc420b5dcf51993dc95a838c55a7a8c9d9735c38b601b5d8a2a13322e329/839f8a2a-fc7f-4bcf-850c-4e4fdb07c651-2194650854099679199/report.json
+f68ba59b449c545ed266aa214e0191f7938fafbcee87b30d6d94cbbe302188b5  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/reports/5c19bc420b5dcf51993dc95a838c55a7a8c9d9735c38b601b5d8a2a13322e329/b2bb226f-dd83-4ca3-89a4-d51c888ca88c-346241731316158680/report.json
+7d95f1979be20ccc6a1930f57a93502e970452e330893fdb3e1c7231bc4f5672  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-1627c6e0-247d-48f6-860b-5329e62ed07c-oTyha3/command
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-1627c6e0-247d-48f6-860b-5329e62ed07c-oTyha3/exit
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-1627c6e0-247d-48f6-860b-5329e62ed07c-oTyha3/stderr
+fa6519839d21a50c779a129111b013fe6a98099036c76351298fa2779a7e48a2  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-1627c6e0-247d-48f6-860b-5329e62ed07c-oTyha3/stdout
+0760ede6be23bac808522c29fef4c1d7fabc9220cf5df135ced834ec1fdf783a  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-839f8a2a-fc7f-4bcf-850c-4e4fdb07c651-pv9ut2/command
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-839f8a2a-fc7f-4bcf-850c-4e4fdb07c651-pv9ut2/exit
+e7192b23c10e22206a1d2cbab11d4620acd64f8bd3e5ed914c289f6b7efda0a1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-839f8a2a-fc7f-4bcf-850c-4e4fdb07c651-pv9ut2/stderr
+e4d35bd4f80640f8c5f2b07db7897d178d3b276228e70741c6cc1a1c54b0d0af  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.Ch5v6zV2ec/run-839f8a2a-fc7f-4bcf-850c-4e4fdb07c651-pv9ut2/stdout
+0ae1ee0626de3ebe8a96b4807de2c4466d03f2f9a3d2121bf8378a8f5cce04b9  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.hm2ngYIByv/reports/417bd786dafb46b693c1f1e4bf0a9a5b42ee2efe833fe4c204656b72031a25fa/3834e662-747e-47a9-8a27-310f586981e2-522025599165797360/report.json
+69242a4036d9e7b270fe1450d27dffb5a3f0ca60b53a713b0d78ab44b95d4869  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.hm2ngYIByv/run-3834e662-747e-47a9-8a27-310f586981e2-UpCCFG/command
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.hm2ngYIByv/run-3834e662-747e-47a9-8a27-310f586981e2-UpCCFG/exit
+e7192b23c10e22206a1d2cbab11d4620acd64f8bd3e5ed914c289f6b7efda0a1  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.hm2ngYIByv/run-3834e662-747e-47a9-8a27-310f586981e2-UpCCFG/stderr
+3f674f32e05a161f45e1ab587f1b40a1c96cbd1d319199493155e19c0399a6e5  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final journeys/temporary/tmp.hm2ngYIByv/run-3834e662-747e-47a9-8a27-310f586981e2-UpCCFG/stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final-preservation.stderr
+f473ea083feeb576f4abbf41e2d45f595926064624ce646bf9402023594942ee  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/final-preservation.stdout
+356954e2ad45d0552310fcd654da6b2b35a4ce1083b8a265d5d016482bb51517  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/history-audit.json
+4f96051f1e650e66c37157e1250df6e9bfc153e9d4498182aae325fd2beeb6bd  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/initial.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/install.stderr
+df9cb56585e8316105216950cc8e457c67f9a3f995d0b0682dacdc210e796d46  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/install.stdout
+25605827bcbdc9b963c1ab0acb6aea2d11ad603dbc99e2fb8ea7eab06b62ac92  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-documents.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-links.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-links.stdout
+be113d5e607c29feb2ee9990e070f99f4881b8b881a8980ed436018b881f81c3  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-llm.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-llm.stderr
+ff2d35692decde8433d4f111af300622bc0191dde6add577fc537205673d1685  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-llm.stdout
+31f24380ac0cc5179e642b521fa8ecb40110df67607cb137a0dc08d03465918c  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-tutorial.json
+41764fce09fdffb366e963e272c0595fb21c218d3daae0676c9b5494ce5da435  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-tutorial.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-tutorial.stderr
+7127d8dd6722e075f40fb320d1237a8f1c894aa2f5608eea788df499142d08be  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/installed-tutorial.stdout
+9c57034b4c4b801e92ef3cb6ba1875042536562f1c4b845a738d3c63fcb786e3  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/journey-results.json
+9bbfe316ad2a4d3fcd60568d933959264aae3f5251746be3202a9e9e31a07bfc  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/kof-0.6.4-info.json
+60edfb086223d1fb896eec1ed1cbaa953a17ac87debeda7692231725b4d853ba  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/kof-0.6.6-info.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/links.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/links.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/management-validation.stderr
+ae157e501ccb838aeaad0df6b0ea60a957177f81277e13c9a0f516b706982b0f  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/management-validation.stdout
+60488e75b9624f4b28b41a4d15f1b8838ea765944f6724eca33016205f472705  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/preservation-audit.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/publication-validation.stderr
+db0f26179726ff7c5b6251e1e973a5e67cfd5f06ebf598fce979e31fb19bcef7  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/publication-validation.stdout
+417f7078cecb274225a736fed835947d75bf1e3e9290f901344b6875dacbaaff  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/regression-inputs.json
+af95e776ffd65976e89edff9e2b8b75eb014d04934749ae25293414d508410b6  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/regression-summary.json
+1116dfcc7d054e61c6e2d374a8fbaa44d1170cdce085bc4e1fec6f1ef68d0ee7  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/research.json
+57b9bb889f6e0a6c1a806f46582322c7ee4baba1faaeeafc87cdf7b75bd7c65d  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/source-tutorial.json
+56c76a70f3a04c9ba6e79b337c57f07b56d7fd0b0bcbb38c12f45608feec2418  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/source-tutorial.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/source-tutorial.stderr
+b9a8796a7547bf97bf401aa97dade285f1f9e982a5b6e6c07c62bdf68719218d  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/source-tutorial.stdout
+e634e95c67b903e639c65475eeedb5a04521174b51a6562c9d371ff4269d7703  .agent/tmp/m7/d22bb06e-5da7-401c-ba51-e059d8ad6a6f/targeted-evidence-summary.json
+9297a8d2210d681cb650698bbe84e162a21af9b05c49147b629b10d7a4cb5f0d  .agent/tmp/m7/fill-report.py
+4676a0fa92d557857d3b8046705641b596978088c8243e86736020eea6305807  .agent/tmp/m7/finalize.py
+c5d29a5636bac732e798ed803e2acbdf331dacf87de34ade9dc7d11a8e94d4b3  .agent/tmp/m7/journeys.py
+2a76b47701a2f54797bd9628d80864cdab24e974f1db0d8fa415ef8dc59e3a66  .agent/tmp/m7/llm-decisions.py
+1785b41767fd5709e80e60f60ba913731ccfb375cafc7907a0f5716da923fe7a  .agent/tmp/m7/management.py
+36f1daa4de77e5c7943aa789299dd5d6f8849b27c5c6bd1247535fbdfe30879e  .agent/tmp/m7/preservation.py
+2b36f42dfe1cbc4e4001d83bb3814c2e62cd86b573b12da4d49ad7bbe2b9f2d7  .agent/tmp/m7/reconcile.py
+ad9ac3dfad522cea7350b7b9c312ebdac8c805ade82285c60ba06d3c17e88be8  .agent/tmp/m7/refresh-package.py
+3d60f2593dfd92d9721815b7d3962230c94b64d6d0b8e150880f3a59d5f081ed  .agent/tmp/m7/verify-publication.py
+141ad8e6ef424b6f523a870e922919277731414b29482be7aa17dd17c2274e3c  .agent/tmp/m7/write-readmes.py
+77734683bb827c33457778c98eff301ed735f5064c1f4fcdc9abae442ad96408  .agent/tmp/m7/write-usage.py
+dd06fc3705962354a1527c51be11b64f3077dc5ada4e08414b076af7a7a2fe3d  .agent/validation/kofmut-m7.md
+4a76ac87a627c4bd0d11bb75069b3d1647ef7e178bb616148cee506fd6a81e16  EXECPLAN.md
+4aafb4b181582da23ced74bd9ea55978b58c7acd6eff61260f37bc6614693f26  README.md
+c21aede3b2bd0deff67d5f902a3a0811b36eac15f96b7005db9dd6bd9efee5d8  README.pt_BR.md
+7030bb25d0a6c57f3819e1a6477d59a7c59c8e987f4ece111f5dc878b0db61af  docs/cli.md
+59f4bafb5766e3e2d8df470f65300d30d6ffd370ffd61fa80486327fb619c3bf  docs/cli.pt_BR.md
+056db0c554ba067db990e7618aba618f9be99b4f5d6a69f7747228e09371a470  docs/installation.md
+15806f4070bbdab62782f1aa94117aa3711127da0aba6e0e9c8d73b69163d337  docs/installation.pt_BR.md
+ebe028969b613ba02c0a9ce68ce80b2e6ece64afe38658fa6af7a9a387960e9e  docs/llm-guide.md
+56d373acdb08a441f50d2e0bb6f68c13e660c11f32a9e314b02aac580db4b38f  docs/llm-guide.pt_BR.md
+4054869287232f9d3b4a7f724905d16324dfdafa23869dd1a0aab4b1379e8927  docs/operators.md
+91edb51f7f6431c089e008ac91590d349e8446cf3008e4e5beb6671880867d05  docs/operators.pt_BR.md
+569df22f2e945ba93017ad3f70ff77c29ebe59df27563a22ce325ce60f81986a  docs/report-format.md
+4e4038403bfd917f39e89b7ebf3f4821d305d0b4808bc11fa14dc29e5386a473  docs/report-format.pt_BR.md
+3c581674698e902386bd755da1a54aa25728e88eb3217ada0d3fe24c68b5d1ac  docs/usage.md
+a67639cf517e547bd3341e62a79f6692271ec6c8afd71c7bb739aa1a72a34ff8  docs/usage.pt_BR.md

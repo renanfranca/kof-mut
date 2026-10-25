@@ -1,0 +1,5 @@
+import src.math.Calc
+
+test "negative values clamp to zero" { assert(new Calc().clamp(-7) == 0) }
+test "zero remains zero" { assert(new Calc().clamp(0) == 0) }
+test "positive values remain unchanged" { assert(new Calc().clamp(7) == 7) }

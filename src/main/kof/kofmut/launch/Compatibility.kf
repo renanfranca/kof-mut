@@ -1,0 +1,507 @@
+package kofmut.launch
+
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.lang.Class
+import java.lang.Exception
+import java.lang.Process
+import java.lang.ProcessHandle
+import java.lang.ProcessBuilder
+import java.lang.Runnable
+import java.lang.Runtime
+import java.lang.System
+import java.lang.Thread
+import java.nio.ByteBuffer
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
+
+record CompatibilityInstallation(String kof, String compiler, String runtime, String stdlib, String os, Bool embeddedJdk, String install)
+record CompatibilityFile(String path, String hash)
+record CompatibilityApproval(Int schemaVersion, String identity, String version, List<CompatibilityFile> inputs, List<CompatibilityFile> classes)
+
+record CompatibilityPackage(Int schemaVersion, String prefix, String id, List<CompatibilityFile> runtimeSources, List<CompatibilityFile> files)
+record CompatibilityOwned(String id, String receiptHash)
+record CompatibilityOwner(Int schemaVersion, String prefix, List<CompatibilityOwned> releases)
+
+String compatibilityText(String path) {
+    var text = File(path).readText()
+    if (text == null) { throw "cannot read " + path }
+    return text
+}
+
+String compatibilityHash(String path, CompatibilityWork work) {
+    var digest = MessageDigest.getInstance("SHA-256")
+    var buffer = ByteBuffer.allocate(1048576)
+    var input = new FileInputStream(path)
+    try {
+        var count = input.read(buffer.array())
+        while (count >= 0) { work.active(); if (count > 0) { digest.update(buffer.array(), 0, count) }; count = input.read(buffer.array()) }
+    } finally { input.close() }
+    return HexFormat.of().formatHex(digest.digest())
+}
+
+void compatibilityDirectory(String path) {
+    if (!Directory(path).createDirectories() && !File(path).isDirectory()) { throw "cannot create " + path }
+}
+
+List<String> compatibilityFiles(String root) {
+    var paths: List<String> = listOf()
+    for (var name in Directory(root).list()) {
+        var path = root + "/" + name
+        if (File(path).isDirectory()) {
+            for (var nested in compatibilityFiles(path)) { paths.add(nested) }
+        } else if (File(path).isFile()) { paths.add(path) }
+        else { throw "unsupported or missing component: " + path }
+    }
+    paths.sort()
+    return paths
+}
+
+class CompatibilityWork implements Runnable {
+    ReentrantLock lock = new ReentrantLock()
+    AtomicBoolean cancelled = new AtomicBoolean(false)
+    List<Process> children = listOf()
+    Long started
+    String evidence
+    String context = ""
+    String candidate = ""
+    String stage = "capture"
+    String version = "unknown"
+
+    constructor(Long clock, String logs) { started = clock; evidence = logs }
+
+    void phase(String value) {
+        stage = value
+        if (context != "") { File(context + "/preparation-detail").writeText(version + "\0" + stage + "\0" + evidence + "\0") }
+    }
+
+    void active() {
+        if (cancelled.get()) { throw "preparation cancelled" }
+        if (System.currentTimeMillis() - started >= 90000) { throw "preparation exceeded 90000 ms" }
+    }
+
+    void signal(Process child, String value) {
+        var signals = new String[5]
+        signals[0] = "/bin/kill"; signals[1] = value; signals[2] = "--"; signals[3] = "-" + child.pid(); signals[4] = "" + child.pid()
+        var builder = new ProcessBuilder(signals)
+        var killer = builder.start()
+        killer.waitFor(50 as Long, TimeUnit.MILLISECONDS)
+        if (killer.isAlive()) { killer.destroyForcibly() }
+    }
+
+    void stopChildren() {
+        var deadline = System.nanoTime() + 2000000000
+        var descendants: List<ProcessHandle> = listOf()
+        for (var child in children) {
+            var parent = child.toHandle()
+            var stream = parent.descendants()
+            try {
+                var handles = stream.toList()
+                for (var i = 0; i < handles.size(); i++) { descendants.add(handles.get(i) as ProcessHandle) }
+            } finally { stream.close() }
+            signal(child, "-TERM")
+        }
+        for (var child in children) {
+            var remaining = (deadline - System.nanoTime()) / 1000000
+            if (remaining > 0) { child.waitFor(remaining, TimeUnit.MILLISECONDS) }
+        }
+        for (var handle in descendants) { var killed = handle.destroyForcibly() }
+        for (var child in children) { signal(child, "-KILL"); if (child.isAlive()) { child.destroyForcibly() } }
+        for (var child in children) {
+            var remaining = (deadline - System.nanoTime()) / 1000000
+            if (remaining > 0) { child.waitFor(remaining, TimeUnit.MILLISECONDS) }
+            if (child.isAlive()) { throw "cannot confirm preparation process cleanup: " + child.pid() }
+        }
+        children.clear()
+    }
+
+    Process startCommand(List<String> command, String cwd, String label) {
+        lock.lock()
+        try {
+            active()
+            var argv = new String[command.size + 1]
+            argv[0] = "setsid"
+            for (var i = 0; i < command.size; i++) { argv[i + 1] = command.get(i) }
+            var builder = new ProcessBuilder(argv)
+            builder.directory(new java.io.File(cwd))
+            builder.redirectOutput(new java.io.File(evidence + "/" + label + ".stdout"))
+            builder.redirectError(new java.io.File(evidence + "/" + label + ".stderr"))
+            var child = builder.start()
+            children.add(child)
+            child.getOutputStream().close()
+            return child
+        } finally { lock.unlock() }
+    }
+
+    Int command(List<String> command, String cwd, String label) {
+        var child = startCommand(command, cwd, label)
+        try {
+            var remaining = 90000 - (System.currentTimeMillis() - started)
+            if (remaining > 10000) { remaining = 10000 }
+            if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (10000 ms maximum)" }
+            active()
+            return child.exitValue()
+        } finally { lock.lock(); try { stopChildren() } finally { lock.unlock() } }
+    }
+
+    void run() {
+        cancelled.set(true)
+        lock.lock()
+        try { stopChildren(); if (candidate != "" && File(candidate).exists()) { CompatibilityState.guard(candidate); Directory(candidate).delete() } } catch (Exception error) { System.err.println("kof-mut: preparation cleanup failed: " + error) }
+        finally { lock.unlock() }
+    }
+}
+
+class CompatibilityState {
+    static void guard(String path) {
+        var current = new java.io.File(path).getAbsolutePath()
+        while (current != "") {
+            if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+            var separator = current.lastIndexOf("/")
+            if (separator <= 0) { break }
+            current = current.substring(0, separator)
+        }
+        if (File(path).isDirectory()) {
+            for (var name in Directory(path).list()) { CompatibilityState.guard(path + "/" + name) }
+        }
+    }
+
+    static void installed(String prefix) {
+        for (var path in listOf("compatibility", "logs", "owner.json", "usage.lock", "manage.lock")) { CompatibilityState.guard(prefix + "/state/kof-mut/" + path) }
+    }
+}
+
+void compatibilityNoLinks(String root, String relative) {
+    var current = root
+    for (var part in relative.split("/")) {
+        if (part == "" || part == "." || part == "..") { throw "invalid installed path; reinstall to repair" }
+        current = current + "/" + part
+        if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "managed path contains a symbolic link: " + current }
+    }
+}
+
+String compatibilityValidatePackage(String root, CompatibilityWork work) {
+    var receipt = json.decode<CompatibilityPackage>(compatibilityText(root + "/image.json"))
+    var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
+    if (receipt.schemaVersion != 2 || prefix != receipt.prefix || !receipt.id.matches("[a-f0-9]{64}(-[a-f0-9-]{36})?") || root != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "invalid installed image receipt; reinstall to repair" }
+    for (var path in listOf("state/kof-mut/owner.json", "state/kof-mut/usage.lock", "state/kof-mut/manage.lock")) { compatibilityNoLinks(prefix, path) }
+    var owner = json.decode<CompatibilityOwner>(compatibilityText(prefix + "/state/kof-mut/owner.json"))
+    var owned = false
+    for (var release in owner.releases) { if (release.id == receipt.id && release.receiptHash == compatibilityHash(root + "/image.json", work)) { owned = true } }
+    if (owner.schemaVersion != 1 || owner.prefix != prefix || !owned) { throw "invalid installation ownership metadata; reinstall to repair" }
+    var runtimeNames: List<String> = listOf()
+    for (var source in receipt.runtimeSources) {
+        if (runtimeNames.contains(source.path)) { throw "duplicate runtime source; reinstall to repair" }
+        var inventoried = false
+        for (var file in receipt.files) { if (file.path == source.path && file.hash == source.hash) { inventoried = true } }
+        if (!inventoried) { throw "invalid runtimeSources inventory; reinstall to repair" }
+        runtimeNames.add(source.path)
+    }
+    for (var required in listOf("src/main/kof/kofmut/Main.kf", "src/main/kof/kofmut/CompatibilityProbe.kf", "src/main/kof/kofmut/launch/Compatibility.kf", "scripts/launch", "scripts/supervise", "scripts/bootstrap/Launch.kf", "scripts/installed-launch", "VERSION", "kof.toml")) {
+        if (!runtimeNames.contains(required)) { throw "incomplete runtimeSources: " + required + "; reinstall to repair" }
+    }
+    var names: List<String> = listOf()
+    for (var file in receipt.files) {
+        work.active()
+        if (file.path == "" || file.path.startsWith("/") || file.path.contains("..") || names.contains(file.path) || !file.hash.matches("[a-f0-9]{64}")) { throw "invalid installed inventory; reinstall to repair" }
+        compatibilityNoLinks(root, file.path)
+        if (!File(root + "/" + file.path).isFile() || compatibilityHash(root + "/" + file.path, work) != file.hash) {
+            if (runtimeNames.contains(file.path)) { throw "invalid installed runtime source: " + file.path + "; reinstall to repair the installation" }
+            throw "invalid installed image: " + file.path + "; reinstall to repair"
+        }
+        names.add(file.path)
+    }
+    for (var path in compatibilityFiles(root + "/src/main/kof")) { if (!runtimeNames.contains(path.substring(root.length() + 1))) { throw "untracked installed runtime source; reinstall to repair" } }
+    for (var path in compatibilityFiles(root + "/classes")) { if (!names.contains(path.substring(root.length() + 1))) { throw "untracked class in installed image; reinstall to repair" } }
+    return prefix
+}
+
+List<CompatibilityFile> compatibilityInputs(String root, String kof, CompatibilityInstallation installation, CompatibilityWork work) {
+    var paths = listOf(kof, new java.io.File(installation.install + "/lib/kof.jar").getCanonicalPath())
+    for (var path in compatibilityFiles(installation.install + "/jdk")) { paths.add(path) }
+    for (var path in compatibilityFiles(root + "/src/main/kof")) { paths.add(path) }
+    for (var relative in listOf("VERSION", "kof.toml", "scripts/launch", "scripts/bootstrap/Launch.kf", "scripts/installed-launch", "scripts/supervise")) { paths.add(root + "/" + relative) }
+    paths.sort()
+    var result: List<CompatibilityFile> = listOf()
+    for (var path in paths) { result.add(CompatibilityFile(path, compatibilityHash(path, work))) }
+    return result
+}
+
+List<CompatibilityFile> compatibilityClassInventory(String image, CompatibilityWork work) {
+    var result: List<CompatibilityFile> = listOf()
+    for (var path in compatibilityFiles(image + "/classes")) { result.add(CompatibilityFile(path.substring(image.length() + 1), compatibilityHash(path, work))) }
+    return result
+}
+
+String compatibilityChecksums(List<CompatibilityFile> classes) {
+    var text = ""
+    for (var entry in classes) { text = text + entry.hash + "  " + entry.path + "\n" }
+    return text
+}
+
+Bool compatibilityApproved(String image, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
+    try {
+        var approval = json.decode<CompatibilityApproval>(compatibilityText(image + "/approval.json"))
+        if (approval.schemaVersion != 1 || approval.identity != identity || approval.version != version || json.encode(approval.inputs) != json.encode(inputs) || approval.classes.size == 0 || !File(image + "/classes/kofmut/CompatibilityProbe.class").isFile() || !File(image + "/classes/Default/Main.class").isFile()) { return false }
+        return json.encode(compatibilityClassInventory(image, work)) == json.encode(approval.classes) && compatibilityText(image + "/prepared.checksums") == compatibilityChecksums(approval.classes)
+    } catch (Exception error) { return false }
+}
+
+void compatibilityCopy(String source, String target, String expected) {
+    compatibilityDirectory(new java.io.File(target).getParent())
+    var bytes = Files.readAllBytes(new java.io.File(source).toPath())
+    var hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    if (hash != expected) { throw "runtime sources changed during preparation: " + source }
+    var output = new FileOutputStream(target)
+    try { output.write(bytes, 0, bytes.length) } finally { output.close() }
+}
+
+String prepareCompatibility(String root, String kof, CompatibilityInstallation installation, String state, CompatibilityWork work) {
+    CompatibilityState.guard(state)
+    work.active()
+    var inputs = compatibilityInputs(root, kof, installation, work)
+    var identity = crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+    compatibilityDirectory(state + "/images")
+    compatibilityDirectory(state + "/locks")
+    compatibilityDirectory(state + "/approved")
+    var reference = state + "/approved/" + identity
+    var image = ""
+    var file = new RandomAccessFile(state + "/locks/" + identity + ".lock", "rw")
+    var channel = file.getChannel()
+    try {
+        var lease = channel.tryLock()
+        while (lease == null) { work.active(); Thread.sleep(25 as Long); lease = channel.tryLock() }
+        try {
+            work.active()
+            if (File(reference).isFile()) {
+                var selected = compatibilityText(reference).trim()
+                if (selected.matches("[a-f0-9]{64}-[a-f0-9-]{36}") && selected.startsWith(identity + "-")) { image = state + "/images/" + selected }
+            }
+            if (image != "" && compatibilityApproved(image, identity, installation.kof, inputs, work)) { return image }
+            System.err.println("kof-mut: Kof " + installation.kof + " detected; preparing application...")
+            var candidate = Files.createTempDirectory(new java.io.File(state + "/images").toPath(), ".candidate-").toString()
+            work.candidate = candidate
+            try {
+                work.phase("compile")
+                for (var entry in inputs) {
+                    if (entry.path.startsWith(root + "/src/main/kof/") && entry.path.endsWith(".kf")) {
+                        compatibilityCopy(entry.path, candidate + "/sources/" + entry.path.substring((root + "/src/main/kof/").length()), entry.hash)
+                    }
+                }
+                if (!File(candidate + "/kof.toml").writeText("[sources]\napp = \"sources\"\n")) { throw "cannot write candidate build manifest" }
+                var jar = new java.io.File(installation.install + "/lib/kof.jar").getCanonicalPath()
+                var java = new java.io.File(installation.install + "/jdk/bin/java").getCanonicalPath()
+                if (work.command(listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", candidate + "/classes"), candidate, "compile") != 0) { throw "compilation failed; see compile.stdout and compile.stderr" }
+                work.phase("contracts")
+                System.err.println("kof-mut: checking compatibility...")
+                // Each child has its own ten second deadline; mutation evidence stays in work.evidence.
+                for (var probe in listOf("frontend", "killed", "survived")) {
+                    if (work.command(listOf(java, "-cp", candidate + "/classes:" + jar, "kofmut.CompatibilityProbe", root, kof, installation.kof, work.evidence, probe), candidate, probe) != 0) { throw "compatibility " + probe + " verification failed; see " + probe + ".stdout and " + probe + ".stderr" }
+                    if (compatibilityText(work.evidence + "/" + probe + ".ok") != "verified\n") { throw "missing compatibility " + probe + " evidence" }
+                }
+                work.phase("integrity")
+                if (json.encode(compatibilityInputs(root, kof, installation, work)) != json.encode(inputs)) { throw "components changed during preparation; retry" }
+                var approval = CompatibilityApproval(1, identity, installation.kof, inputs, compatibilityClassInventory(candidate, work))
+                if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
+                if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
+                work.lock.lock()
+                try {
+                    work.active()
+                    var token = UUID.randomUUID()
+                    var name = identity + "-" + token.toString()
+                    image = state + "/images/" + name
+                    var published = Files.move(new java.io.File(candidate).toPath(), new java.io.File(image).toPath(), StandardCopyOption.ATOMIC_MOVE)
+                    var publication = Files.createTempDirectory(new java.io.File(state + "/approved").toPath(), ".approval-")
+                    var temporary = new java.io.File(publication.toString() + "/reference").toPath()
+                    try {
+                        if (!File(temporary.toString()).writeText(name + "\n")) { throw "cannot write compatibility reference" }
+                        work.active()
+                        var activated = Files.move(temporary, new java.io.File(reference).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                    } finally { Directory(publication.toString()).delete() }
+                } finally { work.lock.unlock() }
+                System.err.println("kof-mut: ready; starting evaluation.")
+                return image
+            } finally { if (File(candidate).exists()) { CompatibilityState.guard(candidate); Directory(candidate).delete() } }
+        } finally { lease.release() }
+    } finally { channel.close(); file.close() }
+}
+
+void compatibilityIndex(String state, String context, String root, String kof, String image, String java, String jar, CompatibilityWork work) {
+    var identity = compatibilityText(context + "/identity").split("\0")
+    if (identity.length != 9 || identity[0] != "kofmut-image-v2" || !identity[6].matches("[a-f0-9]{64}")) { throw "invalid prepared index context" }
+    var directory = state + "/prepared"
+    CompatibilityState.guard(directory)
+    compatibilityDirectory(directory)
+    var temporary = Files.createTempDirectory(new java.io.File(directory).toPath(), ".index-").toString()
+    try {
+        var descriptor = "kofmut-prepared-v1\0" + root + "\0" + kof + "\0" + image + "\0" + java + "\0" + jar + "\0" + identity[6] + "\0" + compatibilityHash(image + "/prepared.checksums", work) + "\0" + compatibilityHash(image + "/approval.json", work) + "\0"
+        if (!File(temporary + "/index").writeText(descriptor)) { throw "cannot write prepared index" }
+        work.active()
+        var published = Files.move(new java.io.File(temporary + "/index").toPath(), new java.io.File(directory + "/" + identity[6]).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } finally { Directory(temporary).delete() }
+}
+
+void compatibilityDeliver(String context, String java, String image, String jar, String root, String kof, String version, String logs) {
+    var descriptor = "kofmut-evaluation-v1\0" + java + "\0" + image + "\0" + jar + "\0" + root + "\0" + kof + "\0" + version + "\0" + logs + "\0"
+    if (!File(context + "/evaluation").writeText(descriptor)) { throw "cannot deliver prepared application" }
+}
+
+void compatibilityApplication(String[] arguments) {
+    var signature = new Class[1]
+    signature[0] = Class.forName("[Ljava.lang.String;")
+    var method = Class.forName("Default.Main").getMethod("main", signature)
+    var invocation = new Object[1]
+    invocation[0] = arguments
+    var invoked = method.invoke(null, invocation)
+}
+
+class CompatibilityApplication {
+    static void main(String[] arguments) {
+        try {
+            var root = System.getProperty("kofmut.root")
+            if (File(root + "/image.json").isFile()) {
+                var receipt = json.decode<CompatibilityPackage>(compatibilityText(root + "/image.json"))
+                var prefix = new java.io.File(receipt.prefix).getCanonicalPath()
+                if (prefix != receipt.prefix || root != prefix + "/share/kof-mut/releases/" + receipt.id) { throw "installed release location mismatch" }
+                CompatibilityState.installed(prefix)
+                compatibilityNoLinks(prefix, "state/kof-mut/usage.lock")
+                var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "r")
+                var channel = usage.getChannel()
+                try {
+                    var lease = channel.lock(0 as Long, 9223372036854775807 as Long, true)
+                    try {
+                        var owner = json.decode<CompatibilityOwner>(compatibilityText(prefix + "/state/kof-mut/owner.json"))
+                        var registered = false
+                        for (var release in owner.releases) { if (release.id == receipt.id && release.receiptHash == crypto.sha256(compatibilityText(root + "/image.json"))) { registered = true } }
+                        if (owner.schemaVersion != 1 || owner.prefix != prefix || !registered) { throw "installed image is not owned" }
+                        compatibilityApplication(arguments)
+                    } finally { lease.release() }
+                } finally { channel.close(); usage.close() }
+            } else { compatibilityApplication(arguments) }
+        } catch (Exception error) { System.err.println("kof-mut: application launch failed: " + error); process.exit(2) }
+    }
+}
+
+Thread compatibilityHook(CompatibilityWork work) { return new Thread(work as Runnable) }
+
+void compatibilityDispatch(String[] arguments) {
+        if (arguments.length < 5) { process.exit(2) }
+        var root = arguments[0]
+        var kof = arguments[1]
+        var context = arguments[3]
+        var state = compatibilityText(context + "/compatibility-state").trim()
+        var started = compatibilityText(context + "/started").trim().toLong()
+        CompatibilityState.guard(state)
+        if (File(root + "/image.json").isFile()) {
+            var prefix = new java.io.File(root).getParentFile().getParentFile().getParentFile().getParent()
+            CompatibilityState.installed(prefix)
+        }
+        var token = UUID.randomUUID()
+        var evidence = root + "/.agent/tmp/m6/" + token.toString()
+        if (File(root + "/image.json").isFile()) { evidence = state + "/logs/" + token.toString() }
+        compatibilityDirectory(evidence)
+        var work = new CompatibilityWork(started, evidence)
+        work.context = context
+        work.phase("capture")
+        var hook = compatibilityHook(work)
+        Runtime.getRuntime().addShutdownHook(hook)
+        var image = ""
+        var jar = ""
+        var java = ""
+        var version = "unknown"
+        var logs = ""
+        var forwarded = new String[arguments.length - 5]
+        for (var i = 0; i < forwarded.length; i++) { forwarded[i] = arguments[i + 5] }
+        try {
+            var installation = json.decode<CompatibilityInstallation>(compatibilityText(context + "/info.json"))
+            version = installation.kof
+            work.version = version
+            work.phase("capture")
+            if (installation.os != "linux" || !installation.embeddedJdk || version == "" || version != installation.compiler || version != installation.runtime || version != installation.stdlib) { throw "incoherent Kof installation; Linux with embedded JDK required" }
+            installation = CompatibilityInstallation(version, installation.compiler, installation.runtime, installation.stdlib, installation.os, installation.embeddedJdk, new java.io.File(installation.install).getCanonicalPath())
+            jar = new java.io.File(installation.install + "/lib/kof.jar").getCanonicalPath()
+            java = new java.io.File(installation.install + "/jdk/bin/java").getCanonicalPath()
+            if (File(root + "/image.json").isFile()) {
+                work.phase("package integrity")
+                var prefix = compatibilityValidatePackage(root, work)
+                if (state != prefix + "/state/kof-mut/compatibility") { throw "invalid installed state location" }
+                logs = prefix + "/state/kof-mut/logs"
+                if (forwarded.length > 0 && forwarded[0] == "uninstall") {
+                    if (forwarded.length != 1) { throw "Usage: kof-mut uninstall" }
+                    var management = listOf(java, "-cp", root + "/classes:" + jar, "kofmut.launch.InstalledEntry", root, "uninstall")
+                    var argv = new String[management.size]
+                    for (var i = 0; i < management.size; i++) { argv[i] = management.get(i) }
+                    var builder = new ProcessBuilder(argv)
+                    var child = builder.inheritIO().start()
+                    process.exit(child.waitFor())
+                }
+            }
+            if (forwarded.length == 0 || (forwarded.length == 1 && (forwarded[0] == "--help" || forwarded[0] == "-h" || forwarded[0] == "--version"))) {
+                if (logs != "") {
+                    if (forwarded.length == 0 || forwarded[0] != "--version") { println("Installed management: kof-mut uninstall") }
+                    compatibilityDeliver(context, java, root, jar, root, kof, version, logs)
+                    return
+                }
+                if (forwarded.length == 1 && forwarded[0] == "--version") { println("KofMut " + compatibilityText(root + "/VERSION").trim()) }
+                else {
+                    if (logs != "") { println("Installed management: kof-mut uninstall") }
+                    println("KofMut: mutation testing for Kof")
+                    println("Usage: kof-mut --version | --help | run --project PATH --files JSON [--report-dir DIRECTORY] [--config JSON] [--run-id UUID]")
+                }
+                return
+            }
+            image = prepareCompatibility(root, kof, installation, state, work)
+            compatibilityIndex(state, context, root, kof, image, java, jar, work)
+        } catch (Exception error) {
+            System.err.println("kof-mut: Kof " + version + "; preparation " + work.stage + " failed: " + error + "; evidence: " + evidence)
+            process.exit(2)
+        } finally {
+            Runtime.getRuntime().removeShutdownHook(hook)
+        }
+        compatibilityDeliver(context, java, image, jar, root, kof, version, logs)
+    }
+
+class CompatibilityEntry {
+    static void main(String[] arguments) {
+        try {
+            if (arguments.length < 5) { throw "missing launch context" }
+            var root = arguments[0]
+            var uninstall = arguments.length > 5 && arguments[5] == "uninstall"
+            if (File(root + "/image.json").isFile() && !uninstall) {
+                var prefix = new java.io.File(root).getParentFile().getParentFile().getParentFile().getParent()
+                CompatibilityState.installed(prefix)
+                compatibilityNoLinks(prefix, "state/kof-mut/usage.lock")
+                var usage = new RandomAccessFile(prefix + "/state/kof-mut/usage.lock", "r")
+                var channel = usage.getChannel()
+                try {
+                    var lease = channel.lock(0 as Long, 9223372036854775807 as Long, true)
+                    try { compatibilityDispatch(arguments) } finally { lease.release() }
+                } finally { channel.close(); usage.close() }
+            } else { compatibilityDispatch(arguments) }
+        } catch (Exception error) {
+            var context = "unavailable"
+            var version = "unknown"
+            if (arguments.length > 3) {
+                context = arguments[3]
+                try { var installation = json.decode<CompatibilityInstallation>(compatibilityText(context + "/info.json")); version = installation.kof }
+                catch (Exception ignored) {}
+            }
+            var detail = "kof-mut: Kof " + version + "; preparation bootstrap failed: " + error + "; evidence: " + context
+            if (context != "unavailable") {
+                try {
+                    File(context + "/bootstrap-failure").writeText(detail + "\n")
+                    File(context + "/preparation-detail").writeText(version + "\0bootstrap\0" + context + "\0")
+                } catch (Exception ignored) {}
+            }
+            System.err.println(detail)
+            process.exit(2)
+        }
+    }
+}

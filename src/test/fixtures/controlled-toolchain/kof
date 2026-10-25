@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == run && "${KOF_MUT_TEST_RUN:-}" == block ]]; then
+    printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+    : > "$KOF_MUT_TEST_READY"
+    while [[ ! -e "$KOF_MUT_TEST_READY.continue" ]]; do /bin/sleep 0.02; done
+fi
+if [[ "${KOF_MUT_TEST_COMPILE:-}" == refuse && ( "$1" == run || "$1" == build ) ]]; then
+    echo 'controlled toolchain refuses compilation' >&2
+    exit 91
+fi
+if [[ "$1" == info ]]; then
+    if [[ "${KOF_MUT_TEST_INFO:-}" == invalid ]]; then
+        printf '%s\n' 'invalid JSON'
+        exit 0
+    fi
+    if [[ -n "${KOF_MUT_TEST_LINK:-}" ]]; then
+        /bin/ln -sfn -- "$KOF_MUT_TEST_REPLACEMENT" "$KOF_MUT_TEST_LINK"
+    fi
+fi
+if [[ "$1" == build ]]; then
+    printf 'build\n' >> "$KOF_MUT_TEST_LOG"
+    if [[ "${KOF_MUT_TEST_BUILD:-}" == block-before-output || "${KOF_MUT_TEST_BUILD:-}" == block-after-output ]]; then
+        if [[ "$KOF_MUT_TEST_BUILD" == block-after-output ]]; then "$KOF_MUT_TEST_KOF" "$@"; fi
+        printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+        printf '%s\n' "$PWD" > "$KOF_MUT_TEST_READY"
+        while [[ ! -e "$KOF_MUT_TEST_READY.continue" ]]; do /bin/sleep 0.02; done
+        if [[ "${KOF_MUT_TEST_FINISH:-}" == fail ]]; then echo 'controlled preparation failure' >&2; exit 7; fi
+        if [[ "$KOF_MUT_TEST_BUILD" == block-after-output ]]; then exit 0; fi
+    fi
+    if [[ "${KOF_MUT_TEST_BUILD:-}" == fail-after-output ]]; then
+        "$KOF_MUT_TEST_KOF" "$@"
+        [[ -f "$PWD/classes/Default/Main.class" ]]
+        echo 'controlled compilation failure after output' >&2
+        exit 7
+    fi
+    if [[ "${KOF_MUT_TEST_BUILD:-}" == interrupt-after-output ]]; then
+        "$KOF_MUT_TEST_KOF" "$@"
+        [[ -f "$PWD/classes/Default/Main.class" ]]
+        printf '%s\n' "$$" > "$KOF_MUT_TEST_READY.pid"
+        printf '%s\n' "$PWD" > "$KOF_MUT_TEST_READY"
+        /bin/sleep 60
+        exit 7
+    fi
+fi
+exec "$KOF_MUT_TEST_KOF" "$@"

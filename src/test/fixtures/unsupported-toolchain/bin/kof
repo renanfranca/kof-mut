@@ -1,2 +1,5 @@
 #!/bin/sh
-printf '%s\n' '{"kof":"9.9.9","compiler":"9.9.9","runtime":"9.9.9","stdlib":"9.9.9"}'
+if [ "$1" = run ]; then
+    exec "$KOF_MUT_TEST_KOF" "$@"
+fi
+printf '%s\n' '{"kof":"9.9.9","compiler":"9.9.9","runtime":"9.9.9","stdlib":"9.9.9","os":"linux","embeddedJdk":true,"install":"/unused"}'

@@ -4,4 +4,6 @@ KOF_MUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$KOF_MUT_ROOT"
 ./bin/kof-mut --version
 kof test src/test/kof/kofmut/Cli.kf
-exec python3 scripts/launch.py contracts
+kof test src/test/kof/kofmut/Run.kf
+kof test src/test/kof/kofmut/Install.kf
+exec ./scripts/launch contracts
