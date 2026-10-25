@@ -240,11 +240,17 @@ List<CompatibilityFile> compatibilityClassInventory(String image, CompatibilityW
     return result
 }
 
+String compatibilityChecksums(List<CompatibilityFile> classes) {
+    var text = ""
+    for (var entry in classes) { text = text + entry.hash + "  " + entry.path + "\n" }
+    return text
+}
+
 Bool compatibilityApproved(String image, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
     try {
         var approval = json.decode<CompatibilityApproval>(compatibilityText(image + "/approval.json"))
         if (approval.schemaVersion != 1 || approval.identity != identity || approval.version != version || json.encode(approval.inputs) != json.encode(inputs) || approval.classes.size == 0 || !File(image + "/classes/kofmut/CompatibilityProbe.class").isFile() || !File(image + "/classes/Default/Main.class").isFile()) { return false }
-        return json.encode(compatibilityClassInventory(image, work)) == json.encode(approval.classes)
+        return json.encode(compatibilityClassInventory(image, work)) == json.encode(approval.classes) && compatibilityText(image + "/prepared.checksums") == compatibilityChecksums(approval.classes)
     } catch (Exception error) { return false }
 }
 
@@ -304,6 +310,7 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
                 if (json.encode(compatibilityInputs(root, kof, installation, work)) != json.encode(inputs)) { throw "components changed during preparation; retry" }
                 var approval = CompatibilityApproval(1, identity, installation.kof, inputs, compatibilityClassInventory(candidate, work))
                 if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
+                if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
                 work.lock.lock()
                 try {
                     work.active()
@@ -324,6 +331,21 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
             } finally { if (File(candidate).exists()) { CompatibilityState.guard(candidate); Directory(candidate).delete() } }
         } finally { lease.release() }
     } finally { channel.close(); file.close() }
+}
+
+void compatibilityIndex(String state, String context, String root, String kof, String image, String java, String jar, CompatibilityWork work) {
+    var identity = compatibilityText(context + "/identity").split("\0")
+    if (identity.length != 9 || identity[0] != "kofmut-image-v2" || !identity[6].matches("[a-f0-9]{64}")) { throw "invalid prepared index context" }
+    var directory = state + "/prepared"
+    CompatibilityState.guard(directory)
+    compatibilityDirectory(directory)
+    var temporary = Files.createTempDirectory(new java.io.File(directory).toPath(), ".index-").toString()
+    try {
+        var descriptor = "kofmut-prepared-v1\0" + root + "\0" + kof + "\0" + image + "\0" + java + "\0" + jar + "\0" + identity[6] + "\0" + compatibilityHash(image + "/prepared.checksums", work) + "\0" + compatibilityHash(image + "/approval.json", work) + "\0"
+        if (!File(temporary + "/index").writeText(descriptor)) { throw "cannot write prepared index" }
+        work.active()
+        var published = Files.move(new java.io.File(temporary + "/index").toPath(), new java.io.File(directory + "/" + identity[6]).toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } finally { Directory(temporary).delete() }
 }
 
 void compatibilityDeliver(String context, String java, String image, String jar, String root, String kof, String version, String logs) {
@@ -436,6 +458,7 @@ void compatibilityDispatch(String[] arguments) {
                 return
             }
             image = prepareCompatibility(root, kof, installation, state, work)
+            compatibilityIndex(state, context, root, kof, image, java, jar, work)
         } catch (Exception error) {
             System.err.println("kof-mut: Kof " + version + "; preparation " + work.stage + " failed: " + error + "; evidence: " + evidence)
             process.exit(2)

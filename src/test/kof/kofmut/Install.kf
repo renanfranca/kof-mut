@@ -95,6 +95,186 @@ InstallJourney installJavaJourney() {
     return InstallJourney(journey.base, journey.checkout, journey.prefix, journey.toolchain, distribution + "/bin/kof")
 }
 
+record StartupCounts(Int candidates, Int killed, Int survived, Int pending)
+record StartupTest(Int executedTests, Int failedTests)
+record StartupBaseline(String status, StartupTest test)
+record StartupReport(Int schemaVersion, String status, StartupCounts counts, StartupBaseline baseline, List<String> limitations, List<String> discardedCandidates)
+
+InstallJourney startupJourney(Bool readyBarrier) {
+    var journey = installJavaJourney()
+    var info = json.decode<InstallKofInfo>(process.run("kof", "info", "--json").stdout)
+    var java = new java.io.File(journey.kof).getParentFile().getParent() + "/jdk/bin/java"
+    assert(File(java).writeText(installText("src/test/fixtures/startup-java").replace("\"$KOF_MUT_TEST_JAVA\"", "\"" + info.install + "/jdk/bin/java\"")))
+    if (readyBarrier) {
+        var launcher = journey.checkout + "/scripts/launch"
+        var anchor = "            # The preparation deadline ends here."
+        var text = installText(launcher)
+        assert(text.contains(anchor))
+        assert(File(launcher).writeText(text.replace(anchor, installText("src/test/fixtures/startup-ready.bash") + "\n" + anchor)))
+    }
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
+    return journey
+}
+
+List<String> startupEmpty(InstallJourney journey) {
+    var scope = journey.base + "/empty-scope.json"
+    assert(File(scope).writeText("[]"))
+    var command = installEnvironment(journey)
+    command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(new java.io.File("fixtures/detected").getCanonicalPath()); command.add("--files"); command.add(scope); command.add("--report-dir"); command.add(journey.base + "/reports")
+    return command
+}
+
+test "a prepared installed round uses one work JVM after checkout removal", "startup-optimization" {
+    var journey = installJavaJourney()
+    var info = json.decode<InstallKofInfo>(process.run("kof", "info", "--json").stdout)
+    var java = new java.io.File(journey.kof).getParentFile().getParent() + "/jdk/bin/java"
+    var observer = installText("src/test/fixtures/startup-java")
+    assert(File(java).writeText(observer.replace("\"$KOF_MUT_TEST_JAVA\"", "\"" + info.install + "/jdk/bin/java\"")))
+    var command = installEnvironment(journey)
+    command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
+    var installed = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
+    var project = journey.base + "/complete round with spaces"
+    assert(process.run("cp", "-a", "fixtures/startup-4-file", project).exitCode == 0)
+    command = installEnvironment(journey)
+    command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(project); command.add("--files"); command.add(project + "/scope.json"); command.add("--report-dir"); command.add(journey.base + "/reports")
+    var first = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(first.exitCode == 1, first.stdout + first.stderr)
+    assert(Directory(journey.checkout).delete())
+    assert(process.run("chmod", "-R", "a-w", journey.prefix + "/share").exitCode == 0)
+    var before = preservationInventory(journey.prefix + "/share")
+    var projectBefore = preservationInventory(project)
+    var log = journey.base + "/work-jvms"
+    try {
+        var warm = shell.runWith(command, journey.base, mapOf("KOF_MUT_JVM_LOG", log, "KOF_MUT_TEST_COMPILE", "refuse"))
+
+        installAssertEvidence(warm.exitCode == 1, warm.stdout + warm.stderr)
+        installAssertEvidence(installText(log).trim().split("\n").length == 1, "prepared installed evaluation must use one work JVM: " + installText(log))
+        assert(!warm.stderr.contains("checking compatibility") && !warm.stderr.contains("preparing application"))
+        var report = ""
+        for (var line in warm.stdout.split("\n")) { if (line.startsWith("reportPath=")) { report = json.decode<String>(line.substring(11)) } }
+        var result = json.decode<StartupReport>(installText(report))
+        assert(result.schemaVersion == 1 && result.status == "complete")
+        assert(result.baseline.status == "passed" && result.baseline.test.executedTests == 8 && result.baseline.test.failedTests == 0)
+        assert(result.counts.candidates == 3 && result.counts.killed == 2 && result.counts.survived == 1 && result.counts.pending == 0)
+        assert(result.limitations.size == 0 && result.discardedCandidates.size == 0)
+        assert(preservationInventory(journey.prefix + "/share") == before)
+        assert(preservationInventory(project) == projectBefore)
+    } finally { assert(process.run("chmod", "-R", "u+w", journey.prefix + "/share").exitCode == 0) }
+}
+
+test "readiness retains both leases and cancellation cannot admit evaluation", "startup-optimization", "startup-transition" {
+    var journey = startupJourney(true)
+    var command = startupEmpty(journey)
+    var warm = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(warm.exitCode == 3, warm.stdout + warm.stderr)
+    var reportsBefore = preservationInventory(journey.base + "/reports")
+    for (var signal in listOf("INT", "TERM")) {
+        var barrier = journey.base + "/ready-" + signal
+        var controlled = listOf("/usr/bin/env", "KOF_MUT_READY_BARRIER=" + barrier)
+        for (var argument in command) { controlled.add(argument) }
+        var running = startInstallCommand(controlled, journey.base + "/ready-" + signal + "-run")
+        try {
+            installReady(barrier, running)
+            var file = new java.io.RandomAccessFile(journey.prefix + "/state/kof-mut/usage.lock", "rw")
+            var channel = file.getChannel()
+            try {
+                var lease = channel.tryLock()
+                if (lease != null) { lease.release() }
+                assert(lease == null, "the same JVM must already hold its lease before confirmation")
+            } finally { channel.close(); file.close() }
+            var refused = process.run(journey.prefix + "/bin/kof-mut", "uninstall")
+            assert(refused.exitCode == 2 && refused.stderr.contains("installed execution is active"))
+            assert(preservationInventory(journey.base + "/reports") == reportsBefore, "the engine cannot start before launcher confirmation")
+            var pid = installText(barrier + ".jvm").trim()
+            assert(process.run("/bin/kill", "-" + signal, "" + running.pid()).exitCode == 0)
+            assert(running.waitFor(5000 as Long, TimeUnit.MILLISECONDS))
+            var expected = 130
+            if (signal == "TERM") { expected = 143 }
+            assert(running.exitValue() == expected)
+            var state = process.run("/bin/ps", "-p", pid, "-o", "stat=").stdout.trim()
+            assert(state == "" || state.startsWith("Z"), "the prepared JVM must stop before test cleanup")
+            assert(File(barrier + ".continue").writeText("late release"))
+            Thread.sleep(150 as Long)
+            assert(preservationInventory(journey.base + "/reports") == reportsBefore)
+        } finally {
+            File(barrier + ".continue").writeText("release")
+            if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+            if (running.isAlive()) { running.destroyForcibly() }
+        }
+    }
+    var retry = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    installAssertEvidence(retry.exitCode == 3 && !retry.stderr.contains("checking compatibility"), retry.stdout + retry.stderr)
+}
+
+test "a prepared invocation retains the original ninety second preparation deadline", "startup-optimization", "startup-deadline" {
+    var journey = startupJourney(false)
+    var command = startupEmpty(journey)
+    var warm = shell.runWith(command, journey.base, mapOf())
+    installAssertEvidence(warm.exitCode == 3, warm.stdout + warm.stderr)
+    var before = preservationInventory(journey.base + "/reports")
+    var barrier = journey.base + "/before-prepared-entry"
+    var controlled = listOf("/usr/bin/env", "KOF_MUT_PREPARED_BARRIER=" + barrier)
+    for (var argument in command) { controlled.add(argument) }
+    var started = System.nanoTime()
+    var wall = System.currentTimeMillis()
+    var running = startInstallCommand(controlled, journey.base + "/deadline")
+    try {
+        installReady(barrier, running)
+        assert(running.waitFor(100000 as Long, TimeUnit.MILLISECONDS))
+        var detail = installText(journey.base + "/deadline.stderr")
+        installAssertEvidence(running.exitValue() == 2 && detail.contains("preparation") && detail.contains("90000 ms"), detail)
+        println("prepared deadline monotonicMs=" + (System.nanoTime() - started) / 1000000 + " wallMs=" + (System.currentTimeMillis() - wall))
+        assert(preservationInventory(journey.base + "/reports") == before)
+        var pid = installText(barrier + ".pid").trim()
+        var state = process.run("/bin/ps", "-p", pid, "-o", "stat=").stdout.trim()
+        assert(state == "" || state.startsWith("Z"))
+        assert(File(barrier + ".continue").writeText("late release"))
+        Thread.sleep(150 as Long)
+        assert(preservationInventory(journey.base + "/reports") == before)
+    } finally {
+        File(barrier + ".continue").writeText("release")
+        if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        if (running.isAlive()) { running.destroyForcibly() }
+    }
+    var retry = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    installAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
+}
+
+test "confirmed evaluation with budget zero can exceed ninety seconds", "startup-optimization", "startup-unbounded" {
+    var journey = startupJourney(false)
+    var empty = startupEmpty(journey)
+    var prepared = shell.runWith(empty, journey.base, mapOf())
+    installAssertEvidence(prepared.exitCode == 3, prepared.stdout + prepared.stderr)
+    var project = journey.base + "/long evaluation"
+    assert(process.run("cp", "-a", "fixtures/detected", project).exitCode == 0)
+    assert(File(project + "/src/math/Calc.kf").writeText("package src.math\nclass Calc { Int sum(Int a, Int b) { return a } }\n"))
+    assert(File(project + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"identity\" { assert(time.now() > 0); assert(new Calc().sum(5, 0) == 5) }\n"))
+    assert(File(project + "/slow-command").writeText("#!/bin/bash\n/bin/sleep 46\nexec kof \"$@\"\n"))
+    assert(new java.io.File(project + "/slow-command").setExecutable(true, true))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml", "slow-command"), listOf("./slow-command", "check", "src/math/Calc.kf", "--json"), listOf("./slow-command", "test", "tests"), 60000, 0))))
+    var command = installEnvironment(journey)
+    command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(project); command.add("--files"); command.add(project + "/scope.json"); command.add("--report-dir"); command.add(journey.base + "/long reports")
+    var started = System.nanoTime()
+    var wall = System.currentTimeMillis()
+    var result = shell.runWith(command, journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+
+    installAssertEvidence(result.exitCode == 3, result.stdout + result.stderr)
+    var report = ""
+    for (var line in result.stdout.split("\n")) { if (line.startsWith("reportPath=")) { report = json.decode<String>(line.substring(11)) } }
+    var outcome = json.decode<StartupReport>(installText(report))
+    assert(outcome.status == "no_mutants" && outcome.baseline.status == "passed" && outcome.baseline.test.executedTests == 1)
+    assert(outcome.counts.candidates == 0 && outcome.limitations.size == 0)
+    var duration = json.decode<StartupDuration>(installText(report))
+    assert(duration.durationMs > 90000)
+    println("confirmed evaluation engineMs=" + duration.durationMs + " monotonicMs=" + (System.nanoTime() - started) / 1000000 + " wallMs=" + (System.currentTimeMillis() - wall))
+}
+
+record StartupDuration(Long durationMs)
+
 test "installed commands and evaluation survive removal of the checkout", "install" {
     var journey = installJourney()
     var copied = process.run("/bin/cp", "-a", "fixtures/detected", journey.base + "/evaluated project")
@@ -570,7 +750,7 @@ test "missing incompatible or contradictory installation context cannot authoriz
     assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == previous)
 }
 
-test "damaged entry fails explicitly and reinstall repairs without replacing the old image", "update", "compatibility", "compatibility-integrity" {
+test "damaged entry fails explicitly and reinstall repairs without replacing the old image", "update", "compatibility", "compatibility-integrity", "startup-optimization" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -935,7 +1115,7 @@ record CompatibilityResult(String kofVersion, String status)
 record CompatibilityReceiptFile(String path, String hash)
 record CompatibilityReceipt(Int schemaVersion, List<CompatibilityReceiptFile> runtimeSources)
 
-test "runtime sources survive checkout and build dependency removal and follow PATH", "compatibility" {
+test "runtime sources survive checkout and build dependency removal and follow PATH", "compatibility", "startup-optimization" {
     var journey = installJourney()
     var info = json.decode<InstallKofInfo>(process.run("kof", "info", "--json").stdout)
     var oldKof = journey.base + "/Kof A"
@@ -993,7 +1173,7 @@ test "runtime sources survive checkout and build dependency removal and follow P
     assert(!File(release + "/build").exists())
 }
 
-test "a read only package rebuilds generated cache and diagnoses changed runtime sources", "compatibility", "compatibility-diagnostics", "compatibility-state-errors" {
+test "a read only package rebuilds generated cache and diagnoses changed runtime sources", "compatibility", "compatibility-diagnostics", "compatibility-state-errors", "startup-optimization" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1098,7 +1278,7 @@ void installAssertEvidence(Bool condition, String evidence) {
     assert(condition, "behavior failed; see evidence above")
 }
 
-test "uninstall cannot cross the handoff before the application acquires its JVM lease", "compatibility", "compatibility-lease" {
+test "uninstall cannot cross the handoff before the application acquires its JVM lease", "compatibility", "compatibility-lease", "startup-optimization" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1203,7 +1383,7 @@ test "cold installed state never follows a compatibility link into an external p
 }
 
 
-test "warm installed state refuses nested links without damage and recovers by unlinking only", "state-preservation" {
+test "warm installed state refuses nested links without damage and recovers by unlinking only", "state-preservation", "startup-optimization" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1229,7 +1409,8 @@ test "warm installed state refuses nested links without damage and recovers by u
     assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf("touch", marker), listOf("touch", marker), 10000, 0))))
     var targetFile = journey.base + "/target-file"
     assert(File(targetFile).writeText("target bytes stay unchanged"))
-    var paths = listOf(cache, bootstrap, bootstrap + "/locations", bootstrap + "/locations/" + location, bootstrap + "/images", bootstrap + "/images/" + bootstrapImage + "/identity", bootstrap + "/build.lock", cache + "/images", cache + "/images/" + image + "/classes/Default/Main.class", cache + "/images/" + image + "/approval.json", cache + "/approved", cache + "/approved/" + approval, cache + "/locks", cache + "/locks/" + lock, cache + "/logs", state + "/logs", cache + "/logs/broken-link", preparationLog, applicationLog, state + "/owner.json", state + "/usage.lock", state + "/manage.lock")
+    var preparedIndex = Directory(cache + "/prepared").list().get(0)
+    var paths = listOf(cache + "/prepared", cache + "/prepared/" + preparedIndex, cache + "/images/" + image + "/prepared.checksums", cache + "/images/" + image + "/classes/kofmut/launch/PreparedEntry.class", cache, bootstrap, bootstrap + "/locations", bootstrap + "/locations/" + location, bootstrap + "/images", bootstrap + "/images/" + bootstrapImage + "/identity", bootstrap + "/build.lock", cache + "/images", cache + "/images/" + image + "/classes/Default/Main.class", cache + "/images/" + image + "/approval.json", cache + "/approved", cache + "/approved/" + approval, cache + "/locks", cache + "/locks/" + lock, cache + "/logs", state + "/logs", cache + "/logs/broken-link", preparationLog, applicationLog, state + "/owner.json", state + "/usage.lock", state + "/manage.lock")
     for (var path in paths) {
         var existed = File(path).exists()
         var directory = File(path).isDirectory()

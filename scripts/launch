@@ -178,6 +178,58 @@ if [[ "$KOF_MUT_MODE" == management ]]; then
     rm -rf -- "$KOF_MUT_CONTEXT"
     exec "$KOF_MUT_JAVA" -cp "$KOF_MUT_ROOT/classes:$KOF_MUT_JAR" kofmut.launch.InstalledEntry "$KOF_MUT_ROOT" "$@"
 fi
+try_prepared() {
+    [[ "$KOF_MUT_MODE" == app && "${1:-}" == run ]] || return 1
+    local index="$KOF_MUT_STATE/prepared/$KOF_MUT_KEY" field="" image="" name="" hash="" child="" result=0
+    local fields=() files=() ready=()
+    [[ -f "$index" ]] || return 1
+    while IFS= read -r -d '' field; do fields+=("$field"); done < "$index"
+    [[ -z "$field" && ${#fields[@]} == 9 && ${fields[0]} == kofmut-prepared-v1 && ${fields[1]} == "$KOF_MUT_ROOT" && ${fields[2]} == "$KOF_MUT_KOF" && ${fields[4]} == "$(readlink -f -- "$KOF_MUT_JAVA")" && ${fields[5]} == "$(readlink -f -- "$KOF_MUT_JAR")" && ${fields[6]} == "$KOF_MUT_KEY" && ${fields[7]} =~ ^[a-f0-9]{64}$ && ${fields[8]} =~ ^[a-f0-9]{64}$ ]] || return 1
+    image="${fields[3]}"; name="${image##*/}"
+    [[ "$name" =~ ^[a-f0-9]{64}-[a-f0-9-]{36}$ && "$image" == "$KOF_MUT_STATE/images/$name" && -f "$image/classes/kofmut/launch/PreparedEntry.class" && -f "$image/prepared.checksums" && -f "$image/approval.json" ]] || return 1
+    check_state_path "$image"
+    hash="$(timeout --foreground --kill-after=2 10 sha256sum -- "$image/prepared.checksums")" || return 1
+    [[ "${hash:0:64}" == "${fields[7]}" ]] || return 1
+    hash="$(timeout --foreground --kill-after=2 10 sha256sum -- "$image/approval.json")" || return 1
+    [[ "${hash:0:64}" == "${fields[8]}" ]] || return 1
+    # Check the entire file set, including extra classes, before loading code.
+    (cd -- "$image" && find classes -type f -print0 | LC_ALL=C sort -z) > "$KOF_MUT_CONTEXT/prepared-files" || return 1
+    while IFS= read -r -d '' field; do files+=("$field"); done < "$KOF_MUT_CONTEXT/prepared-files"
+    (( ${#files[@]} > 0 )) || return 1
+    (cd -- "$image" && timeout --foreground --kill-after=2 10 sha256sum -- "${files[@]}") > "$KOF_MUT_CONTEXT/prepared-checksums" || return 1
+    cmp -s -- "$KOF_MUT_CONTEXT/prepared-checksums" "$image/prepared.checksums" || return 1
+    printf '%s\0' "${fields[@]}" > "$KOF_MUT_CONTEXT/prepared-index"
+    "${fields[4]}" -cp "$image/classes:${fields[5]}" kofmut.launch.PreparedEntry "$KOF_MUT_ROOT" "$KOF_MUT_KOF" app "$KOF_MUT_CONTEXT" "$image" "$@" &
+    child=$!
+    while kill -0 "$child" 2>/dev/null; do
+        (( $(date +%s%3N) - KOF_MUT_STARTED < 90000 )) || fail 'preparation exceeded 90000 ms'
+        if [[ -f "$KOF_MUT_CONTEXT/evaluation-ready" ]]; then
+            field=""
+            while IFS= read -r -d '' field; do ready+=("$field"); done < "$KOF_MUT_CONTEXT/evaluation-ready"
+            [[ -z "$field" && ${#ready[@]} == 2 && ${ready[0]} == kofmut-ready-v1 && ${ready[1]} == "$image" ]] || fail 'invalid prepared evaluation readiness'
+            # The preparation deadline ends here. The engine starts its own budget
+            # only after this private confirmation; wait below has no total timeout.
+            (( $(date +%s%3N) - KOF_MUT_STARTED < 90000 )) || fail 'preparation exceeded 90000 ms'
+            printf 'kofmut-go-v1\n' > "$KOF_MUT_CONTEXT/evaluation-go"
+            if wait "$child"; then result=0; else result=$?; fi
+            exit "$result"
+        fi
+        /bin/sleep 0.02
+    done
+    if wait "$child"; then result=0; else result=$?; fi
+    if [[ "$result" == 75 && -f "$KOF_MUT_CONTEXT/prepared-miss" ]]; then
+        rm -f -- "$KOF_MUT_CONTEXT/prepared-miss"
+        return 1
+    fi
+    if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
+        KOF_MUT_KEEP_CONTEXT=1
+        echo "kof-mut: preparation evidence: $KOF_MUT_CONTEXT" >&2
+        exit 2
+    fi
+    fail "prepared validation failed (exit $result)"
+}
+select_image
+if try_prepared "$@"; then exit 0; fi
 if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
     if timeout --foreground --kill-after=2 10 "${KOF_MUT_LOCATION[1]}" -cp "$KOF_MUT_ROOT/classes:${KOF_MUT_LOCATION[2]}" kofmut.InstalledPreflight "$KOF_MUT_ROOT" "$KOF_MUT_PREFIX" "$KOF_MUT_CONTEXT/arguments" 2> "$KOF_MUT_CONTEXT/preflight.stderr"; then
         cat "$KOF_MUT_CONTEXT/preflight.stderr" >&2
@@ -188,7 +240,6 @@ if [[ -f "$KOF_MUT_ROOT/launch.bin" ]]; then
         exit 2
     fi
 fi
-select_image
 complete_image() {
     [[ ( "$KOF_MUT_MODE" == app && -f "$KOF_MUT_IMAGE/classes/kofmut/launch/CompatibilityEntry.class" ) || ( "$KOF_MUT_MODE" != app && -f "$KOF_MUT_IMAGE/classes/Default/Main.class" && -f "$KOF_MUT_IMAGE/classes/kofmut/launch/RuntimeEntry.class" ) ]] && [[ -f "$KOF_MUT_IMAGE/classes/kofmut/launch/CompatibilityEntry.class" && -f "$KOF_MUT_IMAGE/identity" && -f "$KOF_MUT_IMAGE/checksums" ]] &&
         cmp -s -- "$KOF_MUT_CONTEXT/identity" "$KOF_MUT_IMAGE/identity" &&

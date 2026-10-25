@@ -27,7 +27,15 @@ class InstalledPreflight {
             InstalledEntry.guardState(arguments[1])
             InstalledEntry.preflight(arguments[0])
         }
-        catch (Exception error) { System.err.println("kof-mut: Kof " + KofVersion.version() + "; preparation package integrity failed: " + error); process.exit(2) }
+        catch (Exception error) {
+            var detail = "kof-mut: Kof " + KofVersion.version() + "; preparation package integrity failed: " + error
+            if (arguments.length == 3) {
+                var context = new java.io.File(arguments[2]).getParent()
+                File(context + "/preflight.stderr").writeText(detail + "\n")
+            }
+            System.err.println(detail)
+            process.exit(2)
+        }
         try {
             if (arguments.length != 3) { throw "invalid installed preflight context" }
             var raw = readRequired(arguments[2])
