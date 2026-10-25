@@ -2,7 +2,7 @@
 
 # Guia do CLI
 
-Comece pelos [requisitos e quatro exemplos executáveis](../README.pt_BR.md#requisitos). Este guia é a referência de chamadas, configuração do projeto, isolamento e recuperação. Para o vocabulário dos resultados, leia [operadores](operators.pt_BR.md); para integração, use [JSON v1](report-format.pt_BR.md).
+Comece pelos [requisitos](../README.pt_BR.md#requisitos) e pelo [tutorial de uso](usage.pt_BR.md). Este guia é a referência de chamadas, configuração do projeto, isolamento e recuperação. Para o vocabulário dos resultados, leia [operadores](operators.pt_BR.md); para integração, use [JSON v1](report-format.pt_BR.md).
 
 ## Comandos e caminhos
 
@@ -55,7 +55,7 @@ Quando `--prefix` é omitido, HOME deve estar presente, não vazio e ser absolut
 | `state/kof-mut/manage.lock`, `state/kof-mut/usage.lock` | Arquivos persistentes de coordenação |
 | `state/kof-mut/logs/run-<runId>-<unique-suffix>` | Logs das avaliações instaladas |
 
-O conjunto instalado inclui `src/main/kof/` e os scripts necessários à recompilação, sem testes de desenvolvimento, metadados Git, cache do checkout, histórico, jar do Kof nem JDK. As verificações operacionais de compatibilidade fazem parte das fontes de execução. Links históricos no README copiado apontam para arquivos do checkout. O pacote pode ficar somente para leitura; a preparação usa `state/kof-mut/compatibility/`, as avaliações gravam logs no estado e os relatórios seguem `--report-dir`. Antes da primeira escrita no estado, uma verificação prévia recusa sobreposição com os inputs avaliados.
+O conjunto instalado inclui `src/main/kof/` e os scripts necessários à recompilação, sem testes de desenvolvimento, metadados Git, cache do checkout, histórico, jar do Kof nem JDK. As verificações operacionais de compatibilidade fazem parte das fontes de execução. Os guias públicos copiados podem ser lidos sem checkout nem registros internos. O pacote pode ficar somente para leitura; a preparação usa `state/kof-mut/compatibility/`, as avaliações gravam logs no estado e os relatórios seguem `--report-dir`. Antes da primeira escrita no estado, uma verificação prévia recusa sobreposição com os inputs avaliados.
 
 O recibo interno atual tem `schemaVersion: 2`: `buildDependency` registra versão e caminhos/conteúdos do Kof/Java usados na construção do pacote; `runtimeSources` lista caminhos relativos e hashes SHA-256 das fontes e scripts necessários à recompilação; `files` inventaria o pacote. `buildDependency` é proveniência da construção, não uma dependência que precise permanecer instalada. Recibos antigos com `schemaVersion: 1`, `dependency` e `files` continuam reconhecidos para propriedade, atualização e desinstalação; não são reescritos. Faça uma atualização inicial com `./install.sh` no mesmo prefixo para habilitar a adoção automática de Kof. Depois disso, selecionar outro Kof compatível no PATH dispensa checkout, reinstalação do KofMut e instalação antiga do Kof. `prefix`, `id`, `inputs` e `files` mantêm seus significados. `runtimeSources` e `files` são arrays de objetos `{ "path": "caminho/relativo", "hash": "<SHA-256>" }`. `buildDependency` mantém a forma anterior de `dependency`: `version`, `javaVersion`, `kof`, `java`, `jar` e `contents`; `contents` contém objetos `{path, hash}` com caminhos absolutos das dependências de construção.
 
@@ -79,7 +79,7 @@ Use `--report-dir DIRECTORY` como raiz de relatórios e decodifique a string JSO
 
 ## Configurar um projeto
 
-O formato de `fixtures/detected/kof-mut.json` é um ponto de partida concreto, com o limite opcional de paralelismo mostrado explicitamente:
+O [projeto mínimo completo](usage.pt_BR.md#criar-todos-os-arquivos-do-projeto) fornece um ponto de partida. A mesma configuração, com limite paralelo opcional explícito:
 
 ```json
 {
@@ -177,12 +177,10 @@ No checkout, `build/cache/kof-launch-v2/` contém o bootstrap e `build/cache/com
 
 Links simbólicos no estado gerenciado são recusados, inclusive links existentes ou quebrados em localizações do bootstrap, imagens e classes geradas, referências de aprovação, índices preparados, locks e logs. O lançador verifica os componentes dos caminhos antes de consultar caches que selecionam executáveis; a verificação prévia e a preparação repetem a proteção antes de usar o estado. Isso também vale quando um link aponta para um projeto avaliado fora do prefixo de instalação. A recusa retorna 2, identifica o link em stderr e mantém `launch-failure` ou o diagnóstico de preparação no diretório temporário privado indicado como evidência. O link não é seguido, substituído nem apagado.
 
+As verificações do estado pressupõem propriedade confiável e não garantem proteção atômica contra substituição hostil e simultânea de caminhos após a validação. A recuperação manual exige aguardar chamadas ativas e preservar a propriedade do estado.
+
 Para recuperar, aguarde o término das chamadas ativas, inspecione o caminho indicado e remova somente o link simbólico inválido com `unlink -- PATH`. Preserve o destino, o pacote instalado, os recibos, as entradas saudáveis do cache e os logs. Repita o comando original: diretórios gerados ausentes são recriados e aprovações saudáveis existentes são reutilizadas. Essa condição dispensa reinstalação ou remoção de todo o cache. Confira a finalidade do caminho antes de substituir um link por um diretório; a ausência de arquivos de propriedade ou coordenação continua exigindo a recuperação de gestão descrita acima.
 
 Cache gerado danificado é reconstruído automaticamente. Fontes ou arquivos do pacote instalado danificados exigem reparar a instalação com `./install.sh --prefix PATH`; não são aceitos como novas fontes. Atualização e desinstalação preservam relatórios, logs e arquivos desconhecidos ou alterados. Para remover manualmente caches gerados, espere todas as chamadas terminarem e remova apenas imagens geradas, referências de aprovação, índices preparados e bootstrap, preservando logs. O filesystem precisa suportar locks e movimentos atômicos. Chamadas instaladas mantêm uma lease flock compartilhada durante toda a preparação e avaliação. Chamadas preparadas também mantêm uma única lease JVM compartilhada durante validação, confirmação e avaliação; os locks JVM continuam protegendo execuções antigas. A desinstalação precisa obter ambos os leases exclusivos.
 
-A [validação M6O](../.agent/validation/kofmut-m6o.md) registra medições pareadas com escopo vazio e rodadas completas, contagens de processos, versões reais e limitações. Menos JVMs internas não garantem a mesma redução no tempo total dos testes.
-
-A [validação M6R](../.agent/validation/kofmut-m6r.md) registra a regressão com links simbólicos, as provas de recuperação e o diagnóstico do custo de inicialização. A correção acrescenta verificações de preservação; não promete aceleração.
-
-A [validação M6](../.agent/validation/kofmut-m6.md) registra versões efetivamente verificadas e custos iniciais e com cache. Não há limite numérico de regressão de desempenho nesta etapa. As [medições M1P](../.agent/validation/kofmut-m1p.md) são históricas; a [meta anterior de 90 segundos](../README.pt_BR.md#validação-e-próximos-marcos) continua adiada e não atingida. Sensores permanecem futuros.
+Menos JVMs internas não garantem a mesma redução no tempo total dos testes. A preparação não promete duração fixa.

@@ -2,7 +2,7 @@
 
 # CLI guide
 
-Use the [requirements and four runnable examples](../README.md#requirements) first. This guide is the reference for invocation, project configuration, isolation and recovery. For result vocabulary read [operators](operators.md); for integration use [JSON v1](report-format.md).
+Start with the [requirements](../README.md#requirements) and [usage tutorial](usage.md). This guide is the reference for invocation, project configuration, isolation and recovery. For result vocabulary read [operators](operators.md); for integration use [JSON v1](report-format.md).
 
 ## Commands and paths
 
@@ -55,7 +55,7 @@ When `--prefix` is omitted, HOME must be present, nonempty and absolute before t
 | `state/kof-mut/manage.lock`, `state/kof-mut/usage.lock` | Persistent coordination files |
 | `state/kof-mut/logs/run-<runId>-<unique-suffix>` | Installed evaluation logs |
 
-The payload includes `src/main/kof/` and the scripts needed for recompilation, without development tests, Git metadata, checkout cache, history, Kof jar or JDK. Operational compatibility checks are part of runtime sources. Historical links in the copied README refer to checkout files. The package can be read only; preparation uses `state/kof-mut/compatibility/`, evaluation logs use state and reports obey `--report-dir`. Before the first state write, a preflight refuses overlap with evaluated inputs.
+The payload includes `src/main/kof/` and the scripts needed for recompilation, without development tests, Git metadata, checkout cache, history, Kof jar or JDK. Operational compatibility checks are part of runtime sources. The copied public guides can be read without checkout files or internal records. The package can be read only; preparation uses `state/kof-mut/compatibility/`, evaluation logs use state and reports obey `--report-dir`. Before the first state write, a preflight refuses overlap with evaluated inputs.
 
 The current internal receipt has `schemaVersion: 2`: `buildDependency` records the Kof/Java version and paths/contents used to build the package; `runtimeSources` lists relative paths and SHA-256 hashes for sources and scripts needed for recompilation; `files` inventories the package. `buildDependency` is build provenance and does not need to remain installed. Legacy receipts with `schemaVersion: 1`, `dependency` and `files` remain recognized for ownership, updates and uninstall; they are not rewritten. Perform one initial update with `./install.sh` in the same prefix to enable automatic Kof adoption. After that, selecting another compatible Kof on PATH requires neither the checkout, a KofMut reinstall nor the old Kof installation. `prefix`, `id`, `inputs` and `files` retain their meanings. `runtimeSources` and `files` are arrays of `{ "path": "relative/path", "hash": "<SHA-256>" }` objects. `buildDependency` retains the former `dependency` shape: `version`, `javaVersion`, `kof`, `java`, `jar` and `contents`; `contents` contains `{path, hash}` objects naming absolute build dependency paths.
 
@@ -79,7 +79,7 @@ Use `--report-dir DIRECTORY` for a report root, then decode the current invocati
 
 ## Configure a project
 
-The `fixtures/detected/kof-mut.json` layout is a concrete starting point, with the optional parallel limit shown explicitly:
+The [complete minimal project](usage.md#create-all-project-files) provides a starting point. The same configuration with the optional parallel limit shown explicitly:
 
 ```json
 {
@@ -177,12 +177,10 @@ In a checkout, `build/cache/kof-launch-v2/` contains the bootstrap and `build/ca
 
 Symbolic links in managed state are refused, including existing or broken links in bootstrap locations, generated images/classes, approval references, prepared indexes, locks and logs. The launcher checks path components before consulting executable caches; preflight and preparation repeat the checks before using state. This also applies when a link points to an evaluated project outside the installation prefix. Refusal returns 2, names the symbolic link on stderr and retains `launch-failure` or the preparation diagnostic in the reported private temporary evidence directory. It does not follow, replace or delete the link.
 
+State checks assume trusted ownership and do not guarantee atomic protection against hostile concurrent path replacement after validation. Manual recovery requires waiting for active invocations and preserving state ownership.
+
 To recover, wait for active invocations to finish, inspect the named path and remove only the invalid symbolic link with `unlink -- PATH`. Preserve its target, installed package, receipts, healthy cache entries and logs. Repeat the original command: missing generated directories are recreated and existing healthy approvals are reused. Reinstallation or wholesale cache removal is unnecessary for this condition. Do not replace a link with a directory until you have checked what the path represents; missing ownership or coordination files still require the separate management recovery described above.
 
 Damaged generated cache rebuilds automatically. Damaged installed sources or package files require repair with `./install.sh --prefix PATH`; they are not accepted as new runtime sources. Updates and uninstall preserve reports, logs and unknown or modified files. Before manually removing generated caches, wait for all invocations to finish and remove only generated images, approval references, prepared indexes and bootstrap, preserving logs. The filesystem must support locks and atomic moves. Installed invocations hold a shared flock lease throughout preparation and evaluation. Prepared calls also hold one continuous shared JVM lease during validation, confirmation and evaluation; JVM file locks continue to protect legacy executions. Uninstall requires both exclusive leases.
 
-The [M6O validation](../.agent/validation/kofmut-m6o.md) records paired empty-scope and complete-round measurements, process counts, actual versions and limitations. Fewer internal JVMs do not promise the same reduction in total test time.
-
-The [M6R validation](../.agent/validation/kofmut-m6r.md) records the symbolic link regression, recovery checks and startup cost diagnosis. The repair adds preservation checks; it makes no speedup promise.
-
-[M6 evidence](../.agent/validation/kofmut-m6.md) records actually verified versions and initial/warm costs. This milestone sets no numeric performance regression threshold. [M1P measurements](../.agent/validation/kofmut-m1p.md) are historical; the [earlier 90 second target](../README.md#validation-and-next-milestones) remains deferred and unmet. Sensors remain future work.
+Fewer internal JVMs do not promise the same reduction in total test time. Preparation has no fixed duration guarantee.

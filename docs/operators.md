@@ -2,6 +2,10 @@
 
 # Concepts and selection
 
+## Scope and captured inputs
+
+Scope is the explicit list of production files requested for evaluation. Inputs are the files and directories needed to run the project's commands, including production, tests and configuration. A snapshot is the intact capture of those inputs before commands run; evaluation copies start from those same bytes. The tool does not infer scope from Git. See [selection and inputs](cli.md#select-scope-and-inputs) for exact restrictions.
+
 ## Mutation
 
 A mutation is one deliberate change to a production token, such as replacing `+` with `-`. KofMut applies each change to a disposable copy, preserving original sources and tests. It does not accumulate changes between copies.
@@ -56,6 +60,17 @@ A limitation is an explicit reason the tool cannot claim a complete evaluation o
 
 Locations come from the official lexer, with line/column starting at 1 and offsets/lengths in JVM UTF-16 units. See [location rules](report-format.md#locations-and-evidence) before indexing a source buffer or displaying a byte location.
 
+## Evaluation cycle
+
+1. Capture inputs while preserving original files, relative paths and script permissions. Empty scope ends without baseline commands.
+2. Run check and tests on the intact copy. Only valid, coherent passing baseline evidence permits further work.
+3. Select changes in the requested production sources through the official lexer and parser. Unsupported syntax remains an explicit limitation.
+4. Prepare each candidate in an independent snapshot copy without accumulating changes. Verify tokens and reparse before check. Valid rejections are discarded; invalid evidence remains inconclusion/error.
+5. Run check and, when approved, tests on the changed copy. Baseline runs once; subsequent evaluations can occupy up to four parallel slots without sharing copied files. External resources used by commands can remain shared.
+6. Collect results, terminate command groups, remove copies and publish this invocation's report. Timeouts, pending work and cleanup failure remain explicit; they do not become detections.
+
+The [CLI reference](cli.md#evaluation-and-isolation) defines isolation, limits and cancellation; the [JSON reference](report-format.md) defines states and counts. The [tutorial](usage.md) walks this cycle with a complete project.
+
 ## Possible equivalents
 
 An equivalent mutation preserves observable behavior despite changing the source. A possible equivalent is a survivor that needs human analysis to establish this property. KofMut does not diagnose equivalence automatically.
@@ -66,6 +81,6 @@ The `fixtures/equivalent` production code clamps negative values:
 if (x < 0) { x = 0 }
 ```
 
-Changing `<` to `<=` only adds an assignment of zero when `x` is already zero. The fixture tests negative, zero and positive inputs and still returns one `Survived`, `complete/1`, with no discard. Reproduce it using the [fourth runnable example](../README.md#run-an-evaluation).
+Changing `<` to `<=` only adds an assignment of zero when `x` is already zero. The fixture tests negative, zero and positive inputs and still returns one `Survived`, `complete/1`, with no discard. Reproduce it using the [fourth checkout example](usage.md#additional-checkout-examples).
 
 Do not demand an impossible distinguishing test for equivalent behavior. Inspect each survivor to decide whether an observable difference exists and whether a suitable test is missing. There is no coverage instrumentation, `NoCoverage`, automatic exclusion, suppression comment or approval percentage. A survivor alone proves neither lack of coverage nor equivalence. [CLI configuration](cli.md#configure-a-project) and the [report reference](report-format.md) describe how to collect and interpret the actual evidence.

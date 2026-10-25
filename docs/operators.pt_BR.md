@@ -2,6 +2,10 @@
 
 # Conceitos e seleção
 
+## Escopo e inputs capturados
+
+O escopo é a lista explícita de arquivos de produção solicitados para avaliação. Inputs são os arquivos e diretórios necessários para executar os comandos do projeto, incluindo produção, testes e configuração. Um snapshot é a captura intacta desses inputs antes de executar comandos; as cópias da avaliação partem desses mesmos bytes. A ferramenta não infere o escopo pelo Git. Veja [seleção e inputs](cli.pt_BR.md#selecionar-escopo-e-inputs) para as restrições exatas.
+
 ## Mutação
 
 Uma mutação é uma alteração deliberada em um token de produção, como substituir `+` por `-`. O KofMut aplica cada alteração a uma cópia descartável, preservando fontes e testes originais. As alterações não se acumulam entre cópias.
@@ -56,6 +60,17 @@ Uma limitação é um motivo explícito pelo qual a ferramenta não pode declara
 
 Localizações vêm do lexer oficial, com linha/coluna começando em 1 e offsets/comprimentos em unidades UTF-16 da JVM. Veja [regras de localização](report-format.pt_BR.md#localizações-e-evidência) antes de indexar um buffer de fonte ou mostrar uma localização em bytes.
 
+## Ciclo da avaliação
+
+1. Capture os inputs preservando arquivos originais, caminhos relativos e permissões dos scripts. Escopo vazio termina sem executar comandos da baseline.
+2. Execute check e testes na cópia intacta. Somente evidência válida e coerente da baseline aprovada permite continuar.
+3. Selecione alterações nas fontes de produção solicitadas com lexer e parser oficiais. Sintaxe não suportada permanece limitação explícita.
+4. Prepare cada candidato em cópia independente do snapshot, sem acumular alterações. Confira tokens e reanalise antes do check. Rejeições válidas são descartadas; evidência inválida continua inconclusão/erro.
+5. Execute check e, se aprovado, testes da cópia alterada. A baseline é única; as avaliações seguintes podem usar até quatro posições paralelas sem compartilhar arquivos das cópias. Recursos externos usados pelos comandos podem continuar compartilhados.
+6. Recolha resultados, encerre grupos de comandos, remova cópias e publique o relatório da chamada. Timeouts, trabalho pendente e falhas de limpeza permanecem explícitos; não se tornam detecções.
+
+A [referência CLI](cli.pt_BR.md#avaliação-e-isolamento) define isolamento, limites e cancelamento; a [referência JSON](report-format.pt_BR.md) define estados e contagens. O [tutorial](usage.pt_BR.md) percorre o ciclo com um projeto completo.
+
 ## Possíveis equivalentes
 
 Uma mutação equivalente preserva o comportamento observável apesar de alterar o fonte. Um possível equivalente é um sobrevivente que exige análise humana para estabelecer essa propriedade. O KofMut não diagnostica equivalência automaticamente.
@@ -66,6 +81,6 @@ O código de produção de `fixtures/equivalent` limita valores negativos a zero
 if (x < 0) { x = 0 }
 ```
 
-Alterar `<` para `<=` apenas acrescenta uma atribuição de zero quando `x` já é zero. A fixture testa entradas negativa, zero e positiva e ainda retorna um `Survived`, `complete/1`, sem descarte. Reproduza com o [quarto exemplo executável](../README.pt_BR.md#executar-uma-avaliação).
+Alterar `<` para `<=` apenas acrescenta uma atribuição de zero quando `x` já é zero. A fixture testa entradas negativa, zero e positiva e ainda retorna um `Survived`, `complete/1`, sem descarte. Reproduza com o [quarto exemplo do checkout](usage.pt_BR.md#exemplos-adicionais-do-checkout).
 
 Não exija um teste distintivo impossível para comportamento equivalente. Inspecione cada sobrevivente para decidir se existe diferença observável e se falta um teste adequado. Não há instrumentação de cobertura, `NoCoverage`, exclusão automática, comentário de supressão ou percentual de aprovação. Um sobrevivente sozinho não comprova ausência de cobertura nem equivalência. A [configuração do CLI](cli.pt_BR.md#configurar-um-projeto) e a [referência do relatório](report-format.pt_BR.md) descrevem como coletar e interpretar a evidência real.
