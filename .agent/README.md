@@ -5,6 +5,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 ## Current entry points
 
 - [Root EXECPLAN](../EXECPLAN.md): complete retained plan, dated authorizations, decisions, milestones and observed boundaries. Its older requirements remain historical where explicitly superseded.
+- [M7R discard rule correction](validation/kofmut-m7r.md) and [manifest](validation/kofmut-m7r.sha256): qualifies all-discarded outcomes in both LLM guides and supplements M7 D3 with the unsupported-syntax case. Records reused evidence separately from fresh validation and the preexisting M7 archive hash discrepancy; the original M7 report/manifest remain preserved.
 - [M7 documentation validation](validation/kofmut-m7.md) and [manifest](validation/kofmut-m7.sha256): inventory, canonical document ownership, audience journeys, preservation and new guide acceptance. Read its criterion results and limitations before treating M7 as complete.
 - [M6O validation](validation/kofmut-m6o.md) and [manifest](validation/kofmut-m6o.sha256): latest implementation acceptance preceding M7, prepared evaluation in one work JVM, complete-round measurements, exact runtime delta and limits. Code/tests/scripts are unchanged by M7.
 - [M6R validation](validation/kofmut-m6r.md) and [manifest](validation/kofmut-m6r.sha256): managed-state symbolic link preservation and recovery contracts retained by M6O.

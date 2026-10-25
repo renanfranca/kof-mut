@@ -85,7 +85,7 @@ Use esta tabela de decisão após validar estrutura e identidade. As definiçõe
 | `TestError` | Falha de evidência/runner/tarefa/limpeza; inconclusivo ou erro geral. Diagnostique logs. |
 | `Pending` | Trabalho/próxima fase não começou. Informe motivo e trabalho restante; não conte como detecção. |
 | `CompileError` | Valor histórico de compatibilidade. Não conte como detecção; novas rejeições coerentes são descartes. |
-| Entrada de `discardedCandidates` | Rejeitada antes da avaliação por testes, não é detecção nem parte das contagens de mutantes. Explique diagnósticos; todos descartados resulta em `no_mutants/3`. |
+| Entrada de `discardedCandidates` | Rejeitada antes da avaliação por testes, não é detecção nem parte das contagens de mutantes. Explique diagnósticos; todos descartados resulta em `no_mutants/3` somente se não houver outra causa de erro ou inconclusão. Uma limitação de sintaxe não suportada mantém `incomplete/3`. Descartes não aprovam a qualidade dos testes. |
 
 Para sobreviventes, determine se a alteração pode mudar comportamento observável exigido. Distinga uma lacuna plausível nos testes de um possível equivalente e de informação insuficiente. O [exemplo equivalente](operators.pt_BR.md#possíveis-equivalentes) mostra por que um teste que diferencie comportamentos pode ser impossível. Não existe instrumentação de cobertura, classificação automática de equivalência, supressão nem pontuação.
 

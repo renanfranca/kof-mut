@@ -85,7 +85,7 @@ Use this decision table after structural and identity validation. Exact definiti
 | `TestError` | Evidence/runner/task/cleanup failure; inconclusive or overall error. Diagnose logs. |
 | `Pending` | Work/next phase did not start. Report the reason and remaining work; do not count as detection. |
 | `CompileError` | Historical compatibility value. Do not count as detection; new coherent rejections are discards. |
-| `discardedCandidates` entry | Rejected before test evaluation, not a kill and not part of mutant counts. Explain diagnostics; all discarded is `no_mutants/3`. |
+| `discardedCandidates` entry | Rejected before test evaluation, not a kill and not part of mutant counts. Explain diagnostics; all discarded yields `no_mutants/3` only if there is no other cause of error or inconclusion. An unsupported syntax limitation keeps `incomplete/3`. Discards do not approve test quality. |
 
 For survivors, determine whether the change can alter observable required behavior. Distinguish a plausible test gap from a possible equivalent and from insufficient information. The [equivalent example](operators.md#possible-equivalents) shows why a distinguishing test may be impossible. No coverage instrumentation, automatic equivalence classification, suppression or score exists.
 
