@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "sourceRoots": [
+    "src"
+  ],
+  "testRoots": [
+    "tests"
+  ],
+  "inputs": [
+    "kof.toml",
+    "src",
+    "tests"
+  ],
+  "checkCommand": [
+    "kof",
+    "check",
+    "src/flags/Flags.kf",
+    "--json"
+  ],
+  "testCommand": [
+    "kof",
+    "test",
+    "tests"
+  ],
+  "commandTimeoutMs": 60000,
+  "budgetMs": 0,
+  "maxParallelMutants": 1
+}
