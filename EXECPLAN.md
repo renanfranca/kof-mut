@@ -907,3 +907,81 @@ Both guide discard rows now state the condition and unsupported-syntax precedenc
 ### M7R.2 boundary and final acceptance (2026-10-25)
 
 Fresh installation from a disposable tracked-file copy passed into a prefix with spaces, selecting existing PATH Kof 0.6.6. Both distributed guides match the corrected checkout bytes exactly; installed README/docs links pass with the original installer path unavailable. Source/internal links and `git diff --check` pass. The full M7 suite is reused explicitly (31/44/31/15, exit 0), supported by the unchanged 86 frozen execution inputs; no product tests or scenario reruns were needed. The final preservation audit retains all other tracked bytes/modes, every prior validation file, the original plan as a prefix and researched Kof sources/status. Only two public table rows and authorized internal records change. The M7 report/manifest are preserved; their preexisting archive hash discrepancy remains unresolved and is documented rather than repaired. Procedures, results, hashes and D3 supplement are in `.agent/validation/kofmut-m7r.md` with its separate manifest. M7R.1–2 complete locally; no commit, subagent, worktree, remote, publication or Kof change occurred.
+
+## Multiple invocations: authorized continuation (2026-10-26)
+
+### Purpose and success
+
+Accept concatenated complete Kof test invocations, validating each final file summary against its own suites and accumulating executed cases/failures. Preserve JSON v1, flags, states, exits and rejection of invalid evidence. SiFuture wrapper/configuration and permanent catalog remain unchanged.
+
+### Context and limits
+
+Base a40b20ac37afac302efc2a0dae7702e44720e166, clean checkout, branch multiple-test-invocations. Use existing PATH Kof 0.6.6, local research checkout 7c237861a9035d84b1f7ec4cfddd89daef4c6ddd. No compiler changes, installation, hooks, commits, publication, worktrees or subagents. Synthetic fixtures only here; disposable SiFuture projects remain under that project's .agent/tmp/.
+
+### Milestones
+
+1. Extend src/test/kof/kofmut/Run.kf and the existing mutation-runner, tag multiple-invocations. Demonstrate failure with the old reader, then change Evidence.kf. Cover two plus one cases, detection last/first, survivors, failing baseline first/last, one invocation with multiple suites, filters/skips and invalid/truncated/contradictory output at baseline and mutant.
+2. Run `kof test src/test/kof/kofmut/Run.kf --tag multiple-invocations`, `./scripts/check`, `git diff --check`. In disposable SiFuture copies use the unchanged configuration/manual recipe for Background plus a second suite and for a small production calculation detected/surviving/failing baseline. Validate 115 cases, UUID, announced report, scope, exact states/exits/counts and input hashes.
+3. Update CLI guides EN/PT and SiFuture guides only after real acceptance. Append records to both plans/acceptance without replacing history. Independently audit expectations and proof discrimination.
+
+### Progress
+
+- [x] Regression reproduced and reader corrected; isolated parser proof passes. Public acceptance remains pending.
+- [ ] Focused/full validation and real SiFuture acceptance observed.
+- [ ] Documentation, preservation and separate expectation/proof audits complete.
+
+### Validation
+
+Pending. Raw logs belong in .agent/tmp/multiple-invocations/; final self-contained record in .agent/validation/multiple-invocations.md. Identity includes base SHA plus SHA-256 manifest of uncommitted delivered inputs and the installed Kof jar.
+
+### Multiple invocations: parser proof boundary (2026-10-26)
+
+Old reader public regressions fail (3/3); corrected reader isolated proof passes (2/0, six valid and fourteen invalid shapes), identical old-parser proof fails its valid-shape group. Public corrected tests are blocked during preparation: default compilation exceeds 10 s; JVM diagnostic settings reach contracts but the unchanged 8.5 s real synthetic compatibility budget expires. Existing Kof 0.6.4 also times out compiling. No limits or Kof contents were changed. Full check has been started; real SiFuture acceptance and guide limitation removal remain pending. See .agent/validation/multiple-invocations.md for separate contract/discrimination audits and evidence limits.
+
+### Multiple invocations: validation checkpoint and handoff (2026-10-26)
+
+Final focused command returned 1, 3/3 groups unable to reach the public scenarios because preparation compatibility expired (baseline passed, variant Timeout, 8536 ms). Full ./scripts/check returned 1 at CLI: 18 passed, 13 failed of 31, 1308389 ms; later suites were not reached. Several failures explicitly concern preparation; remaining assertion causes are not all established. Current parser exact-text proof is 2/0 over six valid and fourteen invalid shapes; identical expectations fail the old reader. SiFuture normal two-file tests pass 115/0/exit 0 and preserve all 190 copied files, but the manual mutation recipe returns 2 without a current report during compilation preparation. Background and three calculation mutation scenarios remain pending; SiFuture guides retain the limitation.
+
+EN/PT CLI and report guides describe per-invocation validation and accumulated case counts, qualifying valid versus partial invalid evidence. Separate expectation and discrimination audits, command outputs, dependency identity, preservation and pending criteria are in .agent/validation/multiple-invocations.md. Delivery manifest identifies uncommitted inputs over base a40b20a. No product/compatibility time limit, Kof dependency, SiFuture configuration/wrapper/scope/catalog, hook or installation changed. No commit, publication, worktree or subagent. Plan remains incomplete; resume public and real acceptance after preparation can complete within existing limits, without reusing an older report.
+
+# Recover the implementation from before Luna and resume acceptance (2026-10-26)
+
+## Purpose and success
+
+Restore the exact pre-Luna source/test/documentation/plan set and complete public and real two-file acceptance. Recovery is accepted only when all ten historical manifest entries match. Full delivery additionally requires public compatibility, focused regressions, every check suite and four fresh SiFuture 115-case scenarios.
+
+## Context and limits
+
+Current checkout and existing multiple-test-invocations branch, base a40b20ac37afac302efc2a0dae7702e44720e166. Preserve 10000 ms per preparation command, 8500 ms internal mutation budget, 90000 ms full preparation, current Kof and all earlier evidence. No commits, worktrees, agents, Kof changes or publications. Original manifest and validation record remain immutable; new evidence goes in .agent/tmp/recovery-20261026 and a separate tracked recovery record. SiFuture configuration, wrapper and permanent catalog remain protected. Historical Luna comparisons are invalid because both readers have base bytes; retain their logs with that limitation.
+
+## Milestones
+
+1. Reconstruct only original session edits in disposable storage, verify all ten hashes, apply as a set. Preserve historical records and external plan.
+2. Construct baseline from a40b20a contents and corrected copies from verified recovered bytes; check full inventories and distinct reader hashes before sequential alternating trials. Record compile/probe timing and exits, distinguish timeouts and incorrect results, classify all 13 historical failures without inferred causes. Fix only reproduced KofMut defects with behavioral red evidence first.
+3. Execute kof test src/test/kof/kofmut/Cli.kf --tag compatibility; kof test src/test/kof/kofmut/Run.kf --tag multiple-invocations; ./scripts/check; git diff --check. Require zero exits and all suites. Use unchanged recipes on fresh disposable SiFuture copies for Background, last-file detection, survival and failing baseline; verify UUID/current announced report/scope/counts/exits/input preservation.
+4. Append self-contained evidence to existing plans and acceptance, retain history and write a new manifest. Remove guide limitation only after public and all real proofs pass. If preserved limits prevent acceptance, retain pending state and record the precise diagnostic and necessary decision.
+
+## Progress
+
+- [x] All ten recovered files match original manifest; set applied, original manifest check passes.
+- [x] Verified sequential comparison and historical failure classification; all four public trials refused at compile deadline, five historical stages remain unknown.
+- [ ] Public regressions/full check and four real proofs pass.
+- [x] Final records and separate manifest reconciled; original seal retained, final preservation/link checks recorded.
+
+## Validation
+
+Reconstruction commands and per-file expected/actual hashes: .agent/tmp/recovery-20261026/recover.py and reconstruction.json. sha256sum -c .agent/validation/multiple-invocations.sha256 returned 0 for all ten immediately after application; git diff --check returned 0. The original historical record is preserved rather than rewritten as current acceptance.
+
+Recovery diagnostic boundary: all four alternating trials checked their full designated source inventories and distinct reader hashes before measurement. All refused application compilation at 10000 ms. Separate base compile timed out; recovered compile passed 9.374 s, frontend passed, killed/survived probes both returned 2 with incomplete/one Timeout at mutant check (8559 ms engine). Outer ten-second commands did not time out for those probes. This is not a reader misclassification or proof of host-load causality. Eight of thirteen historical failures show preparation diagnostics; five stages remain unknown. Public suites are now running sequentially. See .agent/validation/multiple-invocations-recovery.md; original record and manifest remain unchanged.
+
+Required public command boundary: fixed Kof 0.6.6 compatibility tag returns 1, 7/8 failed (365.355 external seconds); multiple-invocations tag returns 1, all 3 groups failed (82.230 s), with preparation refusal/missing current report rather than accepted parser journeys. ./scripts/check returns 1 at CLI, 19 passed/12 failed of 31, 1086.264 external seconds. Standalone full Run, Install and frontend contracts are being attempted because check short-circuited; they cannot retroactively approve check. Real SiFuture attempts follow in four prepared disposable copies. The new recovery record preserves exact summary excerpts and keeps historical 18/13 distinct from this run.
+
+New readiness evidence during standalone Run: the normal public launcher published an approval containing the recovered Evidence.kf hash 5e46e9ce8c6a7f8f951b1a46108eb44442d0bdcde624fdc8aa24d71d6a22fc46. Its unchanged killed/survived probes completed in 6069/5797 engine milliseconds, with complete/one Killed and complete/one Survived respectively; all other counters zero and one-case baselines passed. This changes the earlier observation that every attempted preparation was refused, without erasing those failures or identifying their cause. Preserve the new receipt/reports, finish current suites and real attempts, then make one fresh focused compatibility/multiple-invocations attempt. If those and the four real proofs pass, rerun the complete check for a coherent final gate; no timeout widening, manual approval or repeated attempts merely to sample a passing result.
+
+Standalone full Run boundary: exit 1, 34 passed/13 failed of 47, 1491.661 external seconds. The first thirteen cases fail (preparation diagnostics or assertions/missing report); later 34 pass, including all three multiple-invocations public groups. Their behavior is now demonstrated through the normal launcher, separately from the still-rejected aggregate command. Install and frontend contracts continue sequentially; finish.py then performs the missing base profile, exact reader controls and four real recipes. final_gate.py waits for finish, creates a new verified alternating comparison, makes one fresh compatibility/focused attempt, and runs one full check only when comparison/focused/real/parser criteria pass. All initial failures stay preserved; no source or limits changed.
+
+Final execution boundary: standalone Install exit 1, 16 passed/15 failed of 31 (2097.316 external seconds); frontend contracts exit 0, 15 groups. Exact isolated recovered reader exit 0, base negative control exit 1 as expected. Final compatibility retry exit 1, 7/8 failed (327.502 s); final multiple-invocations retry exit 0, all 3 groups passed (173.063 s). Second verified ABBA matrix genuinely uses base/recovered sources but all internal killed probes time out near 8.5 s during mutant test, so no complete caller evaluation is accepted. No further full check was attempted after these unmet prerequisites; original check exit 1 remains, and all suites were separately attempted.
+
+Four fresh SiFuture recipes produced own current reports with reconciled UUID/scope/native exits and preserved 190/191 copied files, but every baseline test exceeded its 10000 ms deadline: incomplete/3, exit 137 in baseline.test, no candidates/mutants. Normal commands show 115/0/exit 0 for Background/detected/survived and 115/1/exit 1 for the deliberately failing baseline. Their two sequential CLI times already sum to 11985/15400/15641/13825 ms, excluding wrapper/startup overhead. This explains those observed deadline refusals without establishing why commands are slow or all historical assertion causes. Guides retain the limitation. Recovery and public reader behavior are proven; full acceptance remains pending a decision on controlled execution conditions versus explicit reconsideration of deadlines/recipe constraints. No limits, wrapper, permanent catalog, Kof contents, commits, agents, worktrees or publication changed. Detailed expectations/observations/gaps and report hashes are in .agent/validation/multiple-invocations-recovery.md; separate manifest follows final audit and preserves the original seal.
+
+Final records/preservation boundary: new KofMut delivery manifest .agent/validation/multiple-invocations-recovery.sha256 and SiFuture .agent/validation/kofmut-recovery.sha256 supplement, without replacing, prior seals. All 132 other KofMut tracked files and 202 protected SiFuture tracked files retain initial bytes/modes; recovered source/test/public-document leaves and original validation match the historical manifest, and all historical plan/acceptance prefixes remain. Both guides and approved recipe blocks remain unchanged. New KofMut links pass; whole-history SiFuture link validation has the same 51 preexisting messages on HEAD and continued documents, zero new-link messages. Both Git exclusions contain /.agent/tmp/ once, Kof source/jar and all 1590 old sealed local evidence files are unchanged. No product validation is repeated after these documentation-only continuations; execution/test inputs are byte-identical to those measured. Plan remains incomplete for the explicitly recorded compatibility/full-gate/real deadlines; no permission question or silent contract change is substituted for acceptance.

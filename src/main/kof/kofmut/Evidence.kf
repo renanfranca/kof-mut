@@ -86,8 +86,10 @@ CheckedEvidence parseTestEvidence(CommandResult result) {
     if (result.timeout) { return CheckedEvidence("Timeout", PhaseEvidence(result.exitCode, result.durationMs, "test timeout; " + summary, null, null, null)) }
     var executed = 0
     var failures = 0
-    var suites = 0
-    var failedSuites = 0
+    var invocationSuites = 0
+    var invocationFailedSuites = 0
+    var invocationExecuted = 0
+    var invocations = 0
     var declaredCases = 0
     var filteredCases = -1
     var pending = false
@@ -95,8 +97,6 @@ CheckedEvidence parseTestEvidence(CommandResult result) {
     var cases = 0
     var failed = 0
     var skipped = 0
-    var commandPassed = -1
-    var commandFailed = -1
     var valid = true
     for (var raw in result.stdout.split("\n")) {
         var line = raw.trim()
@@ -122,19 +122,24 @@ CheckedEvidence parseTestEvidence(CommandResult result) {
             if (!pending || fields[0].toInt() != failed || fields[3].toInt() != cases + skipped || (filteredCases < 0 && fields[3].toInt() != declaredCases) || (filteredCases >= 0 && fields[3].toInt() != filteredCases)) { valid = false }
             executed = executed + cases
             failures = failures + failed
-            suites++
-            if (failed > 0) { failedSuites++ }
+            invocationSuites++
+            invocationExecuted = invocationExecuted + cases
+            if (failed > 0) { invocationFailedSuites++ }
             pending = false
         } else if (line.startsWith("exit code: ")) {
-            if (line.substring(11).trim().toInt() != result.exitCode) { valid = false }
+            if (pending || invocationSuites == 0 || failed == 0 || line.substring(11).trim().toInt() != 1) { valid = false }
         } else if (line.matches("[0-9]+ passed, [0-9]+ failed.*")) {
-            if (commandPassed >= 0) { valid = false }
             var fields = line.split(" ")
-            commandPassed = fields[0].toInt()
-            commandFailed = fields[2].toInt()
+            var commandPassed = fields[0].toInt()
+            var commandFailed = fields[2].toInt()
+            if (pending || invocationSuites == 0 || invocationExecuted == 0 || commandPassed + commandFailed != invocationSuites || commandFailed != invocationFailedSuites) { valid = false }
+            invocations++
+            invocationSuites = 0
+            invocationFailedSuites = 0
+            invocationExecuted = 0
         }
     }
-    if (pending || suites == 0 || executed == 0 || commandPassed + commandFailed != suites || commandFailed != failedSuites || (failures == 0 && (commandFailed != 0 || result.exitCode != 0)) || (failures > 0 && (commandFailed == 0 || result.exitCode != 1))) { valid = false }
+    if (pending || invocations == 0 || invocationSuites != 0 || executed == 0 || (failures == 0 && result.exitCode != 0) || (failures > 0 && result.exitCode != 1)) { valid = false }
     var phase = PhaseEvidence(result.exitCode, result.durationMs, failures + " failed of " + executed + " executed tests; " + summary, null, executed, failures)
     if (!valid) { return CheckedEvidence("TestError", PhaseEvidence(result.exitCode, result.durationMs, "Invalid or incomplete test protocol; " + summary, null, executed, failures)) }
     if (failures > 0) { return CheckedEvidence("Killed", phase) }

@@ -40,6 +40,59 @@ if [[ "$mode:$phase" == counter:check ]] && [[ "${5}" == baseline || "$mutant" =
     printf '{"success":true,"filesChecked":%s,"errorCount":%s,"diagnostics":[]}\n' "$files" "$errors"
     exit 0
 fi
+if [[ "$mode:$phase" == multiple:test ]]; then
+    scenario="${3}"
+    stage="${4:-mutant}"
+    active=false
+    if [[ "$stage" == baseline || "$mutant" == true ]]; then active=true; fi
+    suite() {
+        local name="$1" size="$2" failures="$3"
+        printf 'SUITE tests/%s.kf (%s tests)\n' "$name" "$size"
+        for ((case_index=failures; case_index<size; case_index++)); do printf 'PASS %s case %s\n' "$name" "$case_index"; done
+        for ((case_index=0; case_index<failures; case_index++)); do printf 'FAIL %s case %s: assertion failed\n' "$name" "$case_index"; done
+        printf '%s failed of %s tests\n' "$failures" "$size"
+        if (( failures )); then printf 'exit code: 1\n'; fi
+    }
+    first=0
+    last=0
+    if [[ "$active" == true ]]; then
+        if [[ "$scenario" == first || "$scenario" == one-first ]]; then first=1; fi
+        if [[ "$scenario" == last ]]; then last=1; fi
+    fi
+    suite First 2 "$first"
+    if [[ "$scenario" != one-invocation && "$scenario" != one-first ]]; then printf '%s passed, %s failed\n' "$((1-first))" "$first"; fi
+    if [[ "$active" == true ]]; then
+        case "$scenario" in
+            duplicate) printf '1 passed, 0 failed\n'; exit 0 ;;
+            interrupted) printf 'SUITE tests/Second.kf (1 tests)\nPASS third\n'; exit 0 ;;
+            no-suites) printf '0 passed, 0 failed\n'; exit 0 ;;
+            skip-only) printf 'SUITE tests/Second.kf (1 tests)\nSKIP third\n0 failed of 1 tests\n1 passed, 0 failed\n'; exit 0 ;;
+            orphan-total) printf '0 failed of 2 tests\n1 passed, 0 failed\n'; exit 0 ;;
+            wrong-case-total) printf 'SUITE tests/Second.kf (1 tests)\nPASS third\n0 failed of 2 tests\n1 passed, 0 failed\n'; exit 0 ;;
+            missing-suite-total) printf 'SUITE tests/Second.kf (1 tests)\nPASS third\n1 passed, 0 failed\n'; exit 0 ;;
+        esac
+    fi
+    if [[ "$scenario" == filtered-skip ]]; then
+        printf 'SUITE tests/Second.kf (3 tests)\nkof test: tag selected (2 of 3)\nPASS third\nSKIP ignored\n0 failed of 2 tests\n'
+    else
+        if [[ "$active:$scenario" == true:exit-zero ]]; then last=1; fi
+        suite Second 1 "$last"
+    fi
+    if [[ "$active" == true ]]; then
+        case "$scenario" in
+            missing-final) exit 0 ;;
+            wrong-files) printf '2 passed, 0 failed\n'; exit 0 ;;
+            wrong-failures) printf '0 passed, 1 failed\n'; exit 1 ;;
+            exit-one) printf '1 passed, 0 failed\n'; exit 1 ;;
+            exit-zero) printf '0 passed, 1 failed\n'; exit 0 ;;
+            exit-other) printf '1 passed, 0 failed\n'; exit 127 ;;
+            bad-suite-exit) printf 'exit code: 1\n1 passed, 0 failed\n'; exit 0 ;;
+        esac
+    fi
+    if [[ "$scenario" == one-invocation || "$scenario" == one-first ]]; then printf '%s passed, %s failed\n' "$((2-first))" "$first"; else printf '%s passed, %s failed\n' "$((1-last))" "$last"; fi
+    if (( first || last )); then exit 1; fi
+    exit 0
+fi
 if [[ "$mutant" == true ]]; then
     if [[ "$mode:$phase" == timeout:test ]]; then
         : "${KOF_MUT_OBSERVATIONS:?}"

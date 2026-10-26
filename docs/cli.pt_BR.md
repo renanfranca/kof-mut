@@ -115,6 +115,10 @@ Os comandos executam como argv com cwd na sandbox, ambiente herdado e stdin fech
 
 Exit 0 sozinho é evidência insuficiente. O check da baseline exige JSON válido/coerente, `success: true`, zero erros e exit 0; os testes da baseline exigem suítes concluídas, casos executados e zero falhas. Contadores de check devem ser inteiros originais: `filesChecked` em `1..2147483647` e `errorCount` em `0..2147483647`; `filesChecked` conta arquivos de entrada, não imports. Rejeição coerente tem `success: false`, exit 1 e contagem positiva de erros correspondente aos diagnósticos ERROR. Wrappers devem preservar esses protocolos. Zero testes, SKIP sem casos executados, resumos ausentes, truncamento e saída contraditória nunca aprovam a baseline nem detectam mutantes. Veja [campos e estados da baseline](report-format.pt_BR.md#baseline-e-evidência-de-fase).
 
+Um comando de testes pode emitir uma execução Kof completa ou concatenar várias execuções completas. Cada execução pode conter várias suítes nomeadas. Cada resumo final `N passed, M failed` conta arquivos de suíte e deve concordar com as suítes desde o resumo final anterior. Cada execução deve executar pelo menos um caso; resumo final duplicado sem novas suítes, suíte interrompida ou resumo final ausente é inválido. `executedTests` e `failedTests` acumulam casos de todas as execuções, sem contar SKIP como executado. Dois casos em uma execução mais um em outra resultam em `executedTests: 3`, independentemente da quantidade de resumos de arquivos.
+
+Uma execução posterior aprovada não apaga uma falha anterior. O comando deve retornar 0 quando todos os casos executados passam e 1 quando algum caso falha. Diagnósticos `exit code:` de cada suíte são conferidos contra essa suíte. Saída ou retorno contraditório produz baseline reprovada ou `TestError` no mutante, nunca detecção.
+
 ## Selecionar escopo e inputs
 
 Um arquivo de escopo como `fixtures/detected/scope.json` contém:

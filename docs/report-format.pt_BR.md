@@ -133,6 +133,8 @@ Tanto `check` quanto `test` contêm **todos os seis campos**, incluindo os nulls
 
 Uma fase que nunca começou tem todos os seis valores null. Não interprete null como zero nem aceite contadores de testes não nulos como prova de protocolo válido: saída interpretada inconsistente pode manter contagens observadas e informar evidência inválida. `filesChecked` conta arquivos de entrada, não fontes importadas. Exits de comandos são distintos do exit do processo KofMut. Baseline reprovada/inválida impede avaliação dos mutantes; orçamento esgotado na baseline produz `incomplete` geral.
 
+Com evidência de teste válida, `executedTests` e `failedTests` somam resultados de casos de todas as execuções de testes concluídas na saída do comando. Os resumos finais do CLI contam arquivos de suíte dentro de cada execução, não casos. Toda execução deve ter resumos de suítes e final coerentes e casos executados. Um caso reprovado em qualquer execução continua sendo falha mesmo quando uma execução posterior passa. Contadores não nulos, sozinhos, não validam saída concatenada incompleta ou contraditória.
+
 ## Mutantes e candidatos descartados
 
 Cada item de `mutants` tem os campos obrigatórios e não nulos:

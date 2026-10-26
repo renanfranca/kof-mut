@@ -1981,3 +1981,94 @@ void runAssertEvidence(Bool condition, String evidence) {
     if (!condition) { println(evidence) }
     assert(condition, "behavior failed; see evidence above")
 }
+
+String multipleInvocationProject() {
+    var root = runProjectCopy()
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    assert(File(root + "/src/math/original.txt").writeText(readFixtureSource(root)))
+    return root
+}
+
+test "complete invocations accumulate cases and retain failure in either order", "multiple-invocations" {
+    var root = multipleInvocationProject()
+    try {
+        for (var scenario in listOf("last", "first", "survived", "one-invocation", "one-first", "filtered-skip")) {
+            fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test", "multiple", scenario), 10000, 90000)
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/reports")
+            var expectedKill = scenario == "last" || scenario == "first" || scenario == "one-first"
+            runAssertEvidence(result.exitCode == (if (expectedKill) 0 else 1), scenario + result.stdout + result.stderr)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.status == "complete")
+            assert(report.baseline.status == "passed")
+            assert(report.baseline.test.executedTests == 3)
+            assert(report.baseline.test.failedTests == 0)
+            assert(report.counts.candidates == 1)
+            assert(report.counts.executed == 1)
+            assert(report.counts.killed == (if (expectedKill) 1 else 0))
+            assert(report.counts.survived == (if (expectedKill) 0 else 1))
+            assert(report.counts.testError == 0)
+            assert(report.mutants.get(0).status == (if (expectedKill) "Killed" else "Survived"))
+            assert(report.mutants.get(0).evidence.contains("of 3 executed tests"))
+            assert(report.discardedCandidates.size == 0)
+            assert(report.limitations.size == 0)
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "failure in first or last baseline invocation prevents every mutant", "multiple-invocations" {
+    var root = multipleInvocationProject()
+    try {
+        for (var scenario in listOf("first", "last")) {
+            fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test", "multiple", scenario, "baseline"), 10000, 90000)
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/reports")
+            runAssertEvidence(result.exitCode == 2, scenario + result.stdout + result.stderr)
+            var report = readRun(reportPath(result.stdout))
+            assert(report.status == "baseline_failed")
+            assert(report.baseline.status == "failed")
+            assert(report.baseline.test.executedTests == 3)
+            assert(report.baseline.test.failedTests == 1)
+            assert(report.baseline.test.exitCode == 1)
+            assert(report.baseline.test.summary != null)
+            var summary = report.baseline.test.summary
+            if (summary != null) { assert(summary.contains("1 failed of 3 executed tests")) }
+            assert(report.counts.candidates == 0)
+            assert(report.counts.executed == 0)
+            assert(report.mutants.size == 0)
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "invalid trailing invocations cannot approve baseline or detect mutation", "multiple-invocations" {
+    var root = multipleInvocationProject()
+    try {
+        for (var stage in listOf("baseline", "mutant")) {
+            for (var scenario in listOf("duplicate", "interrupted", "no-suites", "skip-only", "orphan-total", "wrong-case-total", "missing-suite-total", "missing-final", "wrong-files", "wrong-failures", "exit-one", "exit-zero", "exit-other", "bad-suite-exit")) {
+                fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test", "multiple", scenario, stage), 10000, 90000)
+                var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/reports")
+                runAssertEvidence(result.exitCode == (if (stage == "baseline") 2 else 3), stage + ":" + scenario + result.stdout + result.stderr)
+                var report = readRun(reportPath(result.stdout))
+                assert(report.counts.killed == 0)
+                assert(report.counts.survived == 0)
+                assert(report.discardedCandidates.size == 0)
+                if (stage == "baseline") {
+                    assert(report.status == "baseline_failed")
+                    assert(report.baseline.status == "failed")
+                    assert(report.counts.candidates == 0)
+                    assert(report.counts.executed == 0)
+                    var summary = report.baseline.test.summary
+                    assert(summary != null)
+                    if (summary != null) { assert(summary.contains("Invalid")) }
+                } else {
+                    assert(report.status == "incomplete")
+                    assert(report.baseline.status == "passed")
+                    assert(report.baseline.test.executedTests == 3)
+                    assert(report.baseline.test.failedTests == 0)
+                    assert(report.counts.candidates == 1)
+                    assert(report.counts.testError == 1)
+                    assert(report.mutants.get(0).status == "TestError")
+                    assert(report.mutants.get(0).evidence.contains("Invalid"))
+                }
+            }
+        }
+    } finally { assert(Directory(root).delete()) }
+}

@@ -4,6 +4,8 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Current entry points
 
+- [Recovered implementation and resumed acceptance](validation/multiple-invocations-recovery.md): exact recovery verified and public reader groups pass; complete compatibility/full check and four real cases remain unapproved under preserved deadlines.
+- [Concatenated test invocations](validation/multiple-invocations.md): current parser correction and separate expectation/proof audits; public executable and real SiFuture acceptance remain pending under preparation deadline failures.
 - [Root EXECPLAN](../EXECPLAN.md): complete retained plan, dated authorizations, decisions, milestones and observed boundaries. Its older requirements remain historical where explicitly superseded.
 - [M7R discard rule correction](validation/kofmut-m7r.md) and [manifest](validation/kofmut-m7r.sha256): qualifies all-discarded outcomes in both LLM guides and supplements M7 D3 with the unsupported-syntax case. Records reused evidence separately from fresh validation and the preexisting M7 archive hash discrepancy; the original M7 report/manifest remain preserved.
 - [M7 documentation validation](validation/kofmut-m7.md) and [manifest](validation/kofmut-m7.sha256): inventory, canonical document ownership, audience journeys, preservation and new guide acceptance. Read its criterion results and limitations before treating M7 as complete.

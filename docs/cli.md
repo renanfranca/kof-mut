@@ -115,6 +115,10 @@ Commands run as argv with sandbox cwd, inherited environment and closed stdin. K
 
 Exit 0 alone is insufficient evidence. Baseline check needs valid/coherent JSON, `success: true`, zero errors and exit 0; baseline tests need completed suites, executed cases and zero failures. Check counters must be original integers: `filesChecked` in `1..2147483647` and `errorCount` in `0..2147483647`; `filesChecked` counts entry files, not imports. A coherent rejection has `success: false`, exit 1 and a positive error count matching ERROR diagnostics. Wrappers must preserve these protocols. Zero tests, SKIP without executed cases, missing summaries, truncation and contradictory output never approve a baseline or kill a mutant. See [baseline fields and states](report-format.md#baseline-and-phase-evidence).
 
+A test command may emit one complete Kof test invocation or concatenate several complete invocations. Each invocation can contain several named suites. Every final `N passed, M failed` summary counts suite files and must agree with the suites since the preceding final summary. Each invocation must execute at least one case; a duplicate final summary without new suites, an unfinished suite or a missing final summary is invalid. `executedTests` and `failedTests` accumulate cases across all invocations, excluding SKIP cases from execution. Two cases in one invocation plus one in another yield `executedTests: 3`, regardless of the number of file summaries.
+
+A later passing invocation does not erase an earlier failure. The command must return 0 when all executed cases pass and 1 when any case fails. Per-suite `exit code:` diagnostics are checked against that suite. Contradictory output or command exits produce a failed baseline or a mutant `TestError`, never a kill.
+
 ## Select scope and inputs
 
 A scope file such as `fixtures/detected/scope.json` contains:
