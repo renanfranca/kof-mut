@@ -144,8 +144,8 @@ class CompatibilityWork implements Runnable {
         var child = startCommand(command, cwd, label)
         try {
             var remaining = 90000 - (System.currentTimeMillis() - started)
-            if (remaining > 10000) { remaining = 10000 }
-            if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (10000 ms maximum)" }
+            if (remaining > 30000) { remaining = 30000 }
+            if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (30000 ms maximum)" }
             active()
             return child.exitValue()
         } finally { lock.lock(); try { stopChildren() } finally { lock.unlock() } }
@@ -301,7 +301,6 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
                 if (work.command(listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", candidate + "/classes"), candidate, "compile") != 0) { throw "compilation failed; see compile.stdout and compile.stderr" }
                 work.phase("contracts")
                 System.err.println("kof-mut: checking compatibility...")
-                // Each child has its own ten second deadline; mutation evidence stays in work.evidence.
                 for (var probe in listOf("frontend", "killed", "survived")) {
                     if (work.command(listOf(java, "-cp", candidate + "/classes:" + jar, "kofmut.CompatibilityProbe", root, kof, installation.kof, work.evidence, probe), candidate, probe) != 0) { throw "compatibility " + probe + " verification failed; see " + probe + ".stdout and " + probe + ".stderr" }
                     if (compatibilityText(work.evidence + "/" + probe + ".ok") != "verified\n") { throw "missing compatibility " + probe + " evidence" }

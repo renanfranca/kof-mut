@@ -76,10 +76,10 @@ void compileSources(String root, String kof, String jar, List<SourceSnapshot> so
     }
     if (!File(temporary + "/kof.toml").writeText("[sources]\napp = \"sources\"\n")) { throw "cannot write build manifest" }
     var command: List<String> = listOf()
-    if (bounded) { command = listOf("timeout", "--foreground", "--kill-after=2", "10") }
+    if (bounded) { command = listOf("timeout", "--foreground", "--kill-after=2", "30") }
     for (var argument in listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", temporary + "/classes")) { command.add(argument) }
     var result = shell.runWith(command, temporary, mapOf())
-    if (bounded && result.exitCode == 124) { throw "Kof compilation command exceeded 10000 ms" }
+    if (bounded && result.exitCode == 124) { throw "Kof compilation command exceeded 30000 ms" }
     if (result.exitCode != 0) { throw "Kof compilation failed (exit " + result.exitCode + "):\n" + result.stdout + result.stderr }
     if (!File(temporary + "/classes/kofmut/launch/CompatibilityEntry.class").isFile()) { throw "Kof did not emit both verified entry points" }
 }

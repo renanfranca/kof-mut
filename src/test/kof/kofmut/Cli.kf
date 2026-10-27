@@ -863,19 +863,21 @@ test "a preparation command timeout refuses evaluation and retry needs no cache 
         while (!File(ready).exists() && child.isAlive() && System.nanoTime() - started < 90000000000) { Thread.sleep(20 as Long) }
         cliAssertEvidence(File(ready).exists(), "compiler readiness: " + compatibilityRead(project + "/command-timeout.stderr"))
         var commandStarted = System.nanoTime()
-        var finished = child.waitFor(12000 as Long, TimeUnit.MILLISECONDS)
+        var finished = child.waitFor(32000 as Long, TimeUnit.MILLISECONDS)
         var commandElapsed = (System.nanoTime() - commandStarted) / 1000000
         var elapsed = (System.nanoTime() - started) / 1000000
         var error = compatibilityRead(project + "/command-timeout.stderr")
         println("timeout observation: preparationMs=" + elapsed + "; observedCommandAndCleanupMs=" + commandElapsed + "; stderr=" + error)
-        cliAssertEvidence(finished, "command must stop within ten seconds plus two shared cleanup seconds: " + commandElapsed)
+        cliAssertEvidence(finished, "command must stop within thirty seconds plus two shared cleanup seconds: " + commandElapsed)
+        cliAssertEvidence(commandElapsed >= 29000, "command was stopped before its thirty second deadline: " + commandElapsed)
         cliAssertEvidence(child.exitValue() == 2, error)
         cliAssertEvidence(elapsed < 92000, "preparation plus cleanup exceeded its total bound: " + elapsed)
         assert(compatibilityRead(project + "/command-timeout.stdout") == "")
         assert(error.contains("preparation compile failed"))
-        assert(error.contains("10000 ms maximum"))
+        assert(error.contains("30000 ms maximum"))
         assert(error.contains("evidence:"))
         assert(!File(project + "/reports").exists())
+        assert(Directory(project + "/build/cache/compatibility/approved").list().size() == 0, "timeout cannot publish compatibility approval")
         assert(!compatibilityProcessActive(compatibilityRead(ready + ".pid").trim()))
         var retry = shell.runWith(command, project, mapOf())
         cliAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
@@ -989,4 +991,34 @@ test "JDK contents invalidate approval with the same declared version and timest
 void cliAssertEvidence(Bool condition, String evidence) {
     if (!condition) { println(evidence) }
     assert(condition, "behavior failed; see evidence above")
+}
+
+record CompatibilityTiming(Long durationMs)
+
+test "slow compilation and mutation trials retain real behavioral approval", "compatibility", "compatibility-limits" {
+    var project = disposableProject()
+    var path = controlledPath(project)
+    var kof = process.run("/usr/bin/which", "kof").stdout.trim()
+    var log = project + "/builds.log"
+    var command = compatibilityInvocation(project, path, kof, log)
+    try {
+        var warmed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        cliAssertEvidence(warmed.exitCode == 0, warmed.stdout + warmed.stderr)
+        var first = shell.runWith(command, project, mapOf("KOF_MUT_TEST_BUILD_DELAY", "11", "KOF_MUT_TEST_COMMAND_DELAY", "1.5"))
+        cliAssertEvidence(first.exitCode == 3, first.stdout + first.stderr)
+        assert(first.stderr.contains("ready; starting evaluation"))
+        var reports = process.run("/usr/bin/find", project + "/.agent/tmp/m6", "-path", "*-reports/*/*/report.json")
+        assert(reports.exitCode == 0)
+        var count = 0
+        for (var report in reports.stdout.trim().split("\n")) {
+            var timing = json.decode<CompatibilityTiming>(compatibilityRead(report))
+            cliAssertEvidence(timing.durationMs > 8500 && timing.durationMs < 25000, "internal mutation trial durationMs=" + timing.durationMs)
+            println("slow compatibility report=" + report + "; durationMs=" + timing.durationMs)
+            count++
+        }
+        assert(count == 2, "both detection and survival must complete beyond the old budget")
+        var reused = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+        cliAssertEvidence(reused.exitCode == 3, reused.stdout + reused.stderr)
+        assert(!reused.stderr.contains("checking compatibility"))
+    } finally { assert(Directory(project).delete()) }
 }

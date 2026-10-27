@@ -985,3 +985,47 @@ Final execution boundary: standalone Install exit 1, 16 passed/15 failed of 31 (
 Four fresh SiFuture recipes produced own current reports with reconciled UUID/scope/native exits and preserved 190/191 copied files, but every baseline test exceeded its 10000 ms deadline: incomplete/3, exit 137 in baseline.test, no candidates/mutants. Normal commands show 115/0/exit 0 for Background/detected/survived and 115/1/exit 1 for the deliberately failing baseline. Their two sequential CLI times already sum to 11985/15400/15641/13825 ms, excluding wrapper/startup overhead. This explains those observed deadline refusals without establishing why commands are slow or all historical assertion causes. Guides retain the limitation. Recovery and public reader behavior are proven; full acceptance remains pending a decision on controlled execution conditions versus explicit reconsideration of deadlines/recipe constraints. No limits, wrapper, permanent catalog, Kof contents, commits, agents, worktrees or publication changed. Detailed expectations/observations/gaps and report hashes are in .agent/validation/multiple-invocations-recovery.md; separate manifest follows final audit and preserves the original seal.
 
 Final records/preservation boundary: new KofMut delivery manifest .agent/validation/multiple-invocations-recovery.sha256 and SiFuture .agent/validation/kofmut-recovery.sha256 supplement, without replacing, prior seals. All 132 other KofMut tracked files and 202 protected SiFuture tracked files retain initial bytes/modes; recovered source/test/public-document leaves and original validation match the historical manifest, and all historical plan/acceptance prefixes remain. Both guides and approved recipe blocks remain unchanged. New KofMut links pass; whole-history SiFuture link validation has the same 51 preexisting messages on HEAD and continued documents, zero new-link messages. Both Git exclusions contain /.agent/tmp/ once, Kof source/jar and all 1590 old sealed local evidence files are unchanged. No product validation is repeated after these documentation-only continuations; execution/test inputs are byte-identical to those measured. Plan remains incomplete for the explicitly recorded compatibility/full-gate/real deadlines; no permission question or silent contract change is substituted for acceptance.
+
+
+# Complete integration with authorized time limits (2026-10-26)
+
+## Purpose and success
+
+Allow legitimate preparation and SiFuture commands to complete while retaining blocked process termination. Completion requires public compatibility, multiple-invocations regression, all four fresh real 115-case scenarios and the full KofMut check.
+
+## Context and limits
+
+User supplied plan authorizes 30000 ms per SiFuture command, 30000 ms per preparation compilation/probe and 25000 ms per internal mutation trial. Keep internal individual commands at 10000 ms, preparation total at 90000 ms including waits, shared cleanup at 2000 ms, SiFuture budgetMs 0, concurrency, wrapper, scope and permanent catalog. No automatic increases, commits, user installations, worktrees, agents, dependency changes or publications. Preserve all historical records and manifests. Base SiFuture 54c317b52d010fbfa94e28499b05610d3ee62077; KofMut e8a08b6478d02bfd6d8e1158c2c9e9c913bc82b6. Continue current branches.
+
+## Milestones
+
+1. Extend existing behavioral coverage for compilation after ten seconds, internal trial beyond 8500 ms, blocked compilation and normal recovery. Change only timeout boundaries in scripts/launch, scripts/bootstrap/Launch.kf, Compatibility.kf, CompatibilityProbe.kf and SiFuture kof-mut.json; reconcile bilingual preparation documentation.
+2. Run `kof test src/test/kof/kofmut/Cli.kf --tag compatibility` and `kof test src/test/kof/kofmut/Run.kf --tag multiple-invocations`. Use fresh SiFuture byte copies and existing Bash recipes for Background Killed complete/0, last-file calculation Killed complete/0, calculation Survived complete/1, failing baseline baseline_failed/2. Check announced report, UUID, scope, 115 cases, counts, exits and preserved inputs.
+3. Run `./scripts/check` in KofMut and `git diff --check` in both repositories. Retain the existing ninety-second deadline and invalid-evidence controls. Independently audit expected outcomes and proof discrimination. Remove SiFuture guide limitation only after all required gates pass. Append essential results to existing acceptance records and create separate manifests.
+
+## Progress
+
+- [x] Behavioral deadline coverage and implementation.
+- [x] Focused tests and four real scenarios.
+- [x] Full check, documentation gate, preservation and final evidence.
+
+## Validation
+
+Pending. Local raw evidence: `.agent/tmp/timeouts-20261026/`; tracked summaries will continue existing acceptance records. Record base SHA plus hashes of edited execution inputs, configuration hash, observed clocks and native exits. No earlier report substitutes for a current invocation. Unknown causes and any exceeded new deadline remain explicit and acceptance stays pending.
+
+
+### Deadline implementation boundary
+
+Focused Linux/JVM Kof 0.6.6 validation passes: compatibility 9/0 (296.540 s), multiple-invocations 3/0 (86.363 s). The new slow compilation test first failed at the old 10000 ms compile deadline, then passed with an injected 11 s delay. Delayed real detection/survival reports took 10008/9608 ms, beyond 8500 and below 25000, with individual commands still bounded at 10000 ms. Blocked compilation returned 2, observed command/cleanup 30324 ms, whole preparation 31213 ms; no caller report, process stopped, normal retry passed. Compatibility refusal for wrong frontend behavior and concurrent/integrity/signal cases also pass. Four fresh SiFuture copies are now running. Full check and the 90000 ms total-deadline regression remain pending. Logs: `.agent/tmp/timeouts-20261026/` in KofMut.
+
+
+### Real integration boundary
+
+All four fresh real SiFuture copies pass the existing documented run/inspection recipes with two files and 115 cases: Background Killed complete/0 (14.757 s), second-file calculation Killed complete/0 (15.538 s), calculation Survived complete/1 (15.543 s), failing baseline baseline_failed/2 (8.912 s, one failure, zero candidates/mutants). Each own announced report, UUID, namespace, scope, schema/Kof version, exact counts and native/recipe/inspection exits reconcile. All 190/191/191/191 input bytes and modes are preserved. Config SHA-256 a0303c0cd6fa65cb2e7d33e056a4e642a1f8dda00a1432b7d8b7bb3df6027f65. Normal wrapper controls independently execute all 115 cases with 0/0/0/1 failures. Separate proof audit rejects 36 corrupted or cross-call controls. Full check is running; the blocked-command assertion additionally rejects premature termination before 29 seconds and checks no approval publication. No production behavior changed after focused/integration validation. Guide limitation remains until full check passes.
+
+
+### Final integration acceptance boundary
+
+Full `./scripts/check` passed, exit 0, 2822.044 external monotonic seconds: CLI 32/0, mutation cycle 47/0, installation 31/0, frontend 15/0. The original preparation deadline control stopped at 90026 ms monotonic (90027 ms wall); a separately confirmed budget-zero evaluation ran 94097 engine ms, 95220 external ms. Blocked compilation in this full run stopped after 30329 observed command/cleanup ms, whole preparation 31256 ms, with no approval publication and normal recovery. All 44 frozen execution inputs remain unchanged through the check. Focused compatibility and multiple-invocations commands and all four fresh 115-case SiFuture outcomes passed earlier in this same continuation; independent report audit now rejects 58 incorrect controls.
+
+The obsolete second-summary rejection limitation is removed from both SiFuture guides, with the qualified source identity and two-file proof linked. Permanent wrapper, scope and catalog remain unchanged; only SiFuture commandTimeoutMs changes in its configuration. Existing acceptance records receive append-only continuations with authorization, base SHAs, configuration/source/report hashes, commands, clocks, UUIDs, exact results and proof limits. Historical failures/manifests remain preserved. New generated evidence/inventories stay in ignored `.agent/tmp/timeouts-20261026/`. Final diff/link/preservation checks are recorded in the acceptance continuation. This closes the pending public/real multiple-invocation acceptance under the new authorized deadlines; historical sensor activation and project-performance goals remain outside this completion. No commit, publication, user installation, worktree, subagent or Kof change.

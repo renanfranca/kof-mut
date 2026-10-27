@@ -307,3 +307,123 @@ SiFuture has 204 initial tracked files; only EXECPLAN.md and sensors-adoption.md
 Both actual repository Git exclusion files contain `/.agent/tmp/` exactly once. Kof source remains clean at 7c237861a9035d84b1f7ec4cfddd89daef4c6ddd; installed jar contents retain the captured SHA-256. No dependency modification/download/update, wrapper/configuration/catalog change, agent, worktree, commit or publication occurred.
 
 [New delivery manifest](multiple-invocations-recovery.sha256) identifies the continued delivered files, without replacing the [historical manifest](multiple-invocations.sha256). It is expected that the old seal names the original index/plan bytes, while the new seal names their documented continuations. Optional local evidence is inventoried separately under `.agent/tmp/recovery-20261026/`; the findings and gaps above do not require it to be understood. Recovery and reader acceptance are demonstrated; overall plan acceptance remains pending as specified above.
+
+
+## Authorized timeout integration acceptance (2026-10-26)
+
+This continuation supersedes the pending public/real acceptance above under the explicitly authorized new deadlines. It does not rewrite the earlier failures or their unknown individual causes. Tested bases: SiFuture `54c317b52d010fbfa94e28499b05610d3ee62077`, KofMut `e8a08b6478d02bfd6d8e1158c2c9e9c913bc82b6`, plus this session's uncommitted changes identified below. Linux/JVM Kof 0.6.6, installed jar SHA-256 `198bb211dbcefe60bd02f703dff991e82ba55c94f805b1b2b863362757289e58`; local research checkout `7c237861a9035d84b1f7ec4cfddd89daef4c6ddd`. No CI workflow, commit, user installation or publication was performed; installation tests use disposable prefixes.
+
+### Authorized boundaries and identity
+
+SiFuture changes only `commandTimeoutMs` from 10000 to 30000 in its JSON configuration. `budgetMs: 0`, `maxParallelMutants: 1`, wrapper, permanent scope and permanent catalog remain unchanged. Config SHA-256: `a0303c0cd6fa65cb2e7d33e056a4e642a1f8dda00a1432b7d8b7bb3df6027f65`.
+
+KofMut source launcher bootstrap compilation, bootstrap application compilation and coordinator compilation/probe commands use a 30000 ms maximum. The internal real mutation trial uses 25000 ms total while each check/test command retains 10000 ms. Full preparation remains 90000 ms from the original invocation including waits, and process cleanup keeps its shared 2000 ms deadline. The coordinator still computes remaining total time before limiting a command; the outer launcher also bounds bootstrap and coordinator by the original deadline. Starting another stage does not reset it. No evidence parser, JSON v1 shape, status, exit, mutation policy or real compatibility verification was changed.
+
+Current source excerpt, [Compatibility.kf](../../src/main/kof/kofmut/launch/Compatibility.kf#L146):
+
+```kof
+var remaining = 90000 - (System.currentTimeMillis() - started)
+if (remaining > 30000) { remaining = 30000 }
+if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (30000 ms maximum)" }
+```
+
+Subtracting elapsed time keeps the original total deadline; the cap changes only an individual command's maximum. Local CLI training and examples, Learn Kof chapters 21/23, interop/control-flow idioms, fake-idioms/weak-green-proof and current CmdTest implementation were consulted. Actual installed-target test execution, rather than compilation alone, is the evidence for this checkout.
+
+| Changed execution input | SHA-256 |
+| --- | --- |
+| `scripts/launch` | `5d9164a74192b15c236cc8635161dc9df3dea47c0ff11b19448f82fce639c1c0` |
+| `scripts/bootstrap/Launch.kf` | `79fe2bc625dadd9face9bd5ed0b0f5ae9476b636e2579b8d624cb16f83f5e521` |
+| `src/main/kof/kofmut/launch/Compatibility.kf` | `2d45e3f52b3ddd58920bd738dd783070ed40413f97676fb9e7741cc6eef75bef` |
+| `src/main/kof/kofmut/CompatibilityProbe.kf` | `e45031114f6ffe63b0bfdbee84f6cb61b5861157b767fa98ef54ea3a6f9ac078` |
+| `src/test/kof/kofmut/Cli.kf` | `dbf9a4617117d8d789424c85b840ac8414a6c4d5a848d9236f4ebaf1ec9a8a01` |
+| `src/test/fixtures/controlled-toolchain/kof` | `6357c4c377cca4b263804fdb556e7c7f24c3266f82270cd32e0261f119afa57b` |
+
+### Commands and deadline controls
+
+Commands ran sequentially from the KofMut root with the existing PATH distribution. External seconds use Python `time.monotonic`.
+
+| Command | Native exit | External seconds |
+| --- | --- | ---: |
+| `kof test src/test/kof/kofmut/Cli.kf --tag compatibility` | 0 | 296.540 |
+| `kof test src/test/kof/kofmut/Run.kf --tag multiple-invocations` | 0 | 86.363 |
+| `./scripts/check` | 0 | 2822.044 |
+
+Focused compatibility passes 9/0 and multiple-invocations passes 3/0. The complete check independently passes CLI 32/0, mutation cycle 47/0, installation 31/0 and all 15 frontend contracts, including the original ninety-second preparation deadline and evaluation beyond ninety seconds after confirmation. Essential complete-check summaries:
+
+```text
+0 failed of 32 tests
+0 failed of 47 tests
+0 failed of 31 tests
+```
+
+The added slow test first failed against the old compilation deadline, then passed after the implementation. Red command: `kof test src/test/kof/kofmut/Cli.kf --tag compatibility-limits`, exit 1:
+
+```text
+compile exceeded its command deadline (10000 ms maximum)
+FAIL slow compilation and mutation trials retain real behavioral approval
+1 failed of 1 tests
+```
+
+The controlled engine compile sleeps 11 seconds before invoking the real compiler, completes within the new 30-second cap and publishes valid behavioral approval. Both real internal mutation trials delay each individual command by 1.5 seconds, remain individually bounded at 10000 ms and finish at 10008/9608 ms in the focused run (10302/9835 ms in the full check). They are therefore above 8500 and below 25000. The production probe asserts the killed/survived states, complete JSON, exact counters and original Kof/frontend behavior; the new test reads each resulting duration and requires both trials, then reuses approval with compilation refused.
+
+The blocked-compile focused control returns 2 after 30324 ms observed command/cleanup, 31213 ms whole preparation. It emits no caller stdout/report, confirms process termination and recovers on a fresh normal invocation. Full check additionally requires at least 29000 ms before timeout and an empty approval directory, so premature rejection or invalid publication cannot pass. Existing INT/TERM, content-integrity, frontend-behavior refusal, waiting/concurrency, contradictory/truncated evidence and real test-failure controls also pass. Additional time does not bypass any behavioral check or turn invalid evidence into approval.
+
+### Four fresh SiFuture copies
+
+Used the existing English run and inspection Bash blocks verbatim, byte-identical to Portuguese, from each new project's root. The configuration is the updated real configuration, the wrapper is unchanged and both independent suite files are included. Each normal command independently executes 115 cases: 0/0/0/1 failures and exits 0/0/0/1. Fresh run UUID, own single JSON-decoded `reportPath=`, canonical project namespace, report runId, schema/version, scope, baseline, exact counts, tool/recipe/inspection exits and input preservation were checked.
+
+| Scenario | Run UUID | State/exit | Killed/Survived | External recipe seconds |
+| --- | --- | --- | --- | ---: |
+| background | `5edef194-8273-4eec-ac36-5554e9955b8f` | `complete/0` | 1/0 | 14.757 |
+| detected | `660fb933-dfd0-45ae-9e29-61ea54e4b595` | `complete/0` | 1/0 | 15.538 |
+| survived | `11984982-2786-4c42-b093-d32382099039` | `complete/1` | 0/1 | 15.543 |
+| baseline-failed | `3612b9e3-4b33-49f7-8f95-ef33481848da` | `baseline_failed/2` | 0/0 | 8.912 |
+
+Background scope is `src/main/kof/sifuture/game/Background.kf`; the other three use disposable `src/main/kof/sifuture/game/ManualMutationProbe.kf`. Successful baselines contain 115 executed cases and zero failures; failing baseline contains 115 cases and one failure. The first three have exactly one candidate and executed mutant; all timeout/testError/pending/compileError counters are zero, no discards or limitations. The failing baseline has zero candidates, executed mutants and all mutant counters, and returns before mutation. All 190/191/191/191 original copied input bytes and modes are preserved.
+
+| Scenario report | SHA-256 of the own announced report |
+| --- | --- |
+| background | `738d5a24dece97084fb9107dab8ba6a23b586e3e64a807d76edfa4803ae18340` |
+| detected | `9d8be817f01facbb158c96ef75aba4f2353e5d309fe0cef7cade12152614213f` |
+| survived | `c3bff6ccc1cf91d6a298621109e578c636615bfe65a2238c829c95ca1715534b` |
+| baseline-failed | `9708097c19bdfcfec8da0e7a2b39c80495d28404ce94cb4c0edefdb83778eae0` |
+
+### Separate expectation and proof-discrimination audits
+
+Expectation audit: Background advances `(offset + 5) % 60`; its existing real game test checks an offset of 5 after advance, detecting the arithmetic replacement. Calculation `a + b` tested with `(2, 3)` gives 5 while replacement `a - b` gives -1; only disposable ZProbe calls that production calculation. `(2, 0)` gives 2 for either operator, so survival is required, not quality approval. An initial expectation of 6 with `(2, 3)` must fail before any mutation. Agent-created synthetic calculations/tests were executed on JVM only, in disposable copies; they were not added to the permanent game catalog.
+
+Proof audit: the actual detected-mutant stdout proves the failure is in the second file, after all 114 first-file cases passed:
+
+```text
+Suite: sifuture/game/GameJourney.kf
+0 failed of 114 tests
+Suite: sifuture/game/ZProbe.kf
+FAIL probe contract: assertion failed
+1 failed of 1 tests
+```
+
+The independent report checker accepts all four current reports and rejects 58 controls: wrong UUID, scope, status, executed/failed case count, killed counter and another scenario's current report. The public Kof regressions independently reject truncated/contradictory evidence and retain a first/last invocation's failure. Exit 1 for the survivor and exit 2 for the failing baseline are required successful observations of those scenarios, not a claim that their test quality passed. Historical failures and unknown old causes remain historical; this acceptance covers the current measured tree and target, with no universal timing guarantee or automatic further increase.
+
+### Disposition and local evidence
+
+Preparation, both focused commands, all four real scenarios and the complete check pass. This closes the pending concatenated-invocation/manual integration acceptance. SiFuture's two guides can remove the obsolete second-summary rejection limitation and explain the measured two-file acceptance. Sensor installation/activation and historical S1–S3/M2–M5 or 90-second project-performance goals are not closed by this work.
+
+Optional local evidence: KofMut `.agent/tmp/timeouts-20261026/` contains red/focused/full logs, native exits/clocks, captured input inventories and Kof identity; SiFuture's same directory contains four fresh copies/reports, both exact recipes, normal commands, input hashes, failure-file audit and 58-control audit. Essential commands, outcomes, UUIDs, hashes and limitations are reproduced here so these paths are not prerequisites. New generated inventories/manifests stay ignored there; previous tracked manifests are preserved unchanged.
+
+
+### Observed total deadline and final preservation audit
+
+From the same successful `./scripts/check` on Linux/JVM Kof 0.6.6:
+
+```text
+prepared deadline monotonicMs=90026 wallMs=90027
+PASS a prepared invocation retains the original ninety second preparation deadline
+confirmed evaluation engineMs=94097 monotonicMs=95220 wallMs=95221
+PASS confirmed evaluation with budget zero can exceed ninety seconds
+```
+
+The first observation confirms preparation stops at its original 90-second bound. The second confirms a ready evaluation starts its own budget and can continue beyond 90 seconds with budgetMs zero; it does not extend preparation. The full check returned 0 in 2822.044 external seconds. `git diff --check` returned 0 in both repositories.
+
+Final independent byte/mode audit: SiFuture has 205 initial tracked files, five authorized changes and 200 unchanged; KofMut has 145, eleven authorized changes and 134 unchanged. Both continued plans/acceptance records preserve all original bytes as prefixes; every historical tracked SHA-256 manifest is unchanged. All 44 frozen execution inputs, installed Kof jar, clean Kof research checkout and both bilingual Bash recipes are preserved. Each repository's local exclusion contains `/.agent/tmp/` exactly once. Link diagnostics for the changed Markdown set are exactly equal to those from HEAD texts: 51 in SiFuture and 14 in KofMut, zero introduced. These preexisting historical line-suffix/fragment diagnostics remain recorded rather than being mislabeled as a clean whole-history link check. New acceptance/source links pass.
+
+Generated delivery inventories and the structured audit are optional local evidence under `.agent/tmp/timeouts-20261026/` in each repository. Historical files/manifests were not resealed or replaced. Preparation, check, focused tests, four real scenarios, documentation gate and preservation are accepted for this continuation; no required acceptance gap remains for these authorized timeout/invocation changes.

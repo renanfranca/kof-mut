@@ -128,7 +128,7 @@ prepare() {
         while kill -0 "$preparer" 2>/dev/null; do
             elapsed=$(( $(date +%s%3N) - KOF_MUT_STARTED ))
             if (( elapsed >= 90000 )); then fail 'bootstrap coordination exceeded 90000 ms'; fi
-            if [[ ! -f "$KOF_MUT_CONTEXT/bootstrap-running" ]] && (( $(date +%s%3N) - compilation_start >= 10000 )); then fail 'bootstrap compilation command exceeded 10000 ms'; fi
+            if [[ ! -f "$KOF_MUT_CONTEXT/bootstrap-running" ]] && (( $(date +%s%3N) - compilation_start >= 30000 )); then fail 'bootstrap compilation command exceeded 30000 ms'; fi
             /bin/sleep 0.02
         done
         if wait "$preparer"; then bootstrap_status=0; else bootstrap_status=$?; fi
