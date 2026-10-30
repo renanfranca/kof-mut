@@ -60,6 +60,8 @@ Escolha o checkout desejado do fonte do KofMut e execute novamente o instalador 
 
 Para o prefixo padrão, execute `./install.sh`. Isso atualiza a aplicação e a documentação distribuída. A preparação valida o novo pacote antes da ativação atômica. Inputs idênticos e íntegros reutilizam a imagem; mudanças na documentação atualizam o pacote reutilizando classes compiladas válidas. Imagens anteriores permanecem disponíveis para avaliações ativas terminarem. Mudança detectada no checkout durante a instalação retorna 2 com `checkout changed during installation; retry`; estabilize o checkout e tente novamente. Veja [gerenciamento](cli.pt_BR.md#instalação-local-e-gerenciamento) para detalhes de atualização/recibos, incluindo uma reinstalação inicial para recibo legado de schema 1.
 
+Pacotes com os fontes de runtime antigos precisam desta atualização do KofMut antes de adotar o Kof 0.6.8. Esses fontes podem falhar na inicialização com `SEM021` na atribuição do argumento de reflexão, inclusive em `--version`. Execute novamente o instalador a partir de um checkout com a correção, usando o mesmo prefixo, conforme acima; selecionar outro Kof no `PATH` não substitui os fontes do KofMut no pacote. O pacote corrigido pode então preparar conteúdos compatíveis do Kof sem o checkout, passando pelas verificações comportamentais normais.
+
 ## Adotar outro Kof
 
 Para instalação atual, selecione uma distribuição oficial existente e execute normalmente a próxima avaliação:

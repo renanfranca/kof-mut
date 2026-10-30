@@ -98,7 +98,7 @@ test "source launcher works with no Python executable on PATH" {
     }
 }
 
-test "launcher preserves argv cwd environment and application exit status" {
+test "launcher preserves argv cwd environment and application exit status", "launch-arguments" {
     var project = disposableProject()
     var caller = project + "/caller"
     assert(Directory(caller).createDirectories())
@@ -525,7 +525,7 @@ test "installation and entire jar contents select a new image with timestamps pr
 
 record LiveLaunch(String processDirectory, String command, Int contexts, String children)
 
-test "warm argument fixture preserves the public invocation without a compiler" {
+test "warm argument fixture preserves the public invocation without a compiler", "launch-arguments" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()

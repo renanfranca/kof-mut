@@ -60,6 +60,8 @@ Choose the desired KofMut source checkout and rerun the installer with the same 
 
 For the default prefix, run `./install.sh` instead. This updates the application and its bundled documentation. Preparation validates the new package before atomic activation. Healthy identical inputs reuse their image; documentation changes update the package while reusing valid compiled classes. Older images remain available so active evaluations can finish. A detected checkout change during installation returns 2 with `checkout changed during installation; retry`; stabilize the checkout and retry. See [management](cli.md#local-installation-and-management) for update/receipt details, including one initial reinstall for a legacy schema 1 receipt.
 
+Packages containing the older runtime sources need this KofMut update before adopting Kof 0.6.8. Those sources can fail during startup with `SEM021` at the reflection argument store, even for `--version`. Rerun the installer from a checkout containing the fix with the same prefix, as shown above; selecting another Kof on `PATH` does not replace the packaged KofMut sources. The corrected package can then prepare compatible Kof contents without the checkout, using the normal behavioral checks.
+
 ## Adopt another Kof
 
 For a current installation, select an existing official distribution and run the next evaluation normally:

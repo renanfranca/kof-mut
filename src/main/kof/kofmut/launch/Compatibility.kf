@@ -357,7 +357,7 @@ void compatibilityApplication(String[] arguments) {
     signature[0] = Class.forName("[Ljava.lang.String;")
     var method = Class.forName("Default.Main").getMethod("main", signature)
     var invocation = new Object[1]
-    invocation[0] = arguments
+    invocation[0] = arguments as Object
     var invoked = method.invoke(null, invocation)
 }
 

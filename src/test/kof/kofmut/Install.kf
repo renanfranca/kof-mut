@@ -959,7 +959,7 @@ test "default prefix uses the selected HOME and all installed help forms describ
     assert(source.exitCode == 2, "source mode retains its original command contract")
 }
 
-test "installed entry preserves exact argv cwd environment and exit without checkout", "install" {
+test "installed entry preserves exact argv cwd environment and exit without checkout", "install", "launch-arguments" {
     var journey = installJourney()
     var source = installText("src/test/fixtures/LaunchObservation.kf")
     source = source.replace("main() {", "main() {\n    if (args.length == 1 && (args[0] == \"--version\" || args[0] == \"--help\")) { println(\"KofMut fixture\"); return }")
