@@ -6,25 +6,65 @@ IFS= read -r KOF_MUT_CHECK_ID < /proc/sys/kernel/random/uuid
 KOF_MUT_CHECK_OBSERVATIONS="$KOF_MUT_ROOT/.agent/tmp/check-$KOF_MUT_CHECK_ID"
 mkdir -p -- "$KOF_MUT_CHECK_OBSERVATIONS"
 trap 'echo "check observations: $KOF_MUT_CHECK_OBSERVATIONS"' EXIT
-KOF_MUT_STAGE_PID=""
-signal_running_stage_or_exit() {
-    if [[ -n "$KOF_MUT_STAGE_PID" ]]; then kill -"$1" -- "$KOF_MUT_STAGE_PID" 2>/dev/null || true; else exit "$2"; fi
+declare -A KOF_MUT_RUNNING_QUEUES=()
+KOF_MUT_SIGNAL_STATUS=""
+signal_running_queues_or_exit() {
+    if (( ${#KOF_MUT_RUNNING_QUEUES[@]} == 0 )); then exit "$2"; fi
+    [[ -n "$KOF_MUT_SIGNAL_STATUS" ]] || KOF_MUT_SIGNAL_STATUS=$2
+    kill -"$1" -- "${!KOF_MUT_RUNNING_QUEUES[@]}" 2>/dev/null || true
 }
-trap 'signal_running_stage_or_exit INT 130' INT
-trap 'signal_running_stage_or_exit TERM 143' TERM
-observed_stage() {
-    ( trap - INT; exec ./scripts/observe "$KOF_MUT_CHECK_OBSERVATIONS" "$@" ) &
-    KOF_MUT_STAGE_PID=$!
-    local status=""
-    while [[ -z "$status" ]]; do
-        wait "$KOF_MUT_STAGE_PID" && status=0 || status=$?
-        if kill -0 "$KOF_MUT_STAGE_PID" 2>/dev/null; then status=""; fi
+trap 'signal_running_queues_or_exit INT 130' INT
+trap 'signal_running_queues_or_exit TERM 143' TERM
+
+declare -A KOF_MUT_QUEUE_STATUS=()
+declare -A KOF_MUT_QUEUE_START_MS=()
+start_observed_queue() {
+    local queue=$1
+    shift
+    ( trap - INT; exec ./scripts/observe "$KOF_MUT_CHECK_OBSERVATIONS" "$queue" "$@" ) > "$KOF_MUT_CHECK_OBSERVATIONS/$queue.out" 2>&1 &
+    KOF_MUT_RUNNING_QUEUES[$!]=$queue
+    KOF_MUT_QUEUE_START_MS[$queue]=$(date +%s%3N)
+}
+print_each_queue_as_it_finishes() {
+    local finished status queue
+    while (( ${#KOF_MUT_RUNNING_QUEUES[@]} > 0 )); do
+        finished=""
+        wait -n -p finished "${!KOF_MUT_RUNNING_QUEUES[@]}" && status=0 || status=$?
+        [[ -n "${finished:-}" ]] || continue
+        queue=${KOF_MUT_RUNNING_QUEUES[$finished]}
+        unset "KOF_MUT_RUNNING_QUEUES[$finished]"
+        KOF_MUT_QUEUE_STATUS[$queue]=$status
+        cat -- "$KOF_MUT_CHECK_OBSERVATIONS/$queue.out"
+        echo "queue $queue: exit $status in $(( ($(date +%s%3N) - KOF_MUT_QUEUE_START_MS[$queue]) / 1000 )) s"
     done
-    KOF_MUT_STAGE_PID=""
-    return "$status"
 }
-observed_stage version -- ./bin/kof-mut --version
-observed_stage cli -- kof test src/test/kof/kofmut/Cli.kf
-observed_stage run -- kof test src/test/kof/kofmut/Run.kf
-observed_stage install -- kof test src/test/kof/kofmut/Install.kf
-observed_stage contracts -- ./scripts/launch contracts
+selected_and_total_tests() {
+    sed -n "s/^kof test: tag '$2' (\([0-9]*\) of \([0-9]*\))\$/\1 \2/p" -- "$KOF_MUT_CHECK_OBSERVATIONS/$1.out"
+}
+install_queues_cover_every_test() {
+    local a b total_a total_b
+    read -r a total_a <<< "$(selected_and_total_tests install-a check-install-a)"
+    read -r b total_b <<< "$(selected_and_total_tests install-b check-install-b)"
+    if [[ -z "$a" || -z "$b" || "$total_a" != "$total_b" ]] || (( a + b != total_a )); then
+        echo "check queues do not cover Install.kf: ${a:-?} + ${b:-?} of ${total_a:-?}" >&2
+        return 1
+    fi
+}
+
+start_observed_queue version -- ./bin/kof-mut --version
+print_each_queue_as_it_finishes
+(( KOF_MUT_QUEUE_STATUS[version] == 0 )) || exit "${KOF_MUT_SIGNAL_STATUS:-${KOF_MUT_QUEUE_STATUS[version]}}"
+[[ -z "$KOF_MUT_SIGNAL_STATUS" ]] || exit "$KOF_MUT_SIGNAL_STATUS"
+
+start_observed_queue cli -- kof test src/test/kof/kofmut/Cli.kf
+start_observed_queue run -- kof test src/test/kof/kofmut/Run.kf
+start_observed_queue install-a -- kof test src/test/kof/kofmut/Install.kf --tag check-install-a
+start_observed_queue install-b -- kof test src/test/kof/kofmut/Install.kf --tag check-install-b
+start_observed_queue contracts -- ./scripts/launch contracts
+print_each_queue_as_it_finishes
+
+[[ -z "$KOF_MUT_SIGNAL_STATUS" ]] || exit "$KOF_MUT_SIGNAL_STATUS"
+for queue in cli run install-a install-b contracts; do
+    (( KOF_MUT_QUEUE_STATUS[$queue] == 0 )) || exit "${KOF_MUT_QUEUE_STATUS[$queue]}"
+done
+install_queues_cover_every_test

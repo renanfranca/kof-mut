@@ -139,7 +139,7 @@ List<String> startupEmpty(InstallJourney journey) {
     return command
 }
 
-test "a prepared installed round uses one work JVM after checkout removal", "startup-optimization" {
+test "a prepared installed round uses one work JVM after checkout removal", "startup-optimization", "check-install-b" {
     var journey = installJavaJourney()
     var info = json.decode<InstallKofInfo>(process.run("kof", "info", "--json").stdout)
     var java = new java.io.File(journey.kof).getParentFile().getParent() + "/jdk/bin/java"
@@ -178,7 +178,7 @@ test "a prepared installed round uses one work JVM after checkout removal", "sta
     } finally { assert(process.run("chmod", "-R", "u+w", journey.prefix + "/share").exitCode == 0) }
 }
 
-test "readiness retains both leases and cancellation cannot admit evaluation", "startup-optimization", "startup-transition" {
+test "readiness retains both leases and cancellation cannot admit evaluation", "startup-optimization", "startup-transition", "check-install-b" {
     var journey = startupJourney(true)
     var command = startupEmpty(journey)
     var warm = shell.runWith(command, journey.base, mapOf())
@@ -222,7 +222,7 @@ test "readiness retains both leases and cancellation cannot admit evaluation", "
     installAssertEvidence(retry.exitCode == 3 && !retry.stderr.contains("checking compatibility"), retry.stdout + retry.stderr)
 }
 
-test "a prepared invocation retains the original ninety second preparation deadline", "startup-optimization", "startup-deadline" {
+test "a prepared invocation retains the original ninety second preparation deadline", "startup-optimization", "startup-deadline", "check-install-a" {
     var journey = startupJourney(false)
     var command = startupEmpty(journey)
     var warm = shell.runWith(command, journey.base, mapOf())
@@ -256,7 +256,7 @@ test "a prepared invocation retains the original ninety second preparation deadl
     installAssertEvidence(retry.exitCode == 3, retry.stdout + retry.stderr)
 }
 
-test "confirmed evaluation with budget zero can exceed ninety seconds", "startup-optimization", "startup-unbounded" {
+test "confirmed evaluation with budget zero can exceed ninety seconds", "startup-optimization", "startup-unbounded", "check-install-b" {
     var journey = startupJourney(false)
     var empty = startupEmpty(journey)
     var prepared = shell.runWith(empty, journey.base, mapOf())
@@ -287,7 +287,7 @@ test "confirmed evaluation with budget zero can exceed ninety seconds", "startup
 
 record StartupDuration(Long durationMs)
 
-test "installed commands and evaluation survive removal of the checkout", "install" {
+test "installed commands and evaluation survive removal of the checkout", "install", "check-install-b" {
     var journey = installJourney()
     var copied = process.run("/bin/cp", "-a", "fixtures/detected", journey.base + "/evaluated project")
     installAssertEvidence(copied.exitCode == 0, "copy evaluated fixture: " + copied.stderr)
@@ -314,7 +314,7 @@ test "installed commands and evaluation survive removal of the checkout", "insta
     assert(File(journey.prefix + "/state/kof-mut").isDirectory())
 }
 
-test "uninstall removes owned files after checkout removal and preserves user files and logs", "uninstall" {
+test "uninstall removes owned files after checkout removal and preserves user files and logs", "uninstall", "check-install-b" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -343,7 +343,7 @@ test "uninstall removes owned files after checkout removal and preserves user fi
     assert(File(journey.kof).isFile())
 }
 
-test "failed preparation preserves A and activation of B preserves an active A evaluation", "update" {
+test "failed preparation preserves A and activation of B preserves an active A evaluation", "update", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -408,7 +408,7 @@ test "failed preparation preserves A and activation of B preserves an active A e
     }
 }
 
-test "INT and TERM stop installer children before and after emission and permit recovery", "update" {
+test "INT and TERM stop installer children before and after emission and permit recovery", "update", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -463,7 +463,7 @@ test "INT and TERM stop installer children before and after emission and permit 
     } finally { if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
 }
 
-test "early INT and TERM cancel both unregistered children and children awaiting setsid", "m5-fixes", "update" {
+test "early INT and TERM cancel both unregistered children and children awaiting setsid", "m5-fixes", "update", "check-install-b" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -539,7 +539,7 @@ test "early INT and TERM cancel both unregistered children and children awaiting
     } finally { if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
 }
 
-test "checkout changes after compilation refuse mixed VERSION and code then stable B installs", "m5-fixes", "update", "package" {
+test "checkout changes after compilation refuse mixed VERSION and code then stable B installs", "m5-fixes", "update", "package", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -585,7 +585,7 @@ test "checkout changes after compilation refuse mixed VERSION and code then stab
     assert(installText(journey.prefix + "/share/kof-mut/current/NOTICE") == installText(journey.checkout + "/NOTICE"))
 }
 
-test "a warm compiled image remains bound to the captured checkout inputs", "m5-fixes", "update", "package" {
+test "a warm compiled image remains bound to the captured checkout inputs", "m5-fixes", "update", "package", "check-install-b" {
     var journey = installJavaJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -623,7 +623,7 @@ test "a warm compiled image remains bound to the captured checkout inputs", "m5-
     assert(nowB.exitCode == 0 && nowB.stdout == "KofMut 0.1.0-B B\n")
 }
 
-test "final package validation detects content and file set changes while stable packages reuse compilation", "m5-fixes", "update", "package" {
+test "final package validation detects content and file set changes while stable packages reuse compilation", "m5-fixes", "update", "package", "check-install-a" {
     var journey = installJavaJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -695,7 +695,7 @@ test "final package validation detects content and file set changes while stable
     }
 }
 
-test "checkout changes before bootstrap capture refuse incomplete or stale compilation inputs", "m5-fixes", "update", "package", "package-capture" {
+test "checkout changes before bootstrap capture refuse incomplete or stale compilation inputs", "m5-fixes", "update", "package", "package-capture", "check-install-a" {
     var journey = installJourney()
     var extra = journey.checkout + "/src/main/kof/kofmut/CaptureExtra.kf"
     assert(File(extra).writeText("package kofmut\n\nInt captureExtra() { return 1 }\n"))
@@ -736,7 +736,7 @@ test "checkout changes before bootstrap capture refuse incomplete or stale compi
     }
 }
 
-test "missing incompatible or contradictory installation context cannot authorize publication", "m5-fixes", "install", "package", "package-context" {
+test "missing incompatible or contradictory installation context cannot authorize publication", "m5-fixes", "install", "package", "package-context", "check-install-b" {
     var journey = installJavaJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -763,7 +763,7 @@ test "missing incompatible or contradictory installation context cannot authoriz
     assert(new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath() == previous)
 }
 
-test "damaged entry fails explicitly and reinstall repairs without replacing the old image", "update", "compatibility", "compatibility-integrity", "startup-optimization" {
+test "damaged entry fails explicitly and reinstall repairs without replacing the old image", "update", "compatibility", "compatibility-integrity", "startup-optimization", "check-install-b" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -795,7 +795,7 @@ test "damaged entry fails explicitly and reinstall repairs without replacing the
     assert(installText(damaged) == "damaged class", "modified managed files must be preserved")
 }
 
-test "invalid management inputs and ownership never authorize replacement or removal", "install" {
+test "invalid management inputs and ownership never authorize replacement or removal", "install", "check-install-a" {
     var journey = installJourney()
     assert(Directory(journey.prefix + "/bin").createDirectories())
     assert(File(journey.prefix + "/bin/kof-mut").writeText("foreign command"))
@@ -838,7 +838,7 @@ test "invalid management inputs and ownership never authorize replacement or rem
     assert(installText(receiptPath) == receipt)
 }
 
-test "identical inputs reuse the image and concurrent updates publish complete matching versions", "update" {
+test "identical inputs reuse the image and concurrent updates publish complete matching versions", "update", "check-install-b" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -908,7 +908,7 @@ test "identical inputs reuse the image and concurrent updates publish complete m
     }
 }
 
-test "default prefix requires absolute nonempty HOME while explicit prefixes and help do not", "m5-fixes", "install", "home" {
+test "default prefix requires absolute nonempty HOME while explicit prefixes and help do not", "m5-fixes", "install", "home", "check-install-b" {
     var journey = installJourney()
     var environment = installEnvironment(journey)
     for (var mode in listOf("absent", "empty", "relative")) {
@@ -945,7 +945,7 @@ test "default prefix requires absolute nonempty HOME while explicit prefixes and
     assert(installText(journey.base + "/builds.log") == "build\n")
 }
 
-test "default prefix uses the selected HOME and all installed help forms describe management", "install" {
+test "default prefix uses the selected HOME and all installed help forms describe management", "install", "check-install-b" {
     var journey = installJourney()
     var home = journey.base + "/disposable home"
     assert(Directory(home).createDirectories())
@@ -972,7 +972,7 @@ test "default prefix uses the selected HOME and all installed help forms describ
     assert(source.exitCode == 2, "source mode retains its original command contract")
 }
 
-test "installed entry preserves exact argv cwd environment and exit without checkout", "install", "launch-arguments" {
+test "installed entry preserves exact argv cwd environment and exit without checkout", "install", "launch-arguments", "check-install-b" {
     var journey = installJourney()
     var source = installText("src/test/fixtures/LaunchObservation.kf")
     source = source.replace("main() {", "main() {\n    if (args.length == 1 && (args[0] == \"--version\" || args[0] == \"--help\")) { println(\"KofMut fixture\"); return }")
@@ -1004,7 +1004,7 @@ test "installed entry preserves exact argv cwd environment and exit without chec
     assert(installText(journey.base + "/builds.log") == "build\n", "expected: installText(journey.base + \"/builds.log\") == \"build\\n\"")
 }
 
-test "an unusable selected Kof stops before project commands and valid PATH recovers", "install", "compatibility" {
+test "an unusable selected Kof stops before project commands and valid PATH recovers", "install", "compatibility", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -1038,7 +1038,7 @@ test "an unusable selected Kof stops before project commands and valid PATH reco
     } finally { if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
 }
 
-test "a read only application writes logs to state and refuses log destinations inside inputs", "install" {
+test "a read only application writes logs to state and refuses log destinations inside inputs", "install", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -1076,7 +1076,7 @@ test "a read only application writes logs to state and refuses log destinations 
     } finally { assert(process.run("chmod", "-R", "u+w", release).exitCode == 0) }
 }
 
-test "reinstallation preserves an unowned release directory instead of claiming or blocking it", "uninstall" {
+test "reinstallation preserves an unowned release directory instead of claiming or blocking it", "uninstall", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -1099,7 +1099,7 @@ test "reinstallation preserves an unowned release directory instead of claiming 
     assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0\n")
 }
 
-test "the first installed invocation refuses overlapping logs without creating files in inputs", "install-output", "state-preservation" {
+test "the first installed invocation refuses overlapping logs without creating files in inputs", "install-output", "state-preservation", "check-install-a" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -1129,7 +1129,7 @@ record CompatibilityResult(String kofVersion, String status)
 record CompatibilityReceiptFile(String path, String hash)
 record CompatibilityReceipt(Int schemaVersion, List<CompatibilityReceiptFile> runtimeSources)
 
-test "runtime sources survive checkout and build dependency removal and follow PATH", "compatibility", "startup-optimization" {
+test "runtime sources survive checkout and build dependency removal and follow PATH", "compatibility", "startup-optimization", "check-install-a" {
     var journey = installJourney()
     var info = json.decode<InstallKofInfo>(process.run("kof", "info", "--json").stdout)
     var oldKof = journey.base + "/Kof A"
@@ -1187,7 +1187,7 @@ test "runtime sources survive checkout and build dependency removal and follow P
     assert(!File(release + "/build").exists(), "expected: !File(release + \"/build\").exists()")
 }
 
-test "a read only package rebuilds generated cache and diagnoses changed runtime sources", "compatibility", "compatibility-diagnostics", "compatibility-state-errors", "startup-optimization" {
+test "a read only package rebuilds generated cache and diagnoses changed runtime sources", "compatibility", "compatibility-diagnostics", "compatibility-state-errors", "startup-optimization", "check-install-a" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1258,7 +1258,7 @@ record MigrationLegacy(Int schemaVersion, String prefix, String id, String input
 record MigrationOwned(String id, String receiptHash)
 record MigrationOwner(Int schemaVersion, String prefix, List<MigrationOwned> releases)
 
-test "schemaVersion 1 receipts remain owned unchanged across a schemaVersion 2 update and uninstall", "compatibility" {
+test "schemaVersion 1 receipts remain owned unchanged across a schemaVersion 2 update and uninstall", "compatibility", "check-install-b" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     assert(installed.exitCode == 0, "expected: installed.exitCode == 0")
@@ -1291,7 +1291,7 @@ void installAssertEvidence(Bool condition, String evidence) {
     assert(condition, "behavior failed; see evidence above")
 }
 
-test "uninstall cannot cross the handoff before the application acquires its JVM lease", "compatibility", "compatibility-lease", "startup-optimization" {
+test "uninstall cannot cross the handoff before the application acquires its JVM lease", "compatibility", "compatibility-lease", "startup-optimization", "check-install-a" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1322,7 +1322,7 @@ test "uninstall cannot cross the handoff before the application acquires its JVM
     installAssertEvidence(retry.exitCode == 0, retry.stdout + retry.stderr)
 }
 
-test "compatibility command limits do not truncate the existing installer preparation lifecycle", "compatibility", "install-bootstrap" {
+test "compatibility command limits do not truncate the existing installer preparation lifecycle", "compatibility", "install-bootstrap", "check-install-b" {
     var journey = installJourney()
     var ready = journey.base + "/installer-bootstrap"
     var command = installEnvironment(journey)
@@ -1353,7 +1353,7 @@ String preservationInventory(String root) {
     return result.stdout
 }
 
-test "cold installed state never follows a compatibility link into an external project", "state-preservation" {
+test "cold installed state never follows a compatibility link into an external project", "state-preservation", "check-install-a" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
@@ -1396,7 +1396,7 @@ test "cold installed state never follows a compatibility link into an external p
 }
 
 
-test "warm installed state refuses nested links without damage and recovers by unlinking only", "state-preservation", "startup-optimization" {
+test "warm installed state refuses nested links without damage and recovers by unlinking only", "state-preservation", "startup-optimization", "check-install-b" {
     var journey = installJourney()
     var installed = process.run(journey.checkout + "/install.sh", "--prefix", journey.prefix)
     installAssertEvidence(installed.exitCode == 0, installed.stdout + installed.stderr)
