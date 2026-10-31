@@ -77,7 +77,7 @@ The [JSON reference](docs/report-format.md) owns all fields, states, counts and 
 
 ## Validation and next milestones
 
-For a source checkout, `./scripts/check` runs launcher contracts, mutation cycle tests, installation journeys and frontend assertions against the selected installed Kof. For your evaluated project, use its real configured commands and inspect its own current report. [Usage](docs/usage.md#interpret-and-follow-up) covers follow-up; [CLI](docs/cli.md#timeouts-and-cancellation) covers limits and cancellation.
+For a source checkout, `./scripts/check` runs launcher contracts, mutation cycle tests, installation journeys and frontend assertions against the selected installed Kof. Each run writes `.agent/tmp/check-<id>/` with machine load samples (`samples.tsv`), stage timings (`stages.tsv`) and processes left alive (`leftover.txt`), and prints `check observations: <path>` at the end. The samples record load; they do not prove why a run was slow. For your evaluated project, use its real configured commands and inspect its own current report. [Usage](docs/usage.md#interpret-and-follow-up) covers follow-up; [CLI](docs/cli.md#timeouts-and-cancellation) covers limits and cancellation.
 
 Unsupported syntax, invalid evidence, timeouts and cleanup failures remain explicit limitations or inconclusive/error results. Compatibility approval applies to verified contents, with no literal version allowlist or universal latency guarantee. Sensor integration remains future work.
 

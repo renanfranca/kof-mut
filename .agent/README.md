@@ -4,6 +4,8 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Current entry points
 
+- [Explainable check failures and fewer repeated preparations](validation/check-diagnostics.md): named assertion failures, retained evidence, waits aligned with production bounds, the check observation directory, direct compatibility contracts and fewer real builds; final check passes on 0.6.8 with 0.6.6, with partial criteria listed.
+
 - [Authorized timeout integration acceptance](validation/multiple-invocations-recovery.md#authorized-timeout-integration-acceptance-2026-10-26): current continuation passes public compatibility, the full check and all four fresh real SiFuture scenarios with the authorized deadlines. Historical failures below remain preserved.
 
 - [Recovered implementation and resumed acceptance](validation/multiple-invocations-recovery.md): historical recovery verified and public reader groups passed; compatibility/full check and four real cases were unapproved under the former deadlines, before the authorized continuation above.

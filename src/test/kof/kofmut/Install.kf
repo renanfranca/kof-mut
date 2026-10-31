@@ -119,9 +119,9 @@ InstallJourney startupJourney(Bool readyBarrier) {
     assert(File(java).writeText(installText("src/test/fixtures/startup-java").replace("\"$KOF_MUT_TEST_JAVA\"", "\"" + info.install + "/jdk/bin/java\"")))
     if (readyBarrier) {
         var launcher = journey.checkout + "/scripts/launch"
-        var anchor = "            # The preparation deadline ends here."
+        var anchor = "            end_preparation_deadline_and_start_evaluation_budget"
         var text = installText(launcher)
-        assert(text.contains(anchor))
+        assert(text.contains(anchor), "expected: launcher has the evaluation confirmation point")
         assert(File(launcher).writeText(text.replace(anchor, installText("src/test/fixtures/startup-ready.bash") + "\n" + anchor)))
     }
     var command = installEnvironment(journey)

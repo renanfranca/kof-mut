@@ -1270,7 +1270,7 @@ Safety boundary: this task is limited to authorized, defensive maintenance of th
 - [x] M4 — Check observer
 - [x] M5 — Direct contracts
 - [x] M6 — Fewer real preparations
-- [ ] M7 — Design review, acceptance and documentation
+- [x] M7 — Design review, acceptance and documentation
 
 ## Validation
 
@@ -1444,3 +1444,24 @@ Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m6/
   Together with M5, each control fails both a direct contract and an integration test.
 - Suite: `kof test src/test/kof/kofmut/Cli.kf` on 0.6.8, with 0.6.6 as the alternate and under `scripts/observe`, exited 0 with 34 of 34 in 620 s. Load reached 4.38, no process was left over, and no disposable project was retained. `Install.kf` was not re-run in M6, because no Install test changed; the full check in M7 covers it.
 - R9 real proofs remain, as listed in the guarantee map.
+
+### M7 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m7/`. Record: `.agent/validation/check-diagnostics.md`, linked from `.agent/README.md`.
+
+- Between M6 and M7, at the user's request:
+  - comments were replaced by named functions across the changed and older code;
+  - `AGENTS.md` gained the rule on comments.
+
+  That cleanup broke `minst02`, which used a removed launcher comment as its barrier anchor. The anchor is now the call `end_preparation_deadline_and_start_evaluation_budget`.
+- Design review: no defect, no refactor applied. The reported risks are listed in the record.
+- Documentation: the "Validation" section of `README.md` and `README.pt_BR.md` describes `.agent/tmp/check-<id>/`, `samples.tsv`, `stages.tsv`, `leftover.txt` and the `check observations:` line, with the same paths in both languages.
+- Final acceptance, run once, sequentially:
+  - Kof 0.6.6 first on PATH: `Cli.kf --tag compatibility` 9/9, `Cli.kf --tag launch-arguments` 2/2, `Install.kf --tag compatibility` with 0.6.8 as the alternate 7/7, `Install.kf --tag launch-arguments` 1/1, `./scripts/launch contracts` exit 0.
+  - Kof 0.6.8 first on PATH, with 0.6.6 as the alternate: `./scripts/check` exit 0 in 2631 s, with CLI 34/34, Run 47/47 and Install 31/31.
+  - Observation directory: `.agent/tmp/check-f186ee8e-ed1c-4912-9e82-4dafe10b4690/`, with no leftover process and the highest load1 at 5.25.
+  - `git diff --check` passed. Historical records and the original EXECPLAN sections are unchanged.
+- Gaps, also in the record:
+  - A3 beyond 92 s and the A5 INT path were checked by inspection and by manual runs, not by tests.
+  - Asserts outside the covered tests still lack messages.
+  - The launcher text anchor remains a design risk.
