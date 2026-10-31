@@ -1,6 +1,6 @@
 # KofMut
 
-Read `EXECPLAN.md` before implementation. Continue one milestone at a time and record observed evidence at milestone boundaries.
+For large work, create a temporary `EXECPLAN.md`, continue one milestone at a time and record observed evidence in `.agent/validation/`. Delete the plan once the work is complete; git history keeps it.
 
 - Keep selection, mutation, execution and reporting logic in Kof under `src/main/kof/kofmut/`.
 - Use the official Kof lexer and parser through the installed distribution. Do not implement another grammar or transform raw source with regular expressions.

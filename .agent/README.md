@@ -10,7 +10,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 - [Recovered implementation and resumed acceptance](validation/multiple-invocations-recovery.md): historical recovery verified and public reader groups passed; compatibility/full check and four real cases were unapproved under the former deadlines, before the authorized continuation above.
 - [Concatenated test invocations](validation/multiple-invocations.md): original parser correction and separate expectation/proof audits; public executable and real SiFuture acceptance were pending under preparation deadline failures at that checkpoint.
-- [Root EXECPLAN](../EXECPLAN.md): complete retained plan, dated authorizations, decisions, milestones and observed boundaries. Its older requirements remain historical where explicitly superseded.
+- Root EXECPLAN, archived in git at commit `6764595` (`git show 6764595:EXECPLAN.md`): complete retained plan, dated authorizations, decisions, milestones and observed boundaries. Its older requirements remain historical where explicitly superseded.
 - [M7R discard rule correction](validation/kofmut-m7r.md) and [manifest](validation/kofmut-m7r.sha256): qualifies all-discarded outcomes in both LLM guides and supplements M7 D3 with the unsupported-syntax case. Records reused evidence separately from fresh validation and the preexisting M7 archive hash discrepancy; the original M7 report/manifest remain preserved.
 - [M7 documentation validation](validation/kofmut-m7.md) and [manifest](validation/kofmut-m7.sha256): inventory, canonical document ownership, audience journeys, preservation and new guide acceptance. Read its criterion results and limitations before treating M7 as complete.
 - [M6O validation](validation/kofmut-m6o.md) and [manifest](validation/kofmut-m6o.sha256): latest implementation acceptance preceding M7, prepared evaluation in one work JVM, complete-round measurements, exact runtime delta and limits. Code/tests/scripts are unchanged by M7.
@@ -19,7 +19,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Decisions and pending work
 
-M7 supersedes the older requirement to keep milestone history and incidents in the public READMEs. [Archived public history from `3b959ae`](history/public-docs-before-m7.md) preserves the relocated prose in both languages, including links to original evidence. The complete EXECPLAN remains at the root. Public current concepts, commands and schema remain in `docs/`; internal records do not redefine them.
+M7 supersedes the older requirement to keep milestone history and incidents in the public READMEs. [Archived public history from `3b959ae`](history/public-docs-before-m7.md) preserves the relocated prose in both languages, including links to original evidence. The complete EXECPLAN is archived in git at commit `6764595` (`git show 6764595:EXECPLAN.md`). Public current concepts, commands and schema remain in `docs/`; internal records do not redefine them.
 
 Sensor integration and its S1–S3 acceptance remain future work. The historical real-project 90 second performance target is deferred and unmet. M6O's synthetic measurements do not close that target or promise universal speed/latency. M6L's remaining native-thread/initializer attribution remains partial; distinguish supported findings from unanswered forensic questions in its report.
 
