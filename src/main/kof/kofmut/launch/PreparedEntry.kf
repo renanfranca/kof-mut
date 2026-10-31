@@ -10,7 +10,6 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 
-// Decides whether a prepared index describes exactly this image; contradictory fields or paths are rejected.
 Bool preparedIndexMatches(String index, String root, String kof, String image, String java, String jar, String key, String classpath, CompatibilityWork work) {
     var descriptor = index.split("\0")
     if (descriptor.length != 9 || descriptor[0] != "kofmut-prepared-v1" || descriptor[1] != root || descriptor[2] != kof || descriptor[3] != image || descriptor[4] != java || descriptor[5] != jar || descriptor[6] != key || classpath != image + "/classes:" + jar) { throw "invalid prepared image location" }

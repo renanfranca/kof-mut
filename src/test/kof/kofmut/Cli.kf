@@ -874,8 +874,7 @@ test "INT and TERM discard an emitted candidate and allow retry without cleanup"
             var started = System.nanoTime()
             var child = startCompatibility(invocation, project + "/cancel-" + signal)
             try {
-                // Readiness happens inside compatibility preparation: 90000 ms plus 2000 ms cleanup from invocation start.
-                while (!File(ready).exists() && child.isAlive() && System.nanoTime() - started < 92000000000) { Thread.sleep(20 as Long) }
+                cliAwaitDuringPreparation(ready, child, started)
                 assert(File(ready).exists(), "emitted candidate readiness")
                 var compilerPid = compatibilityRead(ready + ".pid").trim()
                 var candidate = compatibilityRead(ready).trim()
@@ -961,8 +960,7 @@ test "contents changing during preparation cannot publish approval even with pre
 
     var completed = false
     try {
-        // The whole observed preparation is bounded by 90000 ms plus 2000 ms cleanup from invocation start.
-        while (!File(ready).exists() && child.isAlive() && System.nanoTime() - started < 92000000000) { Thread.sleep(20 as Long) }
+        cliAwaitDuringPreparation(ready, child, started)
         assert(File(ready).exists(), "expected: File(ready).exists()")
         var source = project + "/src/main/kof/kofmut/Main.kf"
         assert(process.run("/bin/cp", "-p", source, project + "/timestamp").exitCode == 0, "expected: process.run(\"/bin/cp\", \"-p\", source, project + \"/timestamp\").exitCode == 0")
@@ -970,10 +968,10 @@ test "contents changing during preparation cannot publish approval even with pre
         assert(process.run("/usr/bin/touch", "-r", project + "/timestamp", source).exitCode == 0, "expected: process.run(\"/usr/bin/touch\", \"-r\", project + \"/timestamp\", source).exitCode == 0")
         assert(new java.io.File(source).lastModified() == new java.io.File(project + "/timestamp").lastModified(), "expected: new java.io.File(source).lastModified() == new java.io.File(project + \"/timestamp\").lastModified()")
         assert(File(ready + ".continue").writeText("go"), "expected: File(ready + \".continue\").writeText(\"go\")")
-        var remaining = 92000 - (System.nanoTime() - started) / 1000000
+        var remaining = cliPreparationDeadlineWithCleanupMs() - cliElapsedMs(started)
         if (remaining < 0) { remaining = 0 }
         var finished = child.waitFor(remaining, TimeUnit.MILLISECONDS)
-        cliAssertEvidence(finished, "integrity preparation did not finish within 92000 ms of invocation start; elapsed " + (System.nanoTime() - started) / 1000000 + " ms")
+        cliAssertEvidence(finished, "integrity preparation did not finish within " + cliPreparationDeadlineWithCleanupMs() + " ms of invocation start; elapsed " + cliElapsedMs(started) + " ms")
         assert(child.exitValue() == 2, "expected: child.exitValue() == 2")
         var error = compatibilityRead(project + "/integrity.stderr")
         assert(error.contains("preparation integrity failed"), "expected: error.contains(\"preparation integrity failed\")")
@@ -1059,6 +1057,14 @@ test "JDK contents invalidate approval with the same declared version and timest
         }
         completed = true
     } finally { cliCleanup(project, completed) }
+}
+
+Long cliPreparationDeadlineWithCleanupMs() { return 92000 as Long }
+
+Long cliElapsedMs(Long started) { return (System.nanoTime() - started) / 1000000 }
+
+void cliAwaitDuringPreparation(String path, Process child, Long started) {
+    while (!File(path).exists() && child.isAlive() && cliElapsedMs(started) < cliPreparationDeadlineWithCleanupMs()) { Thread.sleep(20 as Long) }
 }
 
 void cliAssertEvidence(Bool condition, String evidence) {

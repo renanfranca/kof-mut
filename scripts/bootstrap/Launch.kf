@@ -68,10 +68,9 @@ void compileSources(String root, String kof, String jar, List<SourceSnapshot> so
     for (var source in sources) {
         var relative = "kofmut/Main.kf"
         var prefix = root + "/src/main/kof/"
-        // Contract sources in the launch package keep their package path; the contracts entry becomes kofmut/Main.kf.
-        var contracts = root + "/src/test/kof/kofmut/launch/"
+        var launchContracts = root + "/src/test/kof/kofmut/launch/"
         if (source.path.startsWith(prefix)) { relative = source.path.substring(prefix.length()) }
-        else if (source.path.startsWith(contracts)) { relative = "kofmut/launch/" + source.path.substring(contracts.length()) }
+        else if (source.path.startsWith(launchContracts)) { relative = "kofmut/launch/" + source.path.substring(launchContracts.length()) }
         var target = new java.io.File(temporary + "/sources/" + relative)
         if (!target.getParentFile().mkdirs() && !target.getParentFile().isDirectory()) { throw "cannot create source directory" }
         var output = new FileOutputStream(target)

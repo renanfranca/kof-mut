@@ -3,9 +3,6 @@ package kofmut.launch
 import java.lang.System
 import java.nio.file.Files
 
-// Direct contracts for the launcher's content identity, approval and descriptor decisions.
-// Fixtures are small synthetic files in a temporary directory; nothing is written under build/cache or state.
-
 class CompatibilityContracts {
     static void run() {
         var base = Files.createTempDirectory("kofmut-contracts-").toString()
@@ -53,8 +50,7 @@ void contractWrite(String path, String text) {
     assert(File(path).writeText(text), "contract fixture written")
 }
 
-// Rewrites bytes while keeping the modification time, so only content can reveal the change.
-void contractRewrite(String path, String text) {
+void contractRewriteKeepingTimestamp(String path, String text) {
     var file = new java.io.File(path).toPath()
     var time = Files.getLastModifiedTime(file)
     contractWrite(path, text)
@@ -69,10 +65,10 @@ void contentIdentity(CompatibilityFixture fixture) {
         var bytes = File(path).readText()
         assert(bytes != null, "expected: identity input readable")
         if (bytes != null) {
-            contractRewrite(path, bytes.substring(0, bytes.length() - 1) + "b")
+            contractRewriteKeepingTimestamp(path, bytes.substring(0, bytes.length() - 1) + "b")
             if (fixture.identity() == original) { println("identity ignored a content change: " + path) }
             assert(fixture.identity() != original, "expected: same-length content change with version and timestamp preserved changes identity")
-            contractRewrite(path, bytes)
+            contractRewriteKeepingTimestamp(path, bytes)
             assert(fixture.identity() == original, "expected: restored content restores identity")
         }
     }
@@ -112,9 +108,9 @@ void approvalDecision(CompatibilityFixture fixture) {
     assert(!compatibilityApproved(fixture.image, fixture.identity(), "0.6.6", fixture.inputs(), fixture.work), "expected: another Kof version is not approved")
 
     var source = fixture.root + "/src/main/kof/kofmut/Main.kf"
-    contractRewrite(source, "source-b")
+    contractRewriteKeepingTimestamp(source, "source-b")
     var changed = fixture.inputs()
-    contractRewrite(source, "source-a")
+    contractRewriteKeepingTimestamp(source, "source-a")
     assert(!compatibilityApproved(fixture.image, fixture.identity(), fixture.installation.kof, changed, fixture.work), "expected: approval recorded for other input content is not approved")
 
     assert(File(fixture.image + "/approval.json").delete(), "approval removed")
@@ -130,7 +126,7 @@ void approvalDecision(CompatibilityFixture fixture) {
     assert(!contractApproved(fixture), "expected: altered prepared checksums are not approved")
 
     contractImage(fixture)
-    contractRewrite(fixture.image + "/classes/kofmut/Other.class", "other-b")
+    contractRewriteKeepingTimestamp(fixture.image + "/classes/kofmut/Other.class", "other-b")
     assert(!contractApproved(fixture), "expected: altered class is not approved")
     contractImage(fixture)
     assert(File(fixture.image + "/classes/kofmut/Other.class").delete(), "class removed")

@@ -33,11 +33,15 @@ void installReady(String path, Process child) {
     installAssertEvidence(File(path).exists(), "readiness missing: " + path)
 }
 
-// Evaluation readiness follows compatibility preparation: 90000 ms plus 2000 ms shared cleanup (Compatibility.kf), measured from invocation start.
+Long installPreparationDeadlineWithCleanupMs() { return 92000 as Long }
+
 void installEvaluationReady(String path, Process child, Long started) {
-    while (!File(path).exists() && child.isAlive() && (System.nanoTime() - started) / 1000000 < 92000) { Thread.sleep(20 as Long) }
     var elapsed = (System.nanoTime() - started) / 1000000
-    installAssertEvidence(File(path).exists(), "evaluation readiness missing after " + elapsed + " ms (bound 92000 ms from invocation start): " + path)
+    while (!File(path).exists() && child.isAlive() && elapsed < installPreparationDeadlineWithCleanupMs()) {
+        Thread.sleep(20 as Long)
+        elapsed = (System.nanoTime() - started) / 1000000
+    }
+    installAssertEvidence(File(path).exists(), "evaluation readiness missing after " + elapsed + " ms (bound " + installPreparationDeadlineWithCleanupMs() + " ms from invocation start): " + path)
 }
 
 Process startInstalledEvaluation(InstallJourney journey, String label) {
