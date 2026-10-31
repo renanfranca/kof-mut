@@ -246,6 +246,16 @@ String compatibilityChecksums(List<CompatibilityFile> classes) {
     return text
 }
 
+String compatibilityIdentity(CompatibilityInstallation installation, List<CompatibilityFile> inputs) {
+    return crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+}
+
+void compatibilityRecordApproval(String candidate, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
+    var approval = CompatibilityApproval(1, identity, version, inputs, compatibilityClassInventory(candidate, work))
+    if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
+    if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
+}
+
 Bool compatibilityApproved(String image, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
     try {
         var approval = json.decode<CompatibilityApproval>(compatibilityText(image + "/approval.json"))
@@ -267,7 +277,7 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
     CompatibilityState.guard(state)
     work.active()
     var inputs = compatibilityInputs(root, kof, installation, work)
-    var identity = crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+    var identity = compatibilityIdentity(installation, inputs)
     compatibilityDirectory(state + "/images")
     compatibilityDirectory(state + "/locks")
     compatibilityDirectory(state + "/approved")
@@ -307,9 +317,7 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
                 }
                 work.phase("integrity")
                 if (json.encode(compatibilityInputs(root, kof, installation, work)) != json.encode(inputs)) { throw "components changed during preparation; retry" }
-                var approval = CompatibilityApproval(1, identity, installation.kof, inputs, compatibilityClassInventory(candidate, work))
-                if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
-                if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
+                compatibilityRecordApproval(candidate, identity, installation.kof, inputs, work)
                 work.lock.lock()
                 try {
                     work.active()

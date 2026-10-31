@@ -2,8 +2,31 @@
 set -euo pipefail
 KOF_MUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$KOF_MUT_ROOT"
-./bin/kof-mut --version
-kof test src/test/kof/kofmut/Cli.kf
-kof test src/test/kof/kofmut/Run.kf
-kof test src/test/kof/kofmut/Install.kf
-exec ./scripts/launch contracts
+IFS= read -r KOF_MUT_CHECK_ID < /proc/sys/kernel/random/uuid
+KOF_MUT_CHECK_OBSERVATIONS="$KOF_MUT_ROOT/.agent/tmp/check-$KOF_MUT_CHECK_ID"
+mkdir -p -- "$KOF_MUT_CHECK_OBSERVATIONS"
+trap 'echo "check observations: $KOF_MUT_CHECK_OBSERVATIONS"' EXIT
+KOF_MUT_STAGE_PID=""
+# A signal reaches the running stage, whose observer returns 130 or 143; between stages the check stops directly.
+interrupted() {
+    if [[ -n "$KOF_MUT_STAGE_PID" ]]; then kill -"$1" -- "$KOF_MUT_STAGE_PID" 2>/dev/null || true; else exit "$2"; fi
+}
+trap 'interrupted INT 130' INT
+trap 'interrupted TERM 143' TERM
+# Each stage runs under the observer, which returns the stage's own exit status.
+stage() {
+    ( trap - INT; exec ./scripts/observe "$KOF_MUT_CHECK_OBSERVATIONS" "$@" ) &
+    KOF_MUT_STAGE_PID=$!
+    local status=""
+    while [[ -z "$status" ]]; do
+        wait "$KOF_MUT_STAGE_PID" && status=0 || status=$?
+        if kill -0 "$KOF_MUT_STAGE_PID" 2>/dev/null; then status=""; fi
+    done
+    KOF_MUT_STAGE_PID=""
+    return "$status"
+}
+stage version -- ./bin/kof-mut --version
+stage cli -- kof test src/test/kof/kofmut/Cli.kf
+stage run -- kof test src/test/kof/kofmut/Run.kf
+stage install -- kof test src/test/kof/kofmut/Install.kf
+stage contracts -- ./scripts/launch contracts

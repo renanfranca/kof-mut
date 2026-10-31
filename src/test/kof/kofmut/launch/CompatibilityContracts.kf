@@ -1,0 +1,196 @@
+package kofmut.launch
+
+import java.lang.System
+import java.nio.file.Files
+
+// Direct contracts for the launcher's content identity, approval and descriptor decisions.
+// Fixtures are small synthetic files in a temporary directory; nothing is written under build/cache or state.
+
+class CompatibilityContracts {
+    static void run() {
+        var base = Files.createTempDirectory("kofmut-contracts-").toString()
+        println("compatibility contract fixture: " + base)
+        var fixture = new CompatibilityFixture(base)
+        contentIdentity(fixture)
+        approvalDecision(fixture)
+        preparedDescriptor(fixture)
+        installationDelivery(fixture)
+        assert(Directory(base).delete(), "contract fixture removed")
+    }
+}
+
+class CompatibilityFixture {
+    String root
+    String install
+    String kof
+    String image
+    CompatibilityInstallation installation
+    CompatibilityWork work
+
+    constructor(String base) {
+        root = base + "/checkout"
+        install = base + "/kof"
+        kof = install + "/bin/kof"
+        image = base + "/image"
+        contractWrite(kof, "launcher-a")
+        contractWrite(install + "/lib/kof.jar", "jar-a")
+        contractWrite(install + "/jdk/bin/java", "java-a")
+        contractWrite(install + "/jdk/lib/modules", "modules-a")
+        contractWrite(root + "/src/main/kof/kofmut/Main.kf", "source-a")
+        for (var relative in listOf("VERSION", "kof.toml", "scripts/launch", "scripts/bootstrap/Launch.kf", "scripts/installed-launch", "scripts/supervise")) { contractWrite(root + "/" + relative, relative + "-a") }
+        installation = CompatibilityInstallation("0.6.8", "0.6.8", "0.6.8", "0.6.8", "linux", true, new java.io.File(install).getCanonicalPath())
+        work = new CompatibilityWork(System.currentTimeMillis(), base)
+    }
+
+    List<CompatibilityFile> inputs() { return compatibilityInputs(root, kof, installation, work) }
+
+    String identity() { return compatibilityIdentity(installation, inputs()) }
+}
+
+void contractWrite(String path, String text) {
+    var parent = new java.io.File(path).getParent()
+    if (!File(parent).isDirectory()) { assert(Directory(parent).createDirectories(), "contract fixture directory created") }
+    assert(File(path).writeText(text), "contract fixture written")
+}
+
+// Rewrites bytes while keeping the modification time, so only content can reveal the change.
+void contractRewrite(String path, String text) {
+    var file = new java.io.File(path).toPath()
+    var time = Files.getLastModifiedTime(file)
+    contractWrite(path, text)
+    var kept = Files.setLastModifiedTime(file, time)
+}
+
+void contentIdentity(CompatibilityFixture fixture) {
+    var original = fixture.identity()
+    assert(fixture.identity() == original, "expected: identity is deterministic for unchanged content")
+    var changes = listOf(fixture.root + "/src/main/kof/kofmut/Main.kf", fixture.root + "/scripts/launch", fixture.root + "/scripts/supervise", fixture.install + "/lib/kof.jar", fixture.install + "/jdk/lib/modules", fixture.kof)
+    for (var path in changes) {
+        var bytes = File(path).readText()
+        assert(bytes != null, "expected: identity input readable")
+        if (bytes != null) {
+            contractRewrite(path, bytes.substring(0, bytes.length() - 1) + "b")
+            if (fixture.identity() == original) { println("identity ignored a content change: " + path) }
+            assert(fixture.identity() != original, "expected: same-length content change with version and timestamp preserved changes identity")
+            contractRewrite(path, bytes)
+            assert(fixture.identity() == original, "expected: restored content restores identity")
+        }
+    }
+    var added = fixture.root + "/src/main/kof/kofmut/Added.kf"
+    contractWrite(added, "source-b")
+    assert(fixture.identity() != original, "expected: added source changes identity")
+    assert(File(added).delete(), "added source removed")
+    assert(fixture.identity() == original, "expected: removing the added source restores identity")
+    var extra = fixture.install + "/jdk/lib/extra"
+    contractWrite(extra, "extra-a")
+    assert(fixture.identity() != original, "expected: added JDK file changes identity")
+    assert(File(extra).delete(), "added JDK file removed")
+    var source = fixture.root + "/src/main/kof/kofmut/Main.kf"
+    assert(File(source).delete(), "source removed")
+    assert(fixture.identity() != original, "expected: removed source changes identity")
+    contractWrite(source, "source-a")
+    assert(fixture.identity() == original, "expected: identity depends on content, not on file times")
+    println("PASS compatibility: identity follows sources, launchers, jar and JDK content")
+}
+
+void contractImage(CompatibilityFixture fixture) {
+    if (File(fixture.image).exists()) { assert(Directory(fixture.image).delete(), "previous image removed") }
+    contractWrite(fixture.image + "/classes/kofmut/CompatibilityProbe.class", "probe-a")
+    contractWrite(fixture.image + "/classes/Default/Main.class", "main-a")
+    contractWrite(fixture.image + "/classes/kofmut/Other.class", "other-a")
+    compatibilityRecordApproval(fixture.image, fixture.identity(), fixture.installation.kof, fixture.inputs(), fixture.work)
+}
+
+Bool contractApproved(CompatibilityFixture fixture) {
+    return compatibilityApproved(fixture.image, fixture.identity(), fixture.installation.kof, fixture.inputs(), fixture.work)
+}
+
+void approvalDecision(CompatibilityFixture fixture) {
+    contractImage(fixture)
+    assert(contractApproved(fixture), "expected: recorded approval with matching identity, inputs and classes is approved")
+    assert(!compatibilityApproved(fixture.image, "0" + fixture.identity().substring(1), fixture.installation.kof, fixture.inputs(), fixture.work), "expected: another identity is not approved")
+    assert(!compatibilityApproved(fixture.image, fixture.identity(), "0.6.6", fixture.inputs(), fixture.work), "expected: another Kof version is not approved")
+
+    var source = fixture.root + "/src/main/kof/kofmut/Main.kf"
+    contractRewrite(source, "source-b")
+    var changed = fixture.inputs()
+    contractRewrite(source, "source-a")
+    assert(!compatibilityApproved(fixture.image, fixture.identity(), fixture.installation.kof, changed, fixture.work), "expected: approval recorded for other input content is not approved")
+
+    assert(File(fixture.image + "/approval.json").delete(), "approval removed")
+    assert(!contractApproved(fixture), "expected: missing approval evidence is not approved")
+    contractImage(fixture)
+    contractWrite(fixture.image + "/approval.json", "{")
+    assert(!contractApproved(fixture), "expected: invalid approval evidence is not approved")
+    contractImage(fixture)
+    contractWrite(fixture.image + "/approval.json", json.encode(CompatibilityApproval(2, fixture.identity(), fixture.installation.kof, fixture.inputs(), compatibilityClassInventory(fixture.image, fixture.work))))
+    assert(!contractApproved(fixture), "expected: unknown approval schema is not approved")
+    contractImage(fixture)
+    contractWrite(fixture.image + "/prepared.checksums", "")
+    assert(!contractApproved(fixture), "expected: altered prepared checksums are not approved")
+
+    contractImage(fixture)
+    contractRewrite(fixture.image + "/classes/kofmut/Other.class", "other-b")
+    assert(!contractApproved(fixture), "expected: altered class is not approved")
+    contractImage(fixture)
+    assert(File(fixture.image + "/classes/kofmut/Other.class").delete(), "class removed")
+    assert(!contractApproved(fixture), "expected: incomplete class inventory is not approved")
+    contractImage(fixture)
+    contractWrite(fixture.image + "/classes/kofmut/Extra.class", "extra-a")
+    assert(!contractApproved(fixture), "expected: extra class is not approved")
+    contractImage(fixture)
+    assert(contractApproved(fixture), "expected: rebuilt fixture is approved again")
+    println("PASS compatibility: approval requires identity, valid evidence and the exact class inventory")
+}
+
+void preparedDescriptor(CompatibilityFixture fixture) {
+    contractImage(fixture)
+    var java = fixture.install + "/jdk/bin/java"
+    var jar = fixture.install + "/lib/kof.jar"
+    var key = crypto.sha256("contract key")
+    var fields = listOf("kofmut-prepared-v1", fixture.root, fixture.kof, fixture.image, java, jar, key, compatibilityHash(fixture.image + "/prepared.checksums", fixture.work), compatibilityHash(fixture.image + "/approval.json", fixture.work))
+    var classpath = fixture.image + "/classes:" + jar
+    assert(preparedIndexMatches(contractDescriptor(fields), fixture.root, fixture.kof, fixture.image, java, jar, key, classpath, fixture.work), "expected: consistent prepared index matches")
+    for (var i = 0; i < 7; i++) {
+        var contradictory = listOf<String>()
+        for (var field in fields) { contradictory.add(field) }
+        contradictory.set(i, fields.get(i) + "-other")
+        assert(contractRejected(contractDescriptor(contradictory), fixture, java, jar, key, classpath), "expected: contradictory prepared index field is rejected")
+    }
+    assert(contractRejected(contractDescriptor(fields), fixture, java, jar, key, fixture.root + "/classes:" + jar), "expected: incompatible class path is rejected")
+    var truncated = contractDescriptor(fields)
+    assert(contractRejected(truncated.substring(0, truncated.indexOf(fixture.image)), fixture, java, jar, key, classpath), "expected: truncated prepared index is rejected")
+    contractWrite(fixture.image + "/prepared.checksums", "")
+    assert(!preparedIndexMatches(contractDescriptor(fields), fixture.root, fixture.kof, fixture.image, java, jar, key, classpath, fixture.work), "expected: prepared index for other checksums does not match")
+    println("PASS compatibility: prepared descriptors reject contradictory fields, paths and truncation")
+}
+
+String contractDescriptor(List<String> fields) {
+    var text = ""
+    for (var field in fields) { text = text + field + "\0" }
+    return text
+}
+
+Bool contractRejected(String index, CompatibilityFixture fixture, String java, String jar, String key, String classpath) {
+    try {
+        var matched = preparedIndexMatches(index, fixture.root, fixture.kof, fixture.image, java, jar, key, classpath, fixture.work)
+        return false
+    } catch (String error) { return error == "invalid prepared image location" }
+}
+
+void installationDelivery(CompatibilityFixture fixture) {
+    var context = fixture.image + "/context"
+    var source = fixture.root + "/src/main/kof/kofmut/Main.kf"
+    var hash = compatibilityHash(source, fixture.work)
+    var request = "kofmut-request-v2\0install\0" + fixture.root + "\0" + fixture.kof + "\0{}\0" + fixture.kof + "\0" + compatibilityHash(fixture.kof, fixture.work) + "\0" + source + "\0" + hash + "\0"
+    var inventory = "kofmut-package-v1\0src/main/kof/kofmut/Main.kf\0" + hash + "\0"
+    contractWrite(context + "/package", inventory)
+    assert(readCheckoutManifest(context, fixture.root, request).files.size == 1, "expected: complete installation context is accepted")
+    for (var damaged in listOf(inventory.substring(0, inventory.length() - 1), inventory.substring(0, inventory.indexOf(hash)), inventory + "/absolute\0" + hash + "\0", inventory + "src/main/kof/kofmut/Main.kf\0" + hash + "\0")) {
+        contractWrite(context + "/package", damaged)
+        var rejected = false
+        try { var manifest = readCheckoutManifest(context, fixture.root, request) } catch (String error) { rejected = error.startsWith("invalid installation context") }
+        assert(rejected, "expected: truncated or invalid installation context is rejected")
+    }
+    println("PASS compatibility: installation delivery rejects truncated and invalid inventories")
+}

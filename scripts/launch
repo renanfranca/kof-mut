@@ -40,7 +40,7 @@ KOF_MUT_INPUTS=("$KOF_MUT_KOF" "$KOF_MUT_ROOT/scripts/bootstrap/Launch.kf" "$KOF
 if [[ ! -f "$KOF_MUT_ROOT/launch.bin" ]]; then KOF_MUT_INPUTS+=("$KOF_MUT_ROOT/bin/kof-mut" "$KOF_MUT_ROOT/scripts/check"); fi
 find "$KOF_MUT_ROOT/src/main/kof" -type f -name '*.kf' -print0 > "$KOF_MUT_CONTEXT/sources"
 if [[ "$KOF_MUT_MODE" == contracts ]]; then
-    printf '%s\0' "$KOF_MUT_ROOT/src/test/kof/kofmut/FrontendContracts.kf" >> "$KOF_MUT_CONTEXT/sources"
+    printf '%s\0' "$KOF_MUT_ROOT/src/test/kof/kofmut/FrontendContracts.kf" "$KOF_MUT_ROOT/src/test/kof/kofmut/launch/CompatibilityContracts.kf" >> "$KOF_MUT_CONTEXT/sources"
 fi
 LC_ALL=C sort -z "$KOF_MUT_CONTEXT/sources" -o "$KOF_MUT_CONTEXT/sources"
 while IFS= read -r -d '' KOF_MUT_SOURCE; do

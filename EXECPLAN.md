@@ -1083,3 +1083,331 @@ One standalone `./scripts/launch contracts` then passes on 0.6.8, exit 0, 15 fro
 Final audit: all 98 frozen execution/test/fixture/public-document inputs retain measured bytes/modes; only the two specified Object conversions change production, and tracked test bodies change only by tags. All 138 other initial tracked files, all 42 historical validation files and the original EXECPLAN prefix remain intact. Both real distributions retain all inventoried files/modes/links (664/665 entries), and local researched Kof HEAD/status/source hashes remain unchanged. `git diff --check` returns 0. Details, exact commands, source/jar hashes, raw exits, partial evidence limits and failed scenario names are in `.agent/validation/kof-068.md`; `.agent/validation/kof-068.sha256` seals delivery and raw-evidence inventory.
 
 The SEM021 startup adaptation is delivered, with narrow compilation/reflection and focused public-path evidence. **Full compatibility acceptance remains pending**. Further diagnosis of preparation/readiness/verification failures is needed; do not infer host-load causality or widen limits automatically. The user's real installation, other repositories, ship tests/scope/acceptance, Kof installations, commits, worktrees, subagents, remotes and publications were not changed. The complete ship mutation count on 0.6.8 remains separate and pending.
+
+# Explainable check failures and fewer repeated preparations (2026-10-30)
+
+## Purpose and success
+
+Make `./scripts/check` failures explain themselves, record machine load during every check, and stop paying full real preparations in tests whose guarantee does not need them, without losing any guarantee. The normative contract is `.agent/specifications/check-diagnostics-and-repeated-preparation.md` (requirements R1–R9, acceptance A1–A10, stop rule, exclusions). This section plans its execution and does not redefine it.
+
+Success is observable when:
+
+- every assertion in the named integration tests reports which condition failed;
+- a failing test leaves its directory and prints its path;
+- no test wait is shorter than the production bound it observes;
+- every `./scripts/check` prints a `.agent/tmp/check-<id>/` observation directory and keeps its old exit status;
+- each converted test performs fewer real `kof build` calls than its measured baseline;
+- negative controls are caught; and
+- `./scripts/check` passes on Kof 0.6.8 with 0.6.6 as the alternate, and the focused 0.6.6 commands pass.
+
+## Context and limits
+
+Base: branch `multiple-test-invocations`, HEAD `5aeb0c5`, clean except the untracked specification. Authorized by the user on 2026-10-30, after the specification and its behavioral acceptance were approved.
+
+Measured baseline, to cite and not re-derive:
+
+- `.agent/validation/kof-068.md`: the 2026-10-30 check, where CLI took 2521 s with 24/8 and later stages were not reached.
+- `.agent/tmp/measure-d847c0f6-a4d9-4ada-972d-dca5a9b211b1/results/results.tsv`: per-test duration and Kof call counts, each test run alone. Its `mcli28` and `mrun08` rows are mislabeled as failures; both passed.
+- `.agent/tmp/suite-72515805-f3e1-44f6-897f-bcaf9123eed7/results/`: the whole CLI suite in one invocation, 665 s, only `mcli27` failing.
+
+Kof distributions: `/home/renanfranca/.local/share/kof/kof-0.6.8-linux-x86_64/bin` (default on PATH) and `/home/renanfranca/.local/share/kof/kof-0.6.6-linux-x86_64/bin`. Local Kof sources are at `/home/renanfranca/projects/kof` (VERSION 0.6.8). Consult them for language and test-harness behavior: `kof test` buffers per-file output, `--tag` filters before execution, and assert messages must be literals on 0.6.6.
+
+Limits:
+
+- Production deadlines, public CLI, JSON, exits and the approval policy MUST NOT change.
+- No retries, reduced profile or parallel suites.
+- No changes to Kof, the real installation or other repositories. No commits, worktrees, subagents, remotes or publication.
+- Logs go to `.agent/tmp/check-diagnostics/<UUID>/`.
+- Stop rule: if a failure is caused by production behavior, stop that work, report the retained evidence and ask the user before any production fix.
+
+Workflow per milestone: strict behavior TDD (a failing behavior test first, the full relevant suite every cycle, a public-path checkpoint at least every two cycles), then the milestone validation below. A design review of the changed files happens once, in M7, after all behavior is green.
+
+Safety boundary: this task is limited to authorized, defensive maintenance of this repository.
+
+## Decisions
+
+- **Direct contracts live in a new `src/test/kof/kofmut/CompatibilityContracts.kf`,** made only of functions and called from the single `main()` in `FrontendContracts.kf`. `scripts/launch` adds the new file to the `contracts` source list (today it adds only `FrontendContracts.kf`).
+  - *Alternative considered:* growing `FrontendContracts.kf` without touching the launcher.
+  - *Rationale:* separate behavior homes, compatibility versus frontend.
+  - *Consequence:* `scripts/launch` is a bootstrap identity input, so existing bootstrap caches rebuild once. This is no contract change and is recorded in validation.
+- **The observer is a shell script `scripts/observe`.** Its usage is `scripts/observe <dir> -- <command…>`: it runs the command, samples every 2 s, finalizes, and exits with the command's status. `scripts/check` wraps each stage through it and no longer uses `exec` for the last stage.
+  - *Rationale:* the observer is development tooling, not product logic, and it follows the existing Bash scripts.
+  - *Consequence:* its behavioral test lives in `Cli.kf` with tag `check-observer`, because it is observed through a public script invocation.
+  - *Recovery:* removing the wrapper restores the old check.
+- **Single tests run only in disposable copies.** To run one test alone, unique tags are added in a disposable copy only, as in `measure-d847c0f6`. Versioned tests receive no measurement tags.
+- **Plan location.** This section is appended to the root `EXECPLAN.md`, following the repository convention of dated top-level sections. Earlier sections remain unchanged.
+
+## Risks
+
+- **Host load.** The measured results vary severalfold with host load. A slow or failed final run is recorded with its observer data and is not retried to obtain a pass.
+- **Identity change from extractions.** Extracting decisions for direct contracts changes the runtime source identity, which invalidates approvals and requires updated installed packages. Record it, and revise `docs/installation.md` and `docs/installation.pt_BR.md` if their guidance no longer holds.
+- **Converted tests that look green.** A converted test could pass under refusal for the wrong reason, for example a refusal on an unrelated stage. Mitigation: assert exit 2, empty stdout, the refusal in stderr and the unchanged build log, then check reuse after the restore (spec R6).
+- **Loss of a guarantee.** Mitigation: the guarantee map plus negative controls, which must be caught by a direct contract and by at least one integration.
+- **Long validation.** A full check takes about 45–70 min per Kof selection on an idle host. Run suites sequentially, with no other heavy jobs.
+
+## Milestones
+
+### M1 — Baseline and reproduction
+
+- **Produces:** recorded identities (HEAD, `kof info --json` for both distributions, jar SHA-256), a hash inventory of tracked inputs, and a reproduction of the current failures.
+- **Steps:**
+  - Reproduce `minst08` and `minst21` alone, each in a disposable copy with a unique tag, on 0.6.8. Expected: `readiness missing` (red evidence for R3).
+  - Reproduce the `mcli27` bare assertion only if it recurs within one run. Do not repeat runs to sample a failure.
+- **Validation:** recorded commands and exits under `.agent/tmp/check-diagnostics/<UUID>/m1/`.
+- **Acceptance:** identities and red evidence are recorded. No tracked file is changed.
+
+### M2 — Failures name their condition and keep evidence (R1, R2, R4)
+
+- **Edits:**
+  - `src/test/kof/kofmut/Cli.kf` and `src/test/kof/kofmut/Install.kf`:
+    - literal messages on every assert in the tests listed in spec R1;
+    - calculated diagnostics through the existing `cliAssertEvidence`/`installAssertEvidence`;
+    - one shared retention helper per suite, so that a failed test, by assertion or by exception, keeps its disposable directory and prints its absolute path, while a passing test deletes it;
+    - barrier review of `Thread.sleep` in those tests (the `mcli27` 100 ms sleep included).
+  - Conditions MUST remain unchanged.
+- **TDD entry:** in a disposable copy, invert one `mcli27` condition and observe the bare `assertion failed` and the deleted directory (red). After the change, the same control shows the named message and the retained path (green).
+- **Validation:**
+  - `kof test src/test/kof/kofmut/Cli.kf --tag compatibility` on 0.6.6, which proves the literal messages compile there;
+  - the same command on 0.6.8;
+  - the negative control, as a red then green output pair.
+- **Acceptance:** A1, A2 and A4 evidence is recorded, including the audit list of asserts and sleeps.
+
+### M3 — Waits honor production bounds (R3)
+
+- **Edits:**
+  - `Install.kf` `installReady`: measure from the invocation start (callers pass the start) and wait up to 92000 ms, with the elapsed time in the failure message.
+  - `Cli.kf`: the integrity test waits use 92000 ms from spawn; the `mcli27` readiness uses 92000 ms from spawn. Its 5000 ms termination wait is checked against the 2000 ms shared cleanup bound (`Compatibility.kf:100`) and kept or changed only with the derivation recorded.
+  - Review every other wait in the R1 tests. Follow the pattern of the timeout test (`Cli.kf`, "a preparation command timeout…").
+- **Validation:**
+  - `minst08` and `minst21` alone (tagged disposable copies), each pass;
+  - `kof test src/test/kof/kofmut/Install.kf --tag compatibility` on 0.6.8;
+  - `git diff` on the production deadline lines (`Compatibility.kf:87,100,146-148`, `CompatibilityProbe.kf:47`, `scripts/bootstrap/Launch.kf:79-82`) must be empty.
+- **Acceptance:**
+  - A3: a wait table (before → after → source line) and green isolated runs.
+  - If `minst08`/`minst21` still fail with the corrected bound, apply the stop rule and record the result as pending.
+
+### M4 — Check observer (R5)
+
+- **Edits:**
+  - New `scripts/observe`. It writes:
+    - `samples.tsv`: monotonic and wall time, `/proc/loadavg`, and the count, CPU, RSS and threads of the observed process tree, computed from the `ps -eo pid,ppid,pcpu,rss,nlwp,args` descendants of the command;
+    - `stages.tsv`: start, end and exit per stage;
+    - `leftover.txt`: the descendants still alive at the end.
+
+    It forwards INT and TERM to the command, keeps the samples and exits with the command's status (130/143 on signals).
+  - `scripts/check`: create `.agent/tmp/check-<id>/` and run each stage (version, CLI, Run, Install, contracts) through the observer, keeping stop-at-first-failure and the exit codes. Replace the final `exec`. Print `check observations: <path>` at the end.
+- **TDD:** a new `Cli.kf` test tagged `check-observer`, observing `scripts/observe` on a synthetic command. It checks that:
+  - exit 7 is preserved;
+  - at least one sample row exists;
+  - the observer stops with the command;
+  - no observer process remains alive.
+
+  A TERM case returns 143 and keeps the samples. The test is written first, and it fails because the script is absent.
+- **Validation:** `kof test src/test/kof/kofmut/Cli.kf --tag check-observer`, then one `./scripts/check` run, which may stop at the first failing stage. Confirm that its exit status equals the stage's exit status and that the observation directory is complete.
+- **Acceptance:** A5.
+
+### M5 — Direct contracts for identity, approval and descriptors (R8)
+
+- **Edits:**
+  - New `src/test/kof/kofmut/CompatibilityContracts.kf`, called from `FrontendContracts.kf` `main()`.
+  - `scripts/launch` includes the new file in `contracts` mode.
+  - Minimal extractions in `src/main/kof/kofmut/launch/Compatibility.kf` (and the descriptor code in `scripts/bootstrap/Launch.kf` only if it is required), so that the same decisions used by the launcher are callable directly: `compatibilityInputs`, `compatibilityClassInventory`/`compatibilityChecksums`, `compatibilityApproved` and descriptor validation.
+  - No test flags and no alternative execution paths.
+  - Contracts use small synthetic files under a temporary directory created by the contract, never `build/cache` or `state/kof-mut`.
+- **TDD:** one contract at a time, through the stable decision APIs above:
+  - content identity: sources, launchers, jar and JDK files; changes with timestamp and version preserved; added and removed files;
+  - approval: incompatible identity, missing or invalid evidence, and an altered, incomplete or extra class inventory;
+  - descriptors: contradictory fields, incompatible paths, truncated delivery.
+- **Negative controls:** each a temporary patch in a disposable copy. Each of the following MUST make a contract fail:
+  - (a) identity by version and timestamp only;
+  - (b) inventory ignored;
+  - (c) approval on compilation only.
+- **Validation:** `./scripts/launch contracts` on 0.6.8 and 0.6.6, plus the three red outputs of the controls.
+- **Acceptance:** the contract half of A8. The identity change is recorded, and the installation guides are revised if needed.
+
+### M6 — Fewer real preparations (R6, R7, R9)
+
+- **Edits:**
+  - Convert the invalidation tests whose cost is real builds, confirmed against `results.tsv`: `mcli15`, `mcli14`, and the invalidation parts of `mcli17` and `mcli31`, plus Install tests with the same pattern. Each change is checked under `KOF_MUT_TEST_COMPILE=refuse`, expecting:
+    - exit 2;
+    - empty stdout;
+    - the refused preparation in stderr;
+    - an unchanged build log.
+
+    After restoring the bytes, a refused call exits 0 and reuses the image.
+  - Keep one real rebuild and recovery per family (R7).
+  - `minst12` is not converted with refusal. Its package rules move to direct contracts only where M5 covers them, and its real `install.sh` identity proof stays.
+- **Guarantee map:** in the validation record, guarantee → test before → test after. All R9 proofs remain.
+- **Counts:** repeat the `measure-d847c0f6` method (PATH shim, unique tags in a disposable copy, one test per invocation, 0.6.8 with the 0.6.6 alternate) only for the converted tests, and compare `build` counts. Each converted test MUST have fewer. Duration is recorded without a target.
+- **Validation:** the converted tests alone and their suites (`Cli.kf`, `Install.kf` on 0.6.8), plus the integration half of the negative controls (each caught by at least one integration).
+- **Acceptance:** A6, A7, A9 and the integration half of A8.
+
+### M7 — Design review, acceptance and documentation (A10)
+
+- **Design review:** only once M2–M6 are green, review the changed files with the refactor-design rubric, applying behavior-preserving refactors only, rerunning the relevant suites, and reporting any gates.
+- **Validation:**
+  - Run sequentially on an otherwise idle host, recording `uptime` and the observer data.
+  - **0.6.6 first on PATH:**
+    - `kof test src/test/kof/kofmut/Cli.kf --tag compatibility`
+    - `kof test src/test/kof/kofmut/Cli.kf --tag launch-arguments`
+    - `KOF_MUT_COMPATIBILITY_OTHER=<0.6.8 bin> kof test src/test/kof/kofmut/Install.kf --tag compatibility`
+    - `kof test src/test/kof/kofmut/Install.kf --tag launch-arguments`
+    - `./scripts/launch contracts`
+  - **0.6.8 first on PATH, with `KOF_MUT_COMPATIBILITY_OTHER=<0.6.6 bin>`:**
+    - `./scripts/check`
+  - `git diff --check`, plus a preservation audit of historical records (the EXECPLAN prefix and `.agent/validation/*` unchanged).
+- **Documentation:**
+  - The "Validation" section of `README.md` and `README.pt_BR.md` mentions the check observation directory, with identical commands and paths in both languages.
+  - New record `.agent/validation/check-diagnostics.md`, with criterion-level evidence for A1–A10.
+  - A pointer in `.agent/README.md`.
+- **Acceptance:** A10. Every criterion is recorded with its command, observed result and artifact. Gaps and unverified criteria are listed explicitly and not presented as satisfied.
+
+## Progress
+
+- [x] M1 — Baseline and reproduction: identities and input inventory recorded; the expected `readiness missing` red was **not** reproduced (both tests passed alone), see Validation.
+- [x] M2 — Failures name their condition and keep evidence: 270 literal messages, retention on failure, sleep audit; red/green controls and both focused runs pass, see Validation.
+- [x] M3 — Waits honor production bounds: four evaluation-readiness waits and two CLI preparation waits now use 92000 ms from invocation start; red reproduced with a slower valid Kof, then green; focused validation passes, see Validation.
+- [x] M4 — Check observer
+- [x] M5 — Direct contracts
+- [ ] M6 — Fewer real preparations
+- [ ] M7 — Design review, acceptance and documentation
+
+## Validation
+
+The planned commands are listed per milestone. Observed results will be appended here at each milestone boundary, separately from planned expectations. Executor obligations:
+
+1. Recheck each expectation against the specification and the cited sources, separately from checking that the tests demonstrate it.
+2. Record the command, observed result and artifact per criterion. A green suite alone does not establish a criterion.
+3. Record failures, gaps and unverified criteria before delivery.
+
+### M1 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m1/`.
+
+- **Identities.**
+  - HEAD `5aeb0c5b1c924ebd3cf27c0cf3c392f43e2734b9`, branch `multiple-test-invocations`.
+  - Working tree changes: only this EXECPLAN section and the untracked specification.
+  - Kof on PATH: `/home/renanfranca/.local/share/kof/kof-0.6.8-linux-x86_64/bin/kof`.
+  - `kof.jar` SHA-256: 0.6.8 `3ee09cb1185c6b793a7ce2a842104d8455601ab506a700f13a6c3e233bd15c61`; 0.6.6 `198bb211dbcefe60bd02f703dff991e82ba55c94f805b1b2b863362757289e58`.
+  - `kof info --json` for both distributions is in `kof-info-<version>.json`.
+  - `tracked-inputs.sha256` inventories the 147 tracked files plus the specification. A recheck after M1 shows that no tracked file changed.
+- **Reproduction.**
+  - The disposable copy `m1/repo/` added unique tags to Install tests 8 and 21 only (`tags.diff`).
+  - With 0.6.8 and load average 0.52 at start, `kof test src/test/kof/kofmut/Install.kf --tag m1inst08` returned exit 0 (`1 of 31`, PASS) in 101.008 s, and `--tag m1inst21` returned exit 0 (PASS) in 29.282 s (`timings.tsv`, `m1inst*.out`).
+  - The expected red (`readiness missing`, seen in `measure-d847c0f6`) was **not** reproduced. Per this plan, it was not resampled.
+- **Correction of a cited source.** The Install readiness is written by `src/test/fixtures/m3-runner:19` during the baseline check (runner configured at `Install.kf:44-48`), not by `mutation-runner`. The specification R3 was corrected accordingly. The installed evaluation in these tests uses the inherited PATH, so the controlled toolchain's `KOF_MUT_TEST_BUILD_DELAY` does not affect it.
+- **Consequence for M3.** R3 for `installReady` remains justified by the source bound: a 30000 ms wait is shorter than the 90000 ms preparation that precedes readiness. M3's TDD entry needs a deterministic red that makes preparation slower than 30 s but within 90 s through a public path. If no such path exists without changing test conditions, M3 records the bound derivation as its evidence, together with the earlier observed failures, and states that a fresh red was not obtained.
+
+### M2 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m2/`.
+
+- **Red control (before the edits).** In a disposable copy, the `mcli27` exit-status check was inverted and the test was run alone with a unique tag. The output said only `FAIL … : assertion failed`, and the disposable project was deleted (`red/control.out`, `red/leftover-dirs.txt` empty).
+- **Literal messages (R1).**
+  - `tool/src/AssertMessages.java` is a disposable probe on the official 0.6.8 `Lexer`/`Parser`/`ExpressionParser`, following the M6 `AssertDiagnostics` precedent. It added `, "expected: <condition source>"` to every bare assert in the 23 covered tests: 14 in CLI, 9 in Install, 156 + 114 = 270 messages (`assert-messages.log`).
+  - `tool/src/VerifyTokens.java` shows that, after removing exactly those inserted pairs, both token streams equal the originals (`verify-tokens.log`).
+  - Bare asserts in the covered tests went from 270 to 0 (`assert-audit.tsv`).
+- **Retention (R2).**
+  - `tool/src/RetainOnFailure.java`, also on official tokens, changed the 28 CLI `finally` deletions to `cliCleanup(project, completed)`. The new helper `cliCleanup` deletes only after the try block completed; otherwise it prints `evidence retained: <path>`.
+  - `disposableProject()` prints `disposable project: <path>`, and `installJourney()` prints `install journey: <base>`. Install journeys were never deleted and still are not.
+- **Barriers (R4).** `sleep-audit.md`: four sleeps are polling intervals inside bounded readiness or exit loops. Two fixed sleeps are kept with justification: `Cli.kf` 100 ms "no late approval" is an absence window after the launcher exit and the inactive compiler were proven, and `Install.kf` 12 s is itself the lifecycle duration under test.
+- **Green controls (after the edits).**
+  - The same inverted check printed `FAIL … : expected: child.exitValue() == expected`, `disposable project: <path>` and `evidence retained: <path>`, and the directory remained (`green/control.out`, `green/retained-dirs.txt`).
+  - An exception control (`throw "m2 exception control"` inside the try) also retained the directory and printed its path (`green/exception-control.out`).
+- **Compilation.** `kof test … --tag m2-compile-only` (a nonexistent tag) compiled `Cli.kf` and `Install.kf` on 0.6.6 and 0.6.8, exit 0 (`compile-*.out`). This shows the literal messages are accepted on 0.6.6.
+- **Focused validation.** `kof test src/test/kof/kofmut/Cli.kf --tag compatibility` returned exit 0 with 9/9 PASS on 0.6.6 (295.0 s, load 0.89 at start) and on 0.6.8 (299.0 s, load 3.65 at start). No new `project with spaces` directory remained after either run, so passing tests still delete their projects (`validation/`).
+- **Limits.** Asserts outside the 23 covered tests are unchanged. Install retention relies on the existing non-deletion plus the printed base path.
+
+### M3 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m3/`.
+
+- **Deterministic red.**
+  - Because M1 could not reproduce `readiness missing`, M3 used a slower but valid Kof first on PATH: `slow-kof/kof`, an observing shim that waits before each `check`/`test` and then execs the real 0.6.8. This keeps every product bound and every test condition.
+  - With 1 s per command, all four target tests passed. The recorded timeline showed the preparation finishing in about 24 s, below the old 30 s waits (`slow-kof-1s/`). This was insufficient, not a pass of the old code against the target window.
+  - From that timeline (each synthetic trial is 4 commands and about 6.5 s), 3 s per command was computed. It gives trials of about 18.5 s, below the 25000 ms budget, and a preparation of about 40 s: above the old 30 s waits and below the 90 s production bound.
+  - With 3 s, the pre-M3 tree failed exactly as observed in earlier runs (`red/`):
+    - `minst08` and `minst21`: `readiness missing` (exit 1, 43.6 s each);
+    - the integrity test: `expected: child.waitFor(30000 as Long, TimeUnit.MILLISECONDS)`, with its project retained by M2 (exit 1, 43.9 s).
+
+    `mcli27` passed (93.6 s), because its readiness precedes the synthetic trials.
+- **Edits.**
+  - `Install.kf`: new `installEvaluationReady(path, child, started)`, which waits up to 92000 ms from a `System.nanoTime()` captured immediately before the spawn and reports the elapsed time. It is used by the four evaluation-readiness callers. The original `installReady` remains for installer and warm barriers.
+  - `Cli.kf`: the `mcli27` readiness and the integrity readiness use 92000 ms from spawn. The integrity completion waits for the remaining time until 92000 ms and reports the elapsed time through `cliAssertEvidence`.
+  - The full review is in `wait-table.md`. Unchanged waits are documented there with their reasons: the installer compile is unbounded outside `app` mode (`scripts/bootstrap/Launch.kf:173`); the 5000 ms post-signal wait exceeds the 2000 ms cleanup; `mcli11` has no total product bound; the `mcli28` lower bound is kept.
+- **Green.** With the same 3 s slower Kof, the M3 tree passed all four tests (`green/`): integrity 86.2 s, `mcli27` 94.0 s, `minst08` 130.6 s, `minst21` 56.4 s.
+- **Compilation.** `Cli.kf` and `Install.kf` compile on 0.6.6 and 0.6.8 (nonexistent-tag runs, exit 0).
+- **Focused validation** (normal Kof 0.6.8, load 2.06 at start):
+  - `minst08` alone passed in 103.9 s, and `minst21` alone in 30.0 s (tagged disposable copy);
+  - `KOF_MUT_COMPATIBILITY_OTHER=<0.6.6 bin> kof test src/test/kof/kofmut/Install.kf --tag compatibility` returned exit 0 with 7/7 PASS in 200.9 s (`validation/`).
+- **Production bounds unchanged.** The cited lines in `Compatibility.kf:87,100,146-148`, `CompatibilityProbe.kf:47` and `scripts/bootstrap/Launch.kf:79-82` equal HEAD, and `git diff` shows no change under `src/main`, `scripts`, `install.sh` or `bin`.
+- **Residual risk.** Installer-barrier waits (30 s) and the `mcli11` concurrent-launch wait remain sensitive to host load, because no production bound exists to align them with. They are not changed.
+
+### M4 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m4/` (`notes.md`).
+
+- Interface deviation from the plan: `scripts/observe <directory> <stage> -- <command...>`. The stage name is part of the call, so one directory holds every stage. `scripts/check` runs each stage in the background through the observer and forwards INT or TERM to it, because Bash defers traps while a foreground child runs.
+- Process tree: descendants of the command, plus detached processes that inherited a per-observer environment variable. A shared variable name let a nested observer hide an interrupted inner test's detached process. One name per observer fixed it (manual INT run).
+- Red: `kof test src/test/kof/kofmut/Cli.kf --tag check-observer` failed, exit 1, because `scripts/observe` was missing. Green: exit 0, 2 of 2 tests (exit 7 kept, samples written, observer stops with the command, no observer alive, detached process listed; TERM gives 143 and keeps the samples).
+- Disposable copy with synthetic suites, comparing the old and new check:
+
+  | Case | Old | New |
+  |---|---|---|
+  | Failing CLI stage | 1 | 1, later stages not reached |
+  | INT to the process group | 130 | 130 |
+  | All stages pass | 0 | 0 |
+  | TERM to the check process only | 143, suite left running | 143, nothing left alive |
+
+  The INT path is checked manually, not by the Kof test.
+- Full check: Kof 0.6.8 on PATH, `KOF_MUT_COMPATIBILITY_OTHER` set to 0.6.6, exit 0 in 2754 s.
+  - Stages: version 5.6 s, CLI 697 s (34 tests), Run 651 s (47), Install 1393 s (31), contracts 6.4 s.
+  - Observation directory: `.agent/tmp/check-67495f6a-63ea-4cad-bdad-72135c2970b9/`, with 1376 samples and no leftover process after any stage.
+  - Load: up to 6.23 (load1), about 1.2 at the start and 3.5 at the end.
+  - Changing `scripts/check` changed a bootstrap identity input, as expected.
+- `cpu_percent` sums the `ps` pcpu value, which averages each process's CPU over its lifetime. It is not instantaneous usage, and the samples do not prove the cause of a slow run.
+
+### M5 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m5/`.
+
+- Kof selection changed outside this work. Kof 0.6.9 (`/home/renanfranca/.local/share/kof/kof-0.6.9-linux-x86_64`) was installed at 2026-10-31 05:21 -0300 and is now first on PATH; M4 ran on 0.6.8. M5 followed the selected Kof and also validated 0.6.8 and 0.6.6 by PATH prefix. The remaining milestones target the selected Kof, with the alternates recorded per run.
+- Contracts live in `src/test/kof/kofmut/launch/CompatibilityContracts.kf` (package `kofmut.launch`), not `src/test/kof/kofmut/` as planned. They are called as `CompatibilityContracts.run()` from `FrontendContracts.kf` `main()`, and `scripts/launch` contracts mode adds the file.
+  - Required bootstrap change: `scripts/bootstrap/Launch.kf` used to compile every source outside `src/main/kof/` as `kofmut/Main.kf`, which left room for one contracts file only. Sources under `src/test/kof/kofmut/launch/` now keep their package path. The entry file is unchanged.
+  - Bootstrap inputs changed, so caches rebuild once.
+- Extractions:
+
+  | Decision | New function | Taken from | Callers |
+  |---|---|---|---|
+  | Identity | `compatibilityIdentity` | expression duplicated in `prepareCompatibility` and `preparedApproval` | both |
+  | Approval record | `compatibilityRecordApproval` | the write in `prepareCompatibility` | `prepareCompatibility` |
+  | Prepared index | `preparedIndexMatches` (`PreparedEntry.kf`) | the descriptor check in `preparedApproval` | `preparedApproval` |
+
+  - There are no test flags and no alternative paths.
+  - Only change in order: `prepared-index` is now read after the launch identity check.
+  - The runtime source identity changed, so installed packages need the usual reinstall. `docs/installation.md` and `docs/installation.pt_BR.md` already say this ("Update KofMut", and new component contents prepare again), so they were not revised.
+- Red: `./scripts/launch contracts` failed with exit 2, `Undefined function` for the three decisions. Green: exit 0 with four new PASS lines:
+  - identity follows sources, launchers, jar and JDK content, with version and timestamps preserved, and with files added or removed;
+  - approval requires identity, version, inputs, valid evidence and schema, matching checksums, and the exact class inventory (altered, missing or extra class);
+  - the prepared index rejects each contradictory field, an incompatible class path and truncation, and returns false for other checksums;
+  - the installation package context rejects truncation, a cut pair, an absolute path and a duplicate.
+
+  Fixtures live in a temporary directory whose path is printed; it is removed on success.
+- Negative controls, each in a disposable copy (`m5/controls/<a|b|c>.patch.diff`, `.out`). Each made `./scripts/launch contracts` exit 1:
+  - (a) identity and approval from version and timestamps only: failed at "same-length content change with version and timestamp preserved changes identity";
+  - (b) class inventory ignored: failed at "altered class is not approved";
+  - (c) approval on compilation only: failed at "another identity is not approved".
+
+  Their fixtures are kept in `m5/controls/retained/`. The integration half of these controls (A8) remains for M6. Probes skipped inside `prepareCompatibility` are outside these direct contracts and still need an integration proof (R9, frontend refusal).
+- Validation:
+  - `./scripts/launch contracts`: exit 0 on 0.6.9, 0.6.8 and 0.6.6, with 19 PASS lines each (15 frontend and 4 compatibility).
+  - On 0.6.9:
+
+    | Suite | Result | Time |
+    |---|---|---|
+    | `Cli.kf --tag compatibility` | 9 of 9 | 295 s |
+    | `Cli.kf --tag startup-optimization` | 9 of 9 | 304 s |
+    | `Cli.kf --tag launch-arguments` | 2 of 2 | 41 s |
+    | `Install.kf --tag compatibility`, with 0.6.8 as the alternate | 7 of 7 | 203 s |
+
+  - No retained disposable project.

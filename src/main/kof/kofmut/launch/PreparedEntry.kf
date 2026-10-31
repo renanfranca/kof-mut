@@ -10,6 +10,13 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 
+// Decides whether a prepared index describes exactly this image; contradictory fields or paths are rejected.
+Bool preparedIndexMatches(String index, String root, String kof, String image, String java, String jar, String key, String classpath, CompatibilityWork work) {
+    var descriptor = index.split("\0")
+    if (descriptor.length != 9 || descriptor[0] != "kofmut-prepared-v1" || descriptor[1] != root || descriptor[2] != kof || descriptor[3] != image || descriptor[4] != java || descriptor[5] != jar || descriptor[6] != key || classpath != image + "/classes:" + jar) { throw "invalid prepared image location" }
+    return compatibilityHash(image + "/prepared.checksums", work) == descriptor[7] && compatibilityHash(image + "/approval.json", work) == descriptor[8]
+}
+
 Bool preparedApproval(String root, String kof, String context, String image, String state, CompatibilityInstallation installation, CompatibilityWork work) {
     var raw = compatibilityText(context + "/info.json")
     var request = compatibilityText(context + "/request")
@@ -18,13 +25,11 @@ Bool preparedApproval(String root, String kof, String context, String image, Str
     for (var i = 5; i < fields.length; i = i + 2) { if (compatibilityHash(fields[i], work) != fields[i + 1]) { return false } }
     var jar = new java.io.File(installation.install + "/lib/kof.jar").getCanonicalPath()
     var java = new java.io.File(installation.install + "/jdk/bin/java").getCanonicalPath()
-    var descriptor = compatibilityText(context + "/prepared-index").split("\0")
     var launch = compatibilityText(context + "/identity").split("\0")
     if (launch.length != 9 || launch[0] != "kofmut-image-v2" || launch[1] != root || launch[2] != kof || launch[3] != "app" || launch[4] != crypto.sha256(request) || new java.io.File(launch[7]).getCanonicalPath() != java || new java.io.File(launch[8]).getCanonicalPath() != jar) { throw "invalid prepared identity" }
-    if (descriptor.length != 9 || descriptor[0] != "kofmut-prepared-v1" || descriptor[1] != root || descriptor[2] != kof || descriptor[3] != image || descriptor[4] != java || descriptor[5] != jar || descriptor[6] != launch[6] || System.getProperty("java.class.path") != image + "/classes:" + jar) { throw "invalid prepared image location" }
-    if (compatibilityHash(image + "/prepared.checksums", work) != descriptor[7] || compatibilityHash(image + "/approval.json", work) != descriptor[8]) { return false }
+    if (!preparedIndexMatches(compatibilityText(context + "/prepared-index"), root, kof, image, java, jar, launch[6], System.getProperty("java.class.path"), work)) { return false }
     var inputs = compatibilityInputs(root, kof, installation, work)
-    var identity = crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+    var identity = compatibilityIdentity(installation, inputs)
     var name = new java.io.File(image).getName()
     if (!name.matches("[a-f0-9]{64}-[a-f0-9-]{36}") || image != state + "/images/" + name || !name.startsWith(identity + "-")) { return false }
     return compatibilityApproved(image, identity, installation.kof, inputs, work)

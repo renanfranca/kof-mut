@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Usage: scripts/observe <directory> <stage> -- <command...>
+# Runs the command, records machine load and its process tree, and exits with its status.
+# Samples record load; they do not prove the cause of a slow run.
+set -uo pipefail
+if (( $# < 4 )) || [[ "$3" != -- ]]; then
+    echo "usage: scripts/observe <directory> <stage> -- <command...>" >&2
+    exit 2
+fi
+KOF_MUT_OBSERVATIONS="$1"
+KOF_MUT_STAGE="$2"
+shift 3
+mkdir -p -- "$KOF_MUT_OBSERVATIONS" || exit 2
+KOF_MUT_SAMPLES="$KOF_MUT_OBSERVATIONS/samples.tsv"
+[[ -f "$KOF_MUT_SAMPLES" ]] || printf 'stage\tmonotonic_s\twall_utc\tload1\tload5\tload15\trunnable_total\tprocesses\tcpu_percent\trss_kib\tthreads\n' > "$KOF_MUT_SAMPLES"
+[[ -f "$KOF_MUT_OBSERVATIONS/stages.tsv" ]] || printf 'stage\tstart_utc\tend_utc\tduration_ms\texit\n' > "$KOF_MUT_OBSERVATIONS/stages.tsv"
+# Processes of the observed command: descendants of its PID, plus detached ones that inherited this marker.
+# Each observer uses its own variable name, so nested observers do not hide each other.
+KOF_MUT_MARKER="KOF_MUT_OBSERVED_$$_$RANDOM=$KOF_MUT_OBSERVATIONS/$KOF_MUT_STAGE"
+
+observed() {
+    local marked
+    marked="$(grep -lzxF -- "$KOF_MUT_MARKER" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3 | tr '\n' ' ')"
+    ps -eo pid=,ppid=,pcpu=,rss=,nlwp=,args= | awk -v root="$1" -v marked="$marked" '
+        { pid[NR] = $1; ppid[NR] = $2; line[NR] = $0 }
+        END {
+            split(marked, list, " "); for (i in list) keep[list[i]] = 1
+            if (root != "") keep[root] = 1
+            do { added = 0; for (i = 1; i <= NR; i++) if (!(pid[i] in keep) && (ppid[i] in keep)) { keep[pid[i]] = 1; added = 1 } } while (added)
+            for (i = 1; i <= NR; i++) if (pid[i] in keep) print line[i]
+        }'
+}
+
+sample() {
+    local uptime load tree
+    read -r uptime _ < /proc/uptime
+    read -r load < /proc/loadavg
+    tree="$(observed "$1" | awk '{ n++; cpu += $3; rss += $4; threads += $5 } END { printf "%d\t%.1f\t%d\t%d", n, cpu, rss, threads }')"
+    set -- $load
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$KOF_MUT_STAGE" "$uptime" "$(date -u +%FT%T.%3NZ)" "$1" "$2" "$3" "$4" "$tree" >> "$KOF_MUT_SAMPLES"
+}
+
+KOF_MUT_STATUS=""
+KOF_MUT_SIGNALED=""
+# INT and TERM reach the command as TERM; the observer then keeps the check's statuses 130 and 143.
+forward() {
+    [[ -n "$KOF_MUT_SIGNALED" ]] || KOF_MUT_SIGNALED=$1
+    kill -TERM -- "$KOF_MUT_CHILD" 2>/dev/null || true
+}
+KOF_MUT_START_UTC="$(date -u +%FT%T.%3NZ)"
+KOF_MUT_START_MS="$(date +%s%3N)"
+# Asynchronous commands ignore INT by default; restore it so terminal interrupts still reach the command.
+( trap - INT; export "$KOF_MUT_MARKER"; exec "$@" ) &
+KOF_MUT_CHILD=$!
+trap 'forward 130' INT
+trap 'forward 143' TERM
+( KOF_MUT_PAUSE=""; trap 'kill -- $KOF_MUT_PAUSE 2>/dev/null; exit 0' TERM; while :; do sample "$KOF_MUT_CHILD"; sleep 2 & KOF_MUT_PAUSE=$!; wait $KOF_MUT_PAUSE; done ) &
+KOF_MUT_SAMPLER=$!
+while [[ -z "$KOF_MUT_STATUS" ]]; do
+    wait "$KOF_MUT_CHILD"
+    KOF_MUT_STATUS=$?
+    if [[ -n "$KOF_MUT_SIGNALED" ]] && kill -0 "$KOF_MUT_CHILD" 2>/dev/null; then KOF_MUT_STATUS=""; fi
+done
+trap '' INT TERM
+kill -TERM -- "$KOF_MUT_SAMPLER" 2>/dev/null || true
+wait "$KOF_MUT_SAMPLER" 2>/dev/null || true
+sample ""
+if [[ -n "$KOF_MUT_SIGNALED" ]]; then KOF_MUT_STATUS=$KOF_MUT_SIGNALED; fi
+printf '%s\t%s\t%s\t%s\t%s\n' "$KOF_MUT_STAGE" "$KOF_MUT_START_UTC" "$(date -u +%FT%T.%3NZ)" "$(( $(date +%s%3N) - KOF_MUT_START_MS ))" "$KOF_MUT_STATUS" >> "$KOF_MUT_OBSERVATIONS/stages.tsv"
+{
+    printf '# after %s: pid\tppid\tpcpu\trss_kib\tthreads\targs\n' "$KOF_MUT_STAGE"
+    KOF_MUT_LEFTOVER="$(observed "" | awk -v OFS='\t' '{ args = $6; for (i = 7; i <= NF; i++) args = args " " $i; print $1, $2, $3, $4, $5, args }')"
+    if [[ -n "$KOF_MUT_LEFTOVER" ]]; then printf '%s\n' "$KOF_MUT_LEFTOVER"; else echo none; fi
+} >> "$KOF_MUT_OBSERVATIONS/leftover.txt"
+exit "$KOF_MUT_STATUS"
