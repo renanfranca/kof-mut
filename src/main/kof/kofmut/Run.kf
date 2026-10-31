@@ -128,7 +128,7 @@ class MutationRun {
                 resources.lock.lock()
                 try {
                     resources.requireActive()
-                    var task = launchCandidate(this, candidates.get(next), config, entries, temporary + "/variant-" + next, next, completed)
+                    var task = spawnCandidateOutsideTry(this, candidates.get(next), config, entries, temporary + "/variant-" + next, next, completed)
                     resources.tasks.add(task)
                 } finally { resources.lock.unlock() }
                 next++
@@ -266,12 +266,11 @@ class MutationRun {
     }
 }
 
-// Kof 0.6.4 requires spawn outside try/finally and an explicit receiver.
-Handle<Int> launchCandidate(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
-    return spawn dispatchCandidate(execution, mutant, config, entries, variant, index, completed)
+Handle<Int> spawnCandidateOutsideTry(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
+    return spawn evaluateCandidateWithExplicitReceiver(execution, mutant, config, entries, variant, index, completed)
 }
 
-Int dispatchCandidate(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
+Int evaluateCandidateWithExplicitReceiver(MutationRun execution, MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
     var result = execution.evaluateTask(mutant, config, entries, variant, index, completed)
     return result.index
 }

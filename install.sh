@@ -9,16 +9,15 @@ KOF_MUT_CREATING=0
 KOF_MUT_SIGNAL=""
 KOF_MUT_STATUS=2
 KOF_MUT_BARRIER=""
+signal_child_before_and_after_setsid() {
+    if [[ -n "$KOF_MUT_GROUP" ]]; then kill -"$1" -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
+    kill -"$1" -- "-$KOF_MUT_CHILD" 2>/dev/null || true
+    kill -"$1" -- "$KOF_MUT_CHILD" 2>/dev/null || true
+}
 cleanup() {
     if [[ -n "$KOF_MUT_CHILD" ]]; then
-        # Before setsid there is only a PID. After the handshake the child has
-        # reported its session leader. Cover both sides of that transition.
-        if [[ -n "$KOF_MUT_GROUP" ]]; then kill -TERM -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
-        kill -TERM -- "-$KOF_MUT_CHILD" 2>/dev/null || true
-        kill -TERM -- "$KOF_MUT_CHILD" 2>/dev/null || true
-        if [[ -n "$KOF_MUT_GROUP" ]]; then kill -KILL -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
-        kill -KILL -- "-$KOF_MUT_CHILD" 2>/dev/null || true
-        kill -KILL -- "$KOF_MUT_CHILD" 2>/dev/null || true
+        signal_child_before_and_after_setsid TERM
+        signal_child_before_and_after_setsid KILL
         wait "$KOF_MUT_CHILD" 2>/dev/null || true
     fi
     if [[ -n "$KOF_MUT_BARRIER" ]]; then rm -rf -- "$KOF_MUT_BARRIER"; fi

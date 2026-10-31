@@ -15,8 +15,8 @@ while [[ "$KOF_MUT_COMPONENT" != / && -n "$KOF_MUT_COMPONENT" ]]; do
     KOF_MUT_COMPONENT="${KOF_MUT_COMPONENT%/*}"
 done
 [[ -f "$KOF_MUT_USAGE" && ! -L "$KOF_MUT_USAGE" ]] || { echo 'kof-mut: missing or invalid installation coordination file: usage.lock' >&2; exit 2; }
-# This descriptor protects the entire invocation, including preparation and evaluation.
-exec 7<"$KOF_MUT_USAGE"
+hold_usage_lease_for_entire_invocation() { exec 7<"$KOF_MUT_USAGE"; }
+hold_usage_lease_for_entire_invocation
 if [[ "${1:-}" == uninstall ]]; then
     flock --nonblock --exclusive 7 || { echo 'kof-mut: installed execution is active; no files removed' >&2; exit 2; }
 else

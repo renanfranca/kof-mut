@@ -865,9 +865,7 @@ test "INT and TERM discard an emitted candidate and allow retry without cleanup"
     var completed = false
     try {
         for (var signal in listOf("INT", "TERM")) {
-            // Change engine contents so each signal meets a fresh candidate.
-            var source = project + "/src/main/kof/kofmut/Main.kf"
-            assert(File(source).writeText(compatibilityRead(source) + "\n"), "expected: File(source).writeText(compatibilityRead(source) + \"\\n\")")
+            cliChangeEngineSoSignalMeetsFreshCandidate(project)
             var ready = project + "/ready-" + signal
             var invocation = listOf("/usr/bin/env", "KOF_MUT_TEST_BUILD=block-after-output", "KOF_MUT_TEST_READY=" + ready)
             for (var arg in command) { invocation.add(arg) }
@@ -1057,6 +1055,11 @@ test "JDK contents invalidate approval with the same declared version and timest
         }
         completed = true
     } finally { cliCleanup(project, completed) }
+}
+
+void cliChangeEngineSoSignalMeetsFreshCandidate(String project) {
+    var source = project + "/src/main/kof/kofmut/Main.kf"
+    assert(File(source).writeText(compatibilityRead(source) + "\n"), "expected: engine source changed")
 }
 
 Long cliPreparationDeadlineWithCleanupMs() { return 92000 as Long }

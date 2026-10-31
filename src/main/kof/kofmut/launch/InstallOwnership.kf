@@ -83,15 +83,18 @@ void removeEmptyInstallDirectories(String image, List<InstalledFile> files) {
     for (var i = directories.size - 1; i >= 0; i--) { var removed = File(directories.get(i)).delete() }
 }
 
-void uninstallOwned(String prefix) {
-    var owner = readInstallationOwner(prefix)
-    if (owner.releases.size == 0) { throw "installation is not owned" }
-    // Preflight every path before removing any entry, including inactive images.
+void rejectLinksInEveryReleaseBeforeRemoval(String prefix, InstallationOwner owner) {
     for (var release in owner.releases) {
         var image = prefix + "/share/kof-mut/releases/" + release.id
         var receipt = readImageReceipt(image + "/image.json")
         for (var entry in receipt.files) { rejectInstallLinks(prefix, "share/kof-mut/releases/" + release.id + "/" + entry.path) }
     }
+}
+
+void uninstallOwned(String prefix) {
+    var owner = readInstallationOwner(prefix)
+    if (owner.releases.size == 0) { throw "installation is not owned" }
+    rejectLinksInEveryReleaseBeforeRemoval(prefix, owner)
     var commandRemoved = Files.deleteIfExists(new java.io.File(prefix + "/bin/kof-mut").toPath())
     var currentRemoved = Files.deleteIfExists(new java.io.File(prefix + "/share/kof-mut/current").toPath())
     for (var release in owner.releases) {

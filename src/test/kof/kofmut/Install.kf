@@ -302,15 +302,14 @@ test "installed commands and evaluation survive removal of the checkout", "insta
     var executable = journey.prefix + "/bin/kof-mut"
     var version = shell.runWith(listOf(executable, "--version"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
     var help = shell.runWith(listOf(executable, "--help"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
-    // M6 follows the selected concrete Kof while project commands retain their environment.
-    var run = shell.runWith(listOf(executable, "run", "--project", journey.base + "/evaluated project", "--files", journey.base + "/evaluated project/scope.json"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    var runFollowsSelectedKofWithProjectEnvironment = shell.runWith(listOf(executable, "run", "--project", journey.base + "/evaluated project", "--files", journey.base + "/evaluated project/scope.json"), journey.base, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
 
     installAssertEvidence(version.exitCode == 0, "version: " + version.stdout + version.stderr)
     assert(version.stdout == "KofMut 0.1.0\n")
     installAssertEvidence(help.exitCode == 0, "help: " + help.stdout + help.stderr)
     assert(help.stdout.contains("uninstall"))
-    installAssertEvidence(run.exitCode == 0, "run: " + run.stdout + run.stderr)
-    assert(run.stdout.contains("Killed"))
+    installAssertEvidence(runFollowsSelectedKofWithProjectEnvironment.exitCode == 0, "run: " + runFollowsSelectedKofWithProjectEnvironment.stdout + runFollowsSelectedKofWithProjectEnvironment.stderr)
+    assert(runFollowsSelectedKofWithProjectEnvironment.stdout.contains("Killed"))
     assert(File(journey.base + "/builds.log").readText() == "build\n")
     assert(File(journey.prefix + "/state/kof-mut").isDirectory())
 }
@@ -362,9 +361,8 @@ test "failed preparation preserves A and activation of B preserves an active A e
     assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), 120000, 0))))
     var log = journey.base + "/active"
     assert(Directory(log).createDirectories())
-    // m3-runner observes the exact discovery stream before starting its barrier.
-    var streamLink = process.run("ln", "-s", "run.stdout", log + "/stdout")
-    assert(streamLink.exitCode == 0)
+    var runnerObservesDiscoveryStream = process.run("ln", "-s", "run.stdout", log + "/stdout")
+    assert(runnerObservesDiscoveryStream.exitCode == 0)
     var evaluationStarted = System.nanoTime()
     var running = startInstallCommand(listOf("/usr/bin/env", "KOF_MUT_OBSERVATIONS=" + log, executable, "run", "--project", project, "--files", project + "/scope.json"), log + "/run")
     try {
@@ -1266,10 +1264,9 @@ test "schemaVersion 1 receipts remain owned unchanged across a schemaVersion 2 u
     assert(installed.exitCode == 0, "expected: installed.exitCode == 0")
     var previous = new java.io.File(journey.prefix + "/share/kof-mut/current").getCanonicalPath()
     var current = json.decode<MigrationCurrent>(installText(previous + "/image.json"))
-    // This synthetic legacy record exercises the historical shape without rewriting historical artifacts.
-    var legacy = json.encode(MigrationLegacy(1, current.prefix, current.id, current.inputs, current.buildDependency, current.files))
-    assert(File(previous + "/image.json").writeText(legacy), "expected: File(previous + \"/image.json\").writeText(legacy)")
-    assert(File(journey.prefix + "/state/kof-mut/owner.json").writeText(json.encode(MigrationOwner(1, journey.prefix, listOf(MigrationOwned(current.id, crypto.sha256(legacy)))))), "expected: File(journey.prefix + \"/state/kof-mut/owner.json\").writeText(json.encode(MigrationOwner(1, journey.prefix, listOf(MigrationOwned(current.id, crypto.sha256(legacy))))))")
+    var syntheticLegacyReceipt = json.encode(MigrationLegacy(1, current.prefix, current.id, current.inputs, current.buildDependency, current.files))
+    assert(File(previous + "/image.json").writeText(syntheticLegacyReceipt), "expected: File(previous + \"/image.json\").writeText(syntheticLegacyReceipt)")
+    assert(File(journey.prefix + "/state/kof-mut/owner.json").writeText(json.encode(MigrationOwner(1, journey.prefix, listOf(MigrationOwned(current.id, crypto.sha256(syntheticLegacyReceipt)))))), "expected: File(journey.prefix + \"/state/kof-mut/owner.json\").writeText(json.encode(MigrationOwner(1, journey.prefix, listOf(MigrationOwned(current.id, crypto.sha256(syntheticLegacyReceipt))))))")
     assert(File(previous + "/unknown.txt").writeText("keep legacy unknown"), "expected: File(previous + \"/unknown.txt\").writeText(\"keep legacy unknown\")")
     assert(File(journey.checkout + "/VERSION").writeText("0.1.0-migrated\n"), "expected: File(journey.checkout + \"/VERSION\").writeText(\"0.1.0-migrated\\n\")")
 
@@ -1279,7 +1276,7 @@ test "schemaVersion 1 receipts remain owned unchanged across a schemaVersion 2 u
     assert(active != previous, "expected: active != previous")
     var receipt = json.decode<CompatibilityReceipt>(installText(active + "/image.json"))
     assert(receipt.schemaVersion == 2 && receipt.runtimeSources.size > 0, "expected: receipt.schemaVersion == 2 && receipt.runtimeSources.size > 0")
-    assert(installText(previous + "/image.json").equals(legacy), "legacy receipt bytes remain unchanged")
+    assert(installText(previous + "/image.json").equals(syntheticLegacyReceipt), "legacy receipt bytes remain unchanged")
     assert(Directory(journey.checkout).delete(), "expected: Directory(journey.checkout).delete()")
     var version = process.run(journey.prefix + "/bin/kof-mut", "--version")
     assert(version.exitCode == 0 && version.stdout == "KofMut 0.1.0-migrated\n", "expected: version.exitCode == 0 && version.stdout == \"KofMut 0.1.0-migrated\\n\"")

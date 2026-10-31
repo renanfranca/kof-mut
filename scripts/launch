@@ -73,10 +73,10 @@ if [[ "$KOF_MUT_MODE" == install ]]; then
         done < "$KOF_MUT_CONTEXT/package-files"
     } > "$KOF_MUT_CONTEXT/package"
 fi
+append_info_json_with_final_newline() { cat "$KOF_MUT_CONTEXT/info.json"; }
 {
     printf 'kofmut-request-v2\0%s\0%s\0%s\0' "$KOF_MUT_MODE" "$KOF_MUT_ROOT" "$KOF_MUT_KOF"
-    # Preserve the raw JSON, including its final newline, in the identity.
-    cat "$KOF_MUT_CONTEXT/info.json"
+    append_info_json_with_final_newline
     printf '\0'
     for KOF_MUT_SOURCE in "${KOF_MUT_INPUTS[@]}"; do
         printf '%s\0%s\0' "$KOF_MUT_SOURCE" "${KOF_MUT_HASHES[$KOF_MUT_SOURCE]}"
@@ -156,11 +156,14 @@ read_location() {
     done < "$KOF_MUT_DESCRIPTOR"
     [[ -z "$field" && ${#KOF_MUT_LOCATION[@]} == 3 && ${KOF_MUT_LOCATION[0]} == kofmut-location-v1 && -x ${KOF_MUT_LOCATION[1]} && -f ${KOF_MUT_LOCATION[2]} ]]
 }
-if [[ -f "$KOF_MUT_ROOT/launch.bin" ]] && ! (cd -- "$KOF_MUT_ROOT/classes" && timeout --foreground --kill-after=2 10 sha256sum --check --quiet "$KOF_MUT_ROOT/classes.sha256") > "$KOF_MUT_CONTEXT/package-check.stdout" 2> "$KOF_MUT_CONTEXT/package-check.stderr"; then
-    # The source bootstrap diagnoses damaged packaged classes before loading any.
+packaged_classes_damaged() {
+    [[ -f "$KOF_MUT_ROOT/launch.bin" ]] && ! (cd -- "$KOF_MUT_ROOT/classes" && timeout --foreground --kill-after=2 10 sha256sum --check --quiet "$KOF_MUT_ROOT/classes.sha256") > "$KOF_MUT_CONTEXT/package-check.stdout" 2> "$KOF_MUT_CONTEXT/package-check.stderr"
+}
+diagnose_damaged_package_through_source_bootstrap() {
     prepare
     fail 'invalid installed image; reinstall from a checkout to repair'
-fi
+}
+if packaged_classes_damaged; then diagnose_damaged_package_through_source_bootstrap; fi
 if ! read_location; then prepare; read_location || fail 'invalid installation descriptor'; fi
 select_image() {
     KOF_MUT_JAVA="${KOF_MUT_LOCATION[1]}"
@@ -178,10 +181,22 @@ if [[ "$KOF_MUT_MODE" == management ]]; then
     rm -rf -- "$KOF_MUT_CONTEXT"
     exec "$KOF_MUT_JAVA" -cp "$KOF_MUT_ROOT/classes:$KOF_MUT_JAR" kofmut.launch.InstalledEntry "$KOF_MUT_ROOT" "$@"
 fi
+entire_prepared_file_set_matches_checksums() {
+    local image="$1" field="" files=()
+    (cd -- "$image" && find classes -type f -print0 | LC_ALL=C sort -z) > "$KOF_MUT_CONTEXT/prepared-files" || return 1
+    while IFS= read -r -d '' field; do files+=("$field"); done < "$KOF_MUT_CONTEXT/prepared-files"
+    (( ${#files[@]} > 0 )) || return 1
+    (cd -- "$image" && timeout --foreground --kill-after=2 10 sha256sum -- "${files[@]}") > "$KOF_MUT_CONTEXT/prepared-checksums" || return 1
+    cmp -s -- "$KOF_MUT_CONTEXT/prepared-checksums" "$image/prepared.checksums" || return 1
+}
+end_preparation_deadline_and_start_evaluation_budget() {
+    (( $(date +%s%3N) - KOF_MUT_STARTED < 90000 )) || fail 'preparation exceeded 90000 ms'
+    printf 'kofmut-go-v1\n' > "$KOF_MUT_CONTEXT/evaluation-go"
+}
 try_prepared() {
     [[ "$KOF_MUT_MODE" == app && "${1:-}" == run ]] || return 1
     local index="$KOF_MUT_STATE/prepared/$KOF_MUT_KEY" field="" image="" name="" hash="" child="" result=0
-    local fields=() files=() ready=()
+    local fields=() ready=()
     [[ -f "$index" ]] || return 1
     while IFS= read -r -d '' field; do fields+=("$field"); done < "$index"
     [[ -z "$field" && ${#fields[@]} == 9 && ${fields[0]} == kofmut-prepared-v1 && ${fields[1]} == "$KOF_MUT_ROOT" && ${fields[2]} == "$KOF_MUT_KOF" && ${fields[4]} == "$(readlink -f -- "$KOF_MUT_JAVA")" && ${fields[5]} == "$(readlink -f -- "$KOF_MUT_JAR")" && ${fields[6]} == "$KOF_MUT_KEY" && ${fields[7]} =~ ^[a-f0-9]{64}$ && ${fields[8]} =~ ^[a-f0-9]{64}$ ]] || return 1
@@ -192,12 +207,7 @@ try_prepared() {
     [[ "${hash:0:64}" == "${fields[7]}" ]] || return 1
     hash="$(timeout --foreground --kill-after=2 10 sha256sum -- "$image/approval.json")" || return 1
     [[ "${hash:0:64}" == "${fields[8]}" ]] || return 1
-    # Check the entire file set, including extra classes, before loading code.
-    (cd -- "$image" && find classes -type f -print0 | LC_ALL=C sort -z) > "$KOF_MUT_CONTEXT/prepared-files" || return 1
-    while IFS= read -r -d '' field; do files+=("$field"); done < "$KOF_MUT_CONTEXT/prepared-files"
-    (( ${#files[@]} > 0 )) || return 1
-    (cd -- "$image" && timeout --foreground --kill-after=2 10 sha256sum -- "${files[@]}") > "$KOF_MUT_CONTEXT/prepared-checksums" || return 1
-    cmp -s -- "$KOF_MUT_CONTEXT/prepared-checksums" "$image/prepared.checksums" || return 1
+    entire_prepared_file_set_matches_checksums "$image" || return 1
     printf '%s\0' "${fields[@]}" > "$KOF_MUT_CONTEXT/prepared-index"
     "${fields[4]}" -cp "$image/classes:${fields[5]}" kofmut.launch.PreparedEntry "$KOF_MUT_ROOT" "$KOF_MUT_KOF" app "$KOF_MUT_CONTEXT" "$image" "$@" &
     child=$!
@@ -207,10 +217,7 @@ try_prepared() {
             field=""
             while IFS= read -r -d '' field; do ready+=("$field"); done < "$KOF_MUT_CONTEXT/evaluation-ready"
             [[ -z "$field" && ${#ready[@]} == 2 && ${ready[0]} == kofmut-ready-v1 && ${ready[1]} == "$image" ]] || fail 'invalid prepared evaluation readiness'
-            # The preparation deadline ends here. The engine starts its own budget
-            # only after this private confirmation; wait below has no total timeout.
-            (( $(date +%s%3N) - KOF_MUT_STARTED < 90000 )) || fail 'preparation exceeded 90000 ms'
-            printf 'kofmut-go-v1\n' > "$KOF_MUT_CONTEXT/evaluation-go"
+            end_preparation_deadline_and_start_evaluation_budget
             if wait "$child"; then result=0; else result=$?; fi
             exit "$result"
         fi
