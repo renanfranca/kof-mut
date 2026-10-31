@@ -1269,7 +1269,7 @@ Safety boundary: this task is limited to authorized, defensive maintenance of th
 - [x] M3 — Waits honor production bounds: four evaluation-readiness waits and two CLI preparation waits now use 92000 ms from invocation start; red reproduced with a slower valid Kof, then green; focused validation passes, see Validation.
 - [x] M4 — Check observer
 - [x] M5 — Direct contracts
-- [ ] M6 — Fewer real preparations
+- [x] M6 — Fewer real preparations
 - [ ] M7 — Design review, acceptance and documentation
 
 ## Validation
@@ -1411,3 +1411,36 @@ Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m5/
     | `Install.kf --tag compatibility`, with 0.6.8 as the alternate | 7 of 7 | 203 s |
 
   - No retained disposable project.
+
+### M6 observed (2026-10-31 UTC)
+
+Evidence: `.agent/tmp/check-diagnostics/d0bc9dc1-cec1-4879-8d48-eaec18615bc2/m6/`. The guarantee map is `guarantee-map.md`.
+
+- Converted tests in `src/test/kof/kofmut/Cli.kf`:
+  - `mcli15`: all 9 inputs refused, plus restore and reuse; one real rebuild.
+  - `mcli14`: 4 damaged components refused, plus restore and reuse; the missing-class real rebuild is kept.
+  - `mcli17`: `prepared.checksums` and an unexpected class refused, plus restore or removal and reuse of the same image; the `PreparedEntry.class` real recovery and the source-change real approval are kept.
+  - `mcli31`: `jdk/release` refused, plus restore and reuse; `jdk/lib/jvm.cfg` keeps a real approval.
+
+  A refused call asserts exit 2, empty stdout, the refusal in stderr ("controlled toolchain refuses compilation" for the bootstrap; "preparation compile failed" with no "checking compatibility" for compatibility) and an unchanged build log.
+- Install: no test matches the R6 pattern. Real builds there come from installer cycles, races during capture (`minst10`, `minst13`), signals (`minst09`) or package rules (`minst12`, excluded). None was converted.
+- Counts, using the `measure-d847c0f6` method (tagged disposable copy, PATH shim on 0.6.8, 0.6.6 as the alternate, one test per invocation; `m6/measure-e4172fcd-30aa-437c-9a26-0d0d122d1f54/`). All four pass alone.
+
+  | Test | Builds before → after | Duration before → after |
+  |---|---|---|
+  | `mcli15` | 10 → 2 | 73.5 → 22.0 s |
+  | `mcli14` | 6 → 2 | 52.7 → 17.8 s |
+  | `mcli17` | 6 → 4 | 99.4 → 58.7 s |
+  | `mcli31` | not counted | 73.0 → 40.4 s |
+
+  - `mcli31` builds run through the Kof copy, which bypasses the shim (0 before and after). By its own build log it does one fewer real approval: 4 → 3 builds.
+  - Durations are recorded without a target, and host load differs between runs.
+  - No check was removed. Each refused call replaces a real rebuild that asserted the same detection.
+- Integration half of the negative controls (A8). The same patches as M5, in disposable copies with tags, on 0.6.8:
+  - (a) `mcli31` failed: the refused call after the JDK change evaluated, with a report path on stdout, instead of exiting 2;
+  - (b) `mcli17` failed at `classes/Unexpected.class`, accepted;
+  - (c) `mcli17` failed at a damaged `prepared.checksums`, accepted.
+
+  Together with M5, each control fails both a direct contract and an integration test.
+- Suite: `kof test src/test/kof/kofmut/Cli.kf` on 0.6.8, with 0.6.6 as the alternate and under `scripts/observe`, exited 0 with 34 of 34 in 620 s. Load reached 4.38, no process was left over, and no disposable project was retained. `Install.kf` was not re-run in M6, because no Install test changed; the full check in M7 covers it.
+- R9 real proofs remain, as listed in the guarantee map.

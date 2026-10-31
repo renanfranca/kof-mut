@@ -367,14 +367,12 @@ test "incomplete or damaged bootstrap images are rebuilt before public commands"
         var image = images + "/" + names[0]
         var expectedBuilds = "build\n"
         for (var relative in listOf("identity", "classes/Default/Main.class", "classes/kofmut/launch/CompatibilityEntry.class", "classes/dev/kof/runtime/KofRuntime.class")) {
-            assert(File(image + "/" + relative).writeText("incomplete image\n"))
-
-            var recovered = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
-
-            cliAssertEvidence(recovered.exitCode == 0, "damaged image must recover automatically: " + relative)
-            assert(recovered.stdout == "KofMut 0.1.0\n")
-            expectedBuilds = expectedBuilds + "build\n"
-            assert(File(log).readText() == expectedBuilds)
+            var component = image + "/" + relative
+            var saved = cliSaveOriginal(project, component)
+            assert(File(component).writeText("incomplete image\n"), "expected: image component damaged")
+            cliVersionRequiresPreparation(project, path, kof, log, expectedBuilds, relative)
+            cliRestoreOriginal(saved, component)
+            cliVersionReusesImage(project, path, kof, log, relative)
         }
         assert(File(image + "/classes/kofmut/launch/CompatibilityEntry.class").delete())
         var missing = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
@@ -399,20 +397,16 @@ test "tool input bytes invalidate images even when timestamps are preserved" {
         var builds = "build\n"
         for (var relative in listOf("src/main/kof/kofmut/launch/Compatibility.kf", "scripts/supervise", "scripts/bootstrap/Launch.kf", "scripts/launch", "bin/kof-mut", "scripts/check", "VERSION", "kof.toml", "toolchain/kof")) {
             var file = project + "/" + relative
-            assert(process.run("/bin/cp", "-p", file, project + "/timestamp").exitCode == 0)
-            var content = File(file).readText()
-            assert(content != null)
-            if (content != null) { assert(File(file).writeText(content + "\n")) }
-            assert(process.run("/usr/bin/touch", "-r", project + "/timestamp", file).exitCode == 0)
-            assert(new java.io.File(file).lastModified() == new java.io.File(project + "/timestamp").lastModified())
-
-            var changed = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
-
-            cliAssertEvidence(changed.exitCode == 0, "changed input must still launch: " + relative)
-            assert(changed.stdout == "KofMut 0.1.0\n")
-            builds = builds + "build\n"
-            cliAssertEvidence(File(log).readText() == builds, "changed contents must compile once: " + relative)
+            var saved = cliChangeKeepingTimestamp(project, file, "\n")
+            cliVersionRequiresPreparation(project, path, kof, log, builds, relative)
+            cliRestoreOriginal(saved, file)
+            cliVersionReusesImage(project, path, kof, log, relative)
         }
+        var rebuilt = cliChangeKeepingTimestamp(project, project + "/src/main/kof/kofmut/launch/Compatibility.kf", "\n")
+        var real = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "--version")
+        cliAssertEvidence(real.exitCode == 0 && real.stdout == "KofMut 0.1.0\n", "changed input must rebuild and launch: " + real.stdout + real.stderr)
+        builds = builds + "build\n"
+        assert(File(log).readText() == builds, "expected: changed contents compile once")
         assert(Directory(project + "/evaluated/src").createDirectories())
         assert(File(project + "/evaluated/src/Example.kf").writeText("main() { println(1) }\n"))
         var unrelated = process.run("/usr/bin/env", "--chdir=" + project + "/evaluated", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_COMPILE=refuse", project + "/bin/kof-mut", "--version")
@@ -483,7 +477,20 @@ test "prepared evaluations repair damaged candidates and revalidate source bytes
         assert(File(index).writeText("truncated candidate"), "expected: File(index).writeText(\"truncated candidate\")")
         var repaired = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
         cliAssertEvidence(repaired.exitCode == 3 && !repaired.stderr.contains("checking compatibility"), repaired.stdout + repaired.stderr)
-        for (var relative in listOf("classes/kofmut/launch/PreparedEntry.class", "prepared.checksums", "classes/Unexpected.class")) {
+        for (var relative in listOf("prepared.checksums", "classes/Unexpected.class")) {
+            var image = compatibilityRead(index).split("\0")[3]
+            var component = image + "/" + relative
+            var existed = File(component).exists()
+            var saved = ""
+            if (existed) { saved = cliSaveOriginal(project, component) }
+            assert(File(component).writeText("damaged generated component"), "expected: generated component damaged")
+            cliEvaluationRequiresPreparation(command, project, relative)
+            if (existed) { cliRestoreOriginal(saved, component) }
+            else { assert(File(component).delete(), "expected: unexpected component removed") }
+            cliEvaluationReusesApproval(command, project, relative)
+            assert(compatibilityRead(index).split("\0")[3] == image, "expected: refused preparation keeps the prepared image")
+        }
+        for (var relative in listOf("classes/kofmut/launch/PreparedEntry.class")) {
             var descriptor = File(index).readText()
             assert(descriptor != null, "expected: descriptor != null")
             if (descriptor != null) {
@@ -1028,7 +1035,13 @@ test "JDK contents invalidate approval with the same declared version and timest
         cliAssertEvidence(first.exitCode == 3, first.stdout + first.stderr)
         assert(File(log).readText() == "build\nbuild\n", "expected: File(log).readText() == \"build\\nbuild\\n\"")
         var expected = "build\nbuild\n"
-        for (var relative in listOf("jdk/release", "jdk/lib/jvm.cfg")) {
+        var release = distribution + "/jdk/release"
+        var saved = cliChangeKeepingTimestamp(project, release, "\n# compatibility content proof\n")
+        cliEvaluationRequiresPreparation(command, project, "jdk/release")
+        assert(File(log).readText() == expected, "expected: refused preparation does not build")
+        cliRestoreOriginal(saved, release)
+        cliEvaluationReusesApproval(command, project, "jdk/release")
+        for (var relative in listOf("jdk/lib/jvm.cfg")) {
             var file = distribution + "/" + relative
             assert(process.run("cp", "-p", file, project + "/timestamp").exitCode == 0, "expected: process.run(\"cp\", \"-p\", file, project + \"/timestamp\").exitCode == 0")
             assert(File(file).writeText(compatibilityRead(file) + "\n# compatibility content proof\n"), "expected: File(file).writeText(compatibilityRead(file) + \"\\n# compatibility content proof\\n\")")
@@ -1051,6 +1064,45 @@ test "JDK contents invalidate approval with the same declared version and timest
 void cliAssertEvidence(Bool condition, String evidence) {
     if (!condition) { println(evidence) }
     assert(condition, "behavior failed; see evidence above")
+}
+
+String cliSaveOriginal(String project, String file) {
+    var saved = project + "/original"
+    assert(process.run("/bin/cp", "-p", file, saved).exitCode == 0, "expected: original bytes and timestamp saved")
+    return saved
+}
+
+String cliChangeKeepingTimestamp(String project, String file, String appended) {
+    var saved = cliSaveOriginal(project, file)
+    assert(File(file).writeText(compatibilityRead(file) + appended), "expected: bytes changed")
+    assert(process.run("/usr/bin/touch", "-r", saved, file).exitCode == 0, "expected: timestamp restored")
+    assert(new java.io.File(file).lastModified() == new java.io.File(saved).lastModified(), "expected: timestamp preserved")
+    return saved
+}
+
+void cliRestoreOriginal(String saved, String file) {
+    assert(process.run("/bin/cp", "-p", saved, file).exitCode == 0, "expected: original bytes restored with their timestamp")
+}
+
+void cliVersionRequiresPreparation(String project, String path, String kof, String log, String builds, String subject) {
+    var refused = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_COMPILE=refuse", project + "/bin/kof-mut", "--version")
+    cliAssertEvidence(refused.exitCode == 2 && refused.stdout == "" && refused.stderr.contains("controlled toolchain refuses compilation"), subject + " must require preparation: " + refused.stdout + refused.stderr)
+    cliAssertEvidence(File(log).readText() == builds, subject + ": refused preparation must not build")
+}
+
+void cliVersionReusesImage(String project, String path, String kof, String log, String subject) {
+    var reused = process.run("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, "KOF_MUT_TEST_COMPILE=refuse", project + "/bin/kof-mut", "--version")
+    cliAssertEvidence(reused.exitCode == 0 && reused.stdout == "KofMut 0.1.0\n", subject + " restored must reuse its image: " + reused.stdout + reused.stderr)
+}
+
+void cliEvaluationRequiresPreparation(List<String> command, String project, String subject) {
+    var refused = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    cliAssertEvidence(refused.exitCode == 2 && refused.stdout == "" && refused.stderr.contains("preparation compile failed") && !refused.stderr.contains("checking compatibility"), subject + " must require preparation: " + refused.stdout + refused.stderr)
+}
+
+void cliEvaluationReusesApproval(List<String> command, String project, String subject) {
+    var reused = shell.runWith(command, project, mapOf("KOF_MUT_TEST_COMPILE", "refuse"))
+    cliAssertEvidence(reused.exitCode == 3 && !reused.stderr.contains("checking compatibility"), subject + " restored must reuse its approval: " + reused.stdout + reused.stderr)
 }
 
 void cliCleanup(String project, Bool completed) {
