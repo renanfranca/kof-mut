@@ -24,7 +24,7 @@ String controlledPath(String project) {
     return project + "/toolchain:" + System.getenv("PATH")
 }
 
-test "warm public commands run with compilation disabled" {
+test "warm public commands run with compilation disabled", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -49,7 +49,7 @@ test "warm public commands run with compilation disabled" {
     }
 }
 
-test "source launcher prints the version from VERSION" {
+test "source launcher prints the version from VERSION", "check-cli-a" {
     var expected = File("VERSION").readText()
 
     var result = process.run("./bin/kof-mut", "--version")
@@ -65,7 +65,7 @@ test "source launcher prints the version from VERSION" {
     }
 }
 
-test "an incomplete selected Kof is rejected before using a cached bootstrap" {
+test "an incomplete selected Kof is rejected before using a cached bootstrap", "check-cli-b" {
     var fake = Path("src/test/fixtures/unsupported-toolchain/bin").toAbsolute().path()
     var inherited = System.getenv("PATH")
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -77,7 +77,7 @@ test "an incomplete selected Kof is rejected before using a cached bootstrap" {
     assert(!result.stdout.contains("KofMut 0.1.0"))
 }
 
-test "source launcher works with no Python executable on PATH" {
+test "source launcher works with no Python executable on PATH", "check-cli-a" {
     var root = Path(".").toAbsolute().path()
     Directory(root + "/.agent/tmp").createDirectories()
     var temporary = Files.createTempDirectory(new java.io.File(root + "/.agent/tmp").toPath(), "no-python-").toString()
@@ -101,7 +101,7 @@ test "source launcher works with no Python executable on PATH" {
     }
 }
 
-test "launcher preserves argv cwd environment and application exit status", "launch-arguments" {
+test "launcher preserves argv cwd environment and application exit status", "launch-arguments", "check-cli-a" {
     var project = disposableProject()
     var caller = project + "/caller"
     assert(Directory(caller).createDirectories(), "expected: Directory(caller).createDirectories()")
@@ -134,7 +134,7 @@ test "launcher preserves argv cwd environment and application exit status", "lau
     }
 }
 
-test "failure to prepare the launch handoff returns an explicit error" {
+test "failure to prepare the launch handoff returns an explicit error", "check-cli-b" {
     var missing = Path(".agent/tmp/missing-handoff-" + System.nanoTime()).toAbsolute().path()
 
     var result = process.run("/usr/bin/env", "TMPDIR=" + missing, "./bin/kof-mut", "--version")
@@ -144,7 +144,7 @@ test "failure to prepare the launch handoff returns an explicit error" {
     assert(result.stderr.contains("kof-mut: cannot create launch handoff"))
 }
 
-test "cache is reused and invalidated by VERSION and source contents" {
+test "cache is reused and invalidated by VERSION and source contents", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -176,7 +176,7 @@ test "cache is reused and invalidated by VERSION and source contents" {
     }
 }
 
-test "invalid toolchain JSON cannot launch an existing cached application" {
+test "invalid toolchain JSON cannot launch an existing cached application", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -199,7 +199,7 @@ test "invalid toolchain JSON cannot launch an existing cached application" {
     }
 }
 
-test "toolchain executable remains fixed if its PATH link changes after discovery" {
+test "toolchain executable remains fixed if its PATH link changes after discovery", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -227,7 +227,7 @@ test "toolchain executable remains fixed if its PATH link changes after discover
     }
 }
 
-test "compiler failure after emitting classes is rejected and retried" {
+test "compiler failure after emitting classes is rejected and retried", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -250,7 +250,7 @@ test "compiler failure after emitting classes is rejected and retried" {
     }
 }
 
-test "concurrent cold informational launches compile the minimal bootstrap exactly once" {
+test "concurrent cold informational launches compile the minimal bootstrap exactly once", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -277,7 +277,7 @@ test "concurrent cold informational launches compile the minimal bootstrap exact
     }
 }
 
-test "interrupted compilation cannot publish classes and a fresh launch succeeds" {
+test "interrupted compilation cannot publish classes and a fresh launch succeeds", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -320,7 +320,7 @@ test "interrupted compilation cannot publish classes and a fresh launch succeeds
     }
 }
 
-test "inconsistent location descriptor is prepared again automatically" {
+test "inconsistent location descriptor is prepared again automatically", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -351,7 +351,7 @@ test "inconsistent location descriptor is prepared again automatically" {
     }
 }
 
-test "incomplete or damaged bootstrap images are rebuilt before public commands" {
+test "incomplete or damaged bootstrap images are rebuilt before public commands", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -384,7 +384,7 @@ test "incomplete or damaged bootstrap images are rebuilt before public commands"
     }
 }
 
-test "tool input bytes invalidate images even when timestamps are preserved" {
+test "tool input bytes invalidate images even when timestamps are preserved", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -433,7 +433,7 @@ String disposableDistribution(String project, String name) {
 
 record TestInstallation(String install)
 
-test "a prepared evaluation uses one work JVM and keeps its own report", "startup-optimization" {
+test "a prepared evaluation uses one work JVM and keeps its own report", "startup-optimization", "check-cli-b" {
     var project = disposableProject()
     var original = json.decode<TestInstallation>(process.run("kof", "info", "--json").stdout)
     var distribution = disposableDistribution(project, "observed Kof")
@@ -462,7 +462,7 @@ test "a prepared evaluation uses one work JVM and keeps its own report", "startu
     } finally { cliCleanup(project, completed) }
 }
 
-test "prepared evaluations repair damaged candidates and revalidate source bytes", "startup-optimization" {
+test "prepared evaluations repair damaged candidates and revalidate source bytes", "startup-optimization", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -523,7 +523,7 @@ test "prepared evaluations repair damaged candidates and revalidate source bytes
     } finally { cliCleanup(project, completed) }
 }
 
-test "installation and entire jar contents select a new image with timestamps preserved" {
+test "installation and entire jar contents select a new image with timestamps preserved", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var firstDistribution = disposableDistribution(project, "distribution one")
@@ -561,7 +561,7 @@ test "installation and entire jar contents select a new image with timestamps pr
 
 record LiveLaunch(String processDirectory, String command, Int contexts, String children)
 
-test "warm argument fixture preserves the public invocation without a compiler", "launch-arguments" {
+test "warm argument fixture preserves the public invocation without a compiler", "launch-arguments", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -599,7 +599,7 @@ test "warm argument fixture preserves the public invocation without a compiler",
     }
 }
 
-test "application consumes its handoff and forwards TERM through the public invocation" {
+test "application consumes its handoff and forwards TERM through the public invocation", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -645,7 +645,7 @@ test "application consumes its handoff and forwards TERM through the public invo
     }
 }
 
-test "runtime rejects altered fresh evidence and removes its context on failure", "compatibility-context-errors" {
+test "runtime rejects altered fresh evidence and removes its context on failure", "compatibility-context-errors", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var original = json.decode<TestInstallation>(process.run("kof", "info", "--json").stdout)
@@ -675,7 +675,7 @@ test "runtime rejects altered fresh evidence and removes its context on failure"
     }
 }
 
-test "truncated location delivery triggers preparation instead of direct execution" {
+test "truncated location delivery triggers preparation instead of direct execution", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -710,7 +710,7 @@ test "truncated location delivery triggers preparation instead of direct executi
     }
 }
 
-test "jar hash failure returns two and cannot execute the warm image" {
+test "jar hash failure returns two and cannot execute the warm image", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -746,7 +746,7 @@ List<String> compatibilityInvocation(String project, String path, String kof, St
     return listOf("/usr/bin/env", "PATH=" + path, "KOF_MUT_TEST_KOF=" + kof, "KOF_MUT_TEST_LOG=" + log, project + "/bin/kof-mut", "run", "--project", evaluated, "--files", project + "/empty-scope.json", "--report-dir", project + "/reports")
 }
 
-test "a new Kof prepares and checks compatibility once before evaluation", "compatibility", "startup-optimization" {
+test "a new Kof prepares and checks compatibility once before evaluation", "compatibility", "startup-optimization", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -777,7 +777,7 @@ test "a new Kof prepares and checks compatibility once before evaluation", "comp
     } finally { cliCleanup(project, completed) }
 }
 
-test "compilation alone cannot approve a frontend behavior change and retry repairs it", "compatibility", "startup-optimization" {
+test "compilation alone cannot approve a frontend behavior change and retry repairs it", "compatibility", "startup-optimization", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -810,7 +810,7 @@ test "compilation alone cannot approve a frontend behavior change and retry repa
     } finally { cliCleanup(project, completed) }
 }
 
-test "concurrent first evaluations share one complete preparation", "compatibility", "startup-optimization" {
+test "concurrent first evaluations share one complete preparation", "compatibility", "startup-optimization", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -853,7 +853,7 @@ Bool compatibilityProcessActive(String pid) {
     return result.exitCode == 0 && result.stdout.trim() != "" && !result.stdout.trim().startsWith("Z")
 }
 
-test "INT and TERM discard an emitted candidate and allow retry without cleanup", "compatibility", "startup-optimization" {
+test "INT and TERM discard an emitted candidate and allow retry without cleanup", "compatibility", "startup-optimization", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -897,7 +897,7 @@ test "INT and TERM discard an emitted candidate and allow retry without cleanup"
     } finally { cliCleanup(project, completed) }
 }
 
-test "a preparation command timeout refuses evaluation and retry needs no cache cleanup", "compatibility", "compatibility-timeout" {
+test "a preparation command timeout refuses evaluation and retry needs no cache cleanup", "compatibility", "compatibility-timeout", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -942,7 +942,7 @@ test "a preparation command timeout refuses evaluation and retry needs no cache 
     }
 }
 
-test "contents changing during preparation cannot publish approval even with preserved timestamps", "compatibility", "startup-optimization" {
+test "contents changing during preparation cannot publish approval even with preserved timestamps", "compatibility", "startup-optimization", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -986,7 +986,7 @@ test "contents changing during preparation cannot publish approval even with pre
     } finally { if (child.isAlive()) { child.destroyForcibly() }; cliCleanup(project, completed) }
 }
 
-test "all informational commands avoid engine compilation even with invalid engine syntax", "compatibility", "startup-optimization" {
+test "all informational commands avoid engine compilation even with invalid engine syntax", "compatibility", "startup-optimization", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -1015,7 +1015,7 @@ test "all informational commands avoid engine compilation even with invalid engi
     } finally { cliCleanup(project, completed) }
 }
 
-test "JDK contents invalidate approval with the same declared version and timestamps", "compatibility", "startup-optimization" {
+test "JDK contents invalidate approval with the same declared version and timestamps", "compatibility", "startup-optimization", "check-cli-b" {
     var project = disposableProject()
     var path = controlledPath(project)
     var installed = json.decode<TestInstallation>(process.run("kof", "info", "--json").stdout)
@@ -1124,7 +1124,7 @@ void cliCleanup(String project, Bool completed) {
 
 record CompatibilityTiming(Long durationMs)
 
-test "slow compilation and mutation trials retain real behavioral approval", "compatibility", "compatibility-limits" {
+test "slow compilation and mutation trials retain real behavioral approval", "compatibility", "compatibility-limits", "check-cli-a" {
     var project = disposableProject()
     var path = controlledPath(project)
     var kof = process.run("/usr/bin/which", "kof").stdout.trim()
@@ -1167,7 +1167,7 @@ Bool observerAlive(String observations) {
     return process.run("/usr/bin/pgrep", "-f", observations).exitCode == 0
 }
 
-test "check observer preserves the command status and records its process tree", "check-observer" {
+test "check observer preserves the command status and records its process tree", "check-observer", "check-cli-a" {
     var project = disposableProject()
     var observations = project + "/observations"
     var orphan = ""
@@ -1203,7 +1203,7 @@ test "check observer preserves the command status and records its process tree",
     }
 }
 
-test "check observer forwards TERM and keeps its samples", "check-observer" {
+test "check observer forwards TERM and keeps its samples", "check-observer", "check-cli-b" {
     var project = disposableProject()
     var observations = project + "/observations"
 

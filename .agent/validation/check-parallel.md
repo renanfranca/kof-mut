@@ -43,3 +43,88 @@ Real run per queue, compared with the sequential check of the same day (`.agent/
 - A test that is missing from one queue and duplicated in the other at the same time leaves the sum unchanged and is not caught.
 - One real run only. Timing tests passed under this load, but sensitivity to heavier host load is not measured.
 - Kof 0.6.6 was not rerun as the first Kof; the change touches only the check script and test tags.
+
+## Regression with Kof 0.6.4
+
+From 2026-10-31 on, the user chose Kof 0.6.4 (`kof.jar` SHA-256 `137a838d38757e317545474d55ad6a3ad291fb86d263ae77d9197cf705829c62`) as the regression Kof instead of 0.6.6. Same tree as above. Commands ran one after another (`kof-064/summary.txt`, outputs in `kof-064/*.out`):
+
+| Kof first on PATH | Command | Result |
+|---|---|---|
+| 0.6.4 | `kof test src/test/kof/kofmut/Cli.kf --tag compatibility` | exit 0, 9/9, 285 s |
+| 0.6.4 | `kof test src/test/kof/kofmut/Cli.kf --tag launch-arguments` | exit 0, 2/2, 41 s |
+| 0.6.4 | `KOF_MUT_COMPATIBILITY_OTHER=<0.6.8 bin> kof test src/test/kof/kofmut/Install.kf --tag compatibility` | exit 0, 7/7, 201 s |
+| 0.6.4 | `kof test src/test/kof/kofmut/Install.kf --tag launch-arguments` | exit 0, 1/1, 30 s |
+| 0.6.4 | `./scripts/launch contracts` | exit 0, 6 s |
+| 0.6.8 | `KOF_MUT_COMPATIBILITY_OTHER=<0.6.4 bin> ./scripts/check` | exit 0, 1043 s |
+
+- In the full check, the queues gave cli 34/34 in 909 s, run 47/47 in 960 s, install-a 15/15 in 1041 s and install-b 16/16 in 956 s.
+- `version` and `contracts` took 0 s and 1 s because their prepared images from the previous run were reused.
+- Observation directory: `.agent/tmp/check-b8675a9a-3a5f-4d93-aa71-fad4b2d9f736/`, with no leftover process and the highest load1 at 15.46.
+
+## Seven queues, not adopted as measured
+
+Each suite was split into queues: `cli-a`/`cli-b`, `run-a`/`run-b`, `install-a`/`install-b`/`install-c`, plus `contracts`. Every test in the three files carries one `check-<queue>` tag, and the coverage guard covers all three files. The fake harness controls passed (`seven/`: pass 0; one short queue per file 1 with the coverage message; failing queue 1 after all queues; TERM 143, INT 130).
+
+Real run: Kof 0.6.4 first on PATH (the user's default, `seven/kof-default.json`), `KOF_MUT_COMPATIBILITY_OTHER` = 0.6.8, host turbo mode enabled by the user. `./scripts/check` exited 1 in 786 s. The highest load1 was 22.55, and no queue left a process. Observation directory: `.agent/tmp/check-e1b5a6cb-17e3-4ec7-90cb-b9356e24a4ad/`.
+
+| Queue | Result | Time |
+|---|---|---|
+| cli-a | 17/17 | 555 s |
+| cli-b | 17/17 | 512 s |
+| run-a | 23/24 | 572 s |
+| run-b | 23/23 | 539 s |
+| install-a | 9/10 | 780 s |
+| install-b | 11/11 | 657 s |
+| install-c | 10/10 | 670 s |
+
+Two failures, both from test timing under load. Neither is a production fault:
+
+- **`Run.kf`, "individual timeout and global budget stop active descendants…": `descendant and parent must have started`.** The individual mode gives the fixture runner a 3000 ms command timeout, and its parent and child did not both write the ready marker before the timeout.
+- **`Install.kf`, "INT and TERM stop installer children…": `behavior failed`.** The independent evaluation timed out in its baseline check (exit 137 after 120073 ms; report `incomplete`). The test holds that baseline until it has finished four interrupted installer updates and their four recovery installs. The fixture gives the check a 120000 ms command timeout, and under this load those cycles took longer than that. Alone, the whole test took 45 s.
+
+The README edit happened a few seconds after this run started. Neither failure involves README contents.
+
+### Rerun with more slack in two tests
+
+At the user's choice, two test-only timing values were raised: the individual command timeout in that `Run.kf` test went from 3000 to 6000 ms, and the command timeout of the shared installed evaluation fixture (`startInstalledEvaluationPath` in `Install.kf`) went from 120000 to 300000 ms. No production deadline changed.
+
+The same run (0.6.4 first, 0.6.8 as the alternate) exited 1 in 759 s, with the highest load1 at 22.51 and no leftover process. Observation directory: `.agent/tmp/check-f51f370d-a141-46e0-ae75-f4f8f542a0c3/`.
+
+- All queues passed except `install-a` (9/10). The `Run.kf` test passed.
+- The Install test failed again, this time with `baseline_failed`: `Invalid check JSON: unexpected end of JSON` after 132851 ms.
+- **Cause:** the fixture `src/test/fixtures/m3-runner` holds the baseline with a child `sleep 120`. When the release came after 132 s, that child had already exited, and `kill -KILL "$child"` failed under `set -e`, with stderr `kill: (1339407) - No such process`.
+
+So the fixture itself requires the release within 120 s, whatever the command timeout. The test was not rerun.
+
+### Fixture child sleep and a contract defect
+
+With the user's approval, the child in `src/test/fixtures/m3-runner` now sleeps 600 s instead of 120 s. Release still kills it, so passing tests take the same time. No test matches the old text.
+
+That run (0.6.4 first, 0.6.8 as the alternate) exited 1 in 791 s, with the highest load1 at 25.75 and no leftover process. Observation directory: `.agent/tmp/check-52ef2f1f-7364-47c3-8530-07570e73e4fc/`.
+
+- All seven test queues passed, including the Install test from above.
+- The `contracts` queue failed: `expected: another identity is not approved`.
+- **Cause:** a defect in the contract written during the check diagnostics work. It built the other identity as `"0" + identity.substring(1)`. The identity includes the temporary fixture path, so it changes per run, and about 1 run in 16 it already starts with `0`. In those runs the "other" identity equals the original.
+- **Fix:** use `1` when the identity starts with `0`. `./scripts/launch contracts` then passed, 19 PASS lines.
+
+### Final seven queue run, adopted
+
+Kof 0.6.4 was first on PATH, with `KOF_MUT_COMPATIBILITY_OTHER` = 0.6.8 and the user's turbo mode enabled. `./scripts/check` exited 0 in 795 s (`seven-final/`).
+
+| Queue | Result | Time |
+|---|---|---|
+| version | passed | 0 s |
+| contracts | 19 PASS | 1 s |
+| cli-a | 17/17 | 562 s |
+| cli-b | 17/17 | 523 s |
+| run-a | 24/24 | 583 s |
+| run-b | 23/23 | 524 s |
+| install-a | 10/10 | 794 s |
+| install-b | 11/11 | 664 s |
+| install-c | 10/10 | 683 s |
+
+- Observation directory: `.agent/tmp/check-6718ed0c-1702-4dc7-ad2d-28561b86c31f/`, with no leftover process and the highest load1 at 27.48.
+- Compared with five queues: 795 s against about 1040 s, under turbo mode, so the two figures are not directly comparable.
+- This is the first full check with 0.6.4 as the main Kof.
+- `install-a` is now the slowest queue by about 110 s.
+- Each change after the first failed run fixed a separate cause and was checked by a new run, not by repeating an unchanged tree.

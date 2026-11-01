@@ -4,7 +4,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Current entry points
 
-- [Parallel check queues](validation/check-parallel.md): the check runs its suites as five parallel queues with an Install coverage guard; full check passes on 0.6.8 with 0.6.6 in 1037 s instead of 2631 s.
+- [Parallel check queues](validation/check-parallel.md): the check runs its suites as seven test queues plus contracts, with a coverage guard per test file; the full check passes in 795 s instead of 2631 s, with 0.6.4 first and 0.6.8 as the alternate. Also records the fixes to test timing and to a contract.
 - [Explainable check failures and fewer repeated preparations](validation/check-diagnostics.md): named assertion failures, retained evidence, waits aligned with production bounds, the check observation directory, direct compatibility contracts and fewer real builds; final check passes on 0.6.8 with 0.6.6, with partial criteria listed.
 
 - [Authorized timeout integration acceptance](validation/multiple-invocations-recovery.md#authorized-timeout-integration-acceptance-2026-10-26): current continuation passes public compatibility, the full check and all four fresh real SiFuture scenarios with the authorized deadlines. Historical failures below remain preserved.

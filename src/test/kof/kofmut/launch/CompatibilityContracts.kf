@@ -104,7 +104,10 @@ Bool contractApproved(CompatibilityFixture fixture) {
 void approvalDecision(CompatibilityFixture fixture) {
     contractImage(fixture)
     assert(contractApproved(fixture), "expected: recorded approval with matching identity, inputs and classes is approved")
-    assert(!compatibilityApproved(fixture.image, "0" + fixture.identity().substring(1), fixture.installation.kof, fixture.inputs(), fixture.work), "expected: another identity is not approved")
+    var identity = fixture.identity()
+    var anotherIdentity = "0" + identity.substring(1)
+    if (identity.startsWith("0")) { anotherIdentity = "1" + identity.substring(1) }
+    assert(!compatibilityApproved(fixture.image, anotherIdentity, fixture.installation.kof, fixture.inputs(), fixture.work), "expected: another identity is not approved")
     assert(!compatibilityApproved(fixture.image, fixture.identity(), "0.6.6", fixture.inputs(), fixture.work), "expected: another Kof version is not approved")
 
     var source = fixture.root + "/src/main/kof/kofmut/Main.kf"

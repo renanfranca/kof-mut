@@ -38,17 +38,33 @@ print_each_queue_as_it_finishes() {
         echo "queue $queue: exit $status in $(( ($(date +%s%3N) - KOF_MUT_QUEUE_START_MS[$queue]) / 1000 )) s"
     done
 }
+KOF_MUT_TEST_QUEUES=(
+    "cli-a Cli.kf" "cli-b Cli.kf"
+    "run-a Run.kf" "run-b Run.kf"
+    "install-a Install.kf" "install-b Install.kf" "install-c Install.kf"
+)
 selected_and_total_tests() {
-    sed -n "s/^kof test: tag '$2' (\([0-9]*\) of \([0-9]*\))\$/\1 \2/p" -- "$KOF_MUT_CHECK_OBSERVATIONS/$1.out"
+    sed -n "s/^kof test: tag 'check-$1' (\([0-9]*\) of \([0-9]*\))\$/\1 \2/p" -- "$KOF_MUT_CHECK_OBSERVATIONS/$1.out"
 }
-install_queues_cover_every_test() {
-    local a b total_a total_b
-    read -r a total_a <<< "$(selected_and_total_tests install-a check-install-a)"
-    read -r b total_b <<< "$(selected_and_total_tests install-b check-install-b)"
-    if [[ -z "$a" || -z "$b" || "$total_a" != "$total_b" ]] || (( a + b != total_a )); then
-        echo "check queues do not cover Install.kf: ${a:-?} + ${b:-?} of ${total_a:-?}" >&2
-        return 1
-    fi
+queues_of_each_file_cover_every_test() {
+    local file entry queue suite selected total parts sum expected uncovered=0
+    for file in Cli.kf Run.kf Install.kf; do
+        parts=() sum=0 expected=""
+        for entry in "${KOF_MUT_TEST_QUEUES[@]}"; do
+            read -r queue suite <<< "$entry"
+            [[ "$suite" == "$file" ]] || continue
+            read -r selected total <<< "$(selected_and_total_tests "$queue")"
+            parts+=("${selected:-?}")
+            sum=$(( sum + ${selected:-0} ))
+            if [[ -z "$total" || ( -n "$expected" && "$total" != "$expected" ) ]]; then expected="?"; elif [[ -z "$expected" ]]; then expected=$total; fi
+        done
+        if [[ "$expected" == "?" ]] || (( sum != expected )); then
+            local joined="${parts[*]}"
+            echo "check queues do not cover $file: ${joined// / + } of $expected" >&2
+            uncovered=1
+        fi
+    done
+    return "$uncovered"
 }
 
 start_observed_queue version -- ./bin/kof-mut --version
@@ -56,15 +72,16 @@ print_each_queue_as_it_finishes
 (( KOF_MUT_QUEUE_STATUS[version] == 0 )) || exit "${KOF_MUT_SIGNAL_STATUS:-${KOF_MUT_QUEUE_STATUS[version]}}"
 [[ -z "$KOF_MUT_SIGNAL_STATUS" ]] || exit "$KOF_MUT_SIGNAL_STATUS"
 
-start_observed_queue cli -- kof test src/test/kof/kofmut/Cli.kf
-start_observed_queue run -- kof test src/test/kof/kofmut/Run.kf
-start_observed_queue install-a -- kof test src/test/kof/kofmut/Install.kf --tag check-install-a
-start_observed_queue install-b -- kof test src/test/kof/kofmut/Install.kf --tag check-install-b
+for entry in "${KOF_MUT_TEST_QUEUES[@]}"; do
+    read -r queue suite <<< "$entry"
+    start_observed_queue "$queue" -- kof test "src/test/kof/kofmut/$suite" --tag "check-$queue"
+done
 start_observed_queue contracts -- ./scripts/launch contracts
 print_each_queue_as_it_finishes
 
 [[ -z "$KOF_MUT_SIGNAL_STATUS" ]] || exit "$KOF_MUT_SIGNAL_STATUS"
-for queue in cli run install-a install-b contracts; do
+for entry in "${KOF_MUT_TEST_QUEUES[@]}" contracts; do
+    read -r queue _ <<< "$entry"
     (( KOF_MUT_QUEUE_STATUS[$queue] == 0 )) || exit "${KOF_MUT_QUEUE_STATUS[$queue]}"
 done
-install_queues_cover_every_test
+queues_of_each_file_cover_every_test

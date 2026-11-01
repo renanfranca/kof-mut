@@ -12,7 +12,7 @@ printf '%s:%s\n' "$variant" "$phase" >> "$log/commands"
 if [[ "$variant-$phase" == "$mode" ]]; then
     printf '%s\n' "$PWD" > "$log/cwd"
     printf '%s\n' "$BASHPID" > "$log/parent.pid"
-    (printf '%s\n' "$BASHPID" > "$log/child.pid"; exec sleep 120) &
+    (printf '%s\n' "$BASHPID" > "$log/child.pid"; exec sleep 600) &
     child=$!
     while [[ ! -s "$log/child.pid" ]]; do sleep 0.01; done
     kill -0 "$child"
