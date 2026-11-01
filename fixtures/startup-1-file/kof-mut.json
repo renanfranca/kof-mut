@@ -22,7 +22,7 @@
     "test",
     "tests"
   ],
-  "commandTimeoutMs": 60000,
+  "commandTimeoutMs": 600000,
   "budgetMs": 0,
   "maxParallelMutants": 1
 }

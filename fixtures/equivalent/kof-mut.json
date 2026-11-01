@@ -5,6 +5,6 @@
   "inputs": ["kof.toml", "src", "tests"],
   "checkCommand": ["kof", "check", "src/math/Calc.kf", "--json"],
   "testCommand": ["kof", "test", "tests"],
-  "commandTimeoutMs": 10000,
-  "budgetMs": 90000
+  "commandTimeoutMs": 600000,
+  "budgetMs": 3600000
 }

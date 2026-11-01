@@ -35,6 +35,7 @@ void installReady(String path, Process child) {
 
 Long installPreparationDeadlineWithCleanupMs() { return 92000 as Long }
 Long commandTimeoutBeyondAnyInstallerWorkMs() { return 3600000 as Long }
+Long hangProtectionCommandTimeoutMs() { return 600000 as Long }
 
 void stopRunnerGroupLeftActive(String log) {
     if (File(log + "/parent.pid").exists()) { var killed = process.run("kill", "-KILL", "--", "-" + installText(log + "/parent.pid").trim()) }
@@ -272,7 +273,7 @@ test "confirmed evaluation with budget zero can exceed ninety seconds", "startup
     assert(File(project + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"identity\" { assert(time.now() > 0); assert(new Calc().sum(5, 0) == 5) }\n"))
     assert(File(project + "/slow-command").writeText("#!/bin/bash\n/bin/sleep 46\nexec kof \"$@\"\n"))
     assert(new java.io.File(project + "/slow-command").setExecutable(true, true))
-    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml", "slow-command"), listOf("./slow-command", "check", "src/math/Calc.kf", "--json"), listOf("./slow-command", "test", "tests"), 60000, 0))))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml", "slow-command"), listOf("./slow-command", "check", "src/math/Calc.kf", "--json"), listOf("./slow-command", "test", "tests"), hangProtectionCommandTimeoutMs(), 0))))
     var command = installEnvironment(journey)
     command.add(journey.prefix + "/bin/kof-mut"); command.add("run"); command.add("--project"); command.add(project); command.add("--files"); command.add(project + "/scope.json"); command.add("--report-dir"); command.add(journey.base + "/long reports")
     var started = System.nanoTime()

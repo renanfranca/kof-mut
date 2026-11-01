@@ -162,3 +162,38 @@ Principle: in a passing test, no deadline decides the outcome except the deadlin
   - All Install queues passed, including the four held evaluations (install-a 10/10, install-b 11/11, install-c 10/10).
   - `run-b` failed 1 of 23: "run detects a changed arithmetic result with compiler and suite evidence". Its baseline `kof test` (real Kof) timed out at 10127 ms against `commandTimeoutMs` 10000 in `fixtures/detected/kof-mut.json`.
   - This is the same class of race in another test: a real Kof JVM against a fixture deadline that the test does not verify. The same 10000 ms value appears in `fixtures/equivalent`, `fixtures/survived` and `fixtures/invalid`, and in `fixtureConfig(…, 10000, …)` calls that use the real runner. Not changed yet.
+
+### Fixture deadlines
+
+The same race appeared wherever real Kof ran against a fixture deadline that the test does not verify. Changed:
+
+- **`fixtures/detected`, `survived`, `invalid` and `equivalent`:** `commandTimeoutMs` 10000 → 600000 and `budgetMs` 90000 → 3600000.
+- **`fixtures/startup-1-file` and `startup-4-file`:** `commandTimeoutMs` 60000 → 600000.
+- **`Run.kf`:** the 18 `fixtureConfig(…, 10000, 90000)` calls in 17 tests that run commands now use `hangProtectionCommandTimeoutMs()` (600000) and `hangProtectionBudgetMs()` (3600000).
+- **`Install.kf`:** "confirmed evaluation with budget zero can exceed ninety seconds" uses `hangProtectionCommandTimeoutMs()` instead of 60000. The 46 s sleep plus a real Kof JVM had a 14 s margin.
+
+Unchanged:
+
+- "configuration and CLI input errors do not execute project commands" and "zero budget requires explicit integer configuration…" keep the literal 10000 and 90000. They rewrite the config text through those literals, and they run no project command.
+- Configs whose commands are `touch` keep their values.
+- Tests that verify a timeout or budget keep their own values.
+- The documentation examples keep 10000.
+
+Result, run once: `KOF_MUT_COMPATIBILITY_OTHER=<0.6.8 bin> ./scripts/check` with 0.6.4 first exited 0 in 767 s, highest load1 23.96, with no leftover process (`check-fixtures.out`, `.agent/tmp/check-6079b6d4-8250-4a1f-9137-9885f6ef13c5/`).
+
+| Queue | Result | Time |
+|---|---|---|
+| version | passed | 0 s |
+| contracts | passed | 2 s |
+| cli-a | 17/17 | 541 s |
+| cli-b | 17/17 | 500 s |
+| run-a | 24/24 | 559 s |
+| run-b | 23/23 | 506 s |
+| install-a | 10/10 | 765 s |
+| install-b | 11/11 | 641 s |
+| install-c | 10/10 | 659 s |
+
+Remaining environment dependencies, not changed:
+
+- **Production deadlines.** The compatibility probe uses a 10000 ms command timeout, and preparation has a 90000 ms limit. Under extreme load (load1 about 100 on 32 cores) the product refuses, by design.
+- **Bounds the tests impose themselves.** For example, the 30 s `installReady` wait and the 92 s preparation bound mirror production limits or bound the test's own waits.
