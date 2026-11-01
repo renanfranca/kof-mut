@@ -552,7 +552,7 @@ test "early INT and TERM cancel both unregistered children and children awaiting
     }
 }
 
-test "checkout changes after compilation refuse mixed VERSION and code then stable B installs", "m5-fixes", "update", "package", "check-install-a" {
+test "checkout changes after compilation refuse mixed VERSION and code then stable B installs", "m5-fixes", "update", "package", "check-install-b" {
     var journey = installJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)
@@ -749,7 +749,7 @@ test "checkout changes before bootstrap capture refuse incomplete or stale compi
     }
 }
 
-test "missing incompatible or contradictory installation context cannot authorize publication", "m5-fixes", "install", "package", "package-context", "check-install-a" {
+test "missing incompatible or contradictory installation context cannot authorize publication", "m5-fixes", "install", "package", "package-context", "check-install-c" {
     var journey = installJavaJourney()
     var command = installEnvironment(journey)
     command.add(journey.checkout + "/install.sh"); command.add("--prefix"); command.add(journey.prefix)

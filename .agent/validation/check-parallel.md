@@ -197,3 +197,26 @@ Remaining environment dependencies, not changed:
 
 - **Production deadlines.** The compatibility probe uses a 10000 ms command timeout, and preparation has a 90000 ms limit. Under extreme load (load1 about 100 on 32 cores) the product refuses, by design.
 - **Bounds the tests impose themselves.** For example, the 30 s `installReady` wait and the 92 s preparation bound mirror production limits or bound the test's own waits.
+
+### Install queue rebalance
+
+In parallel, `install-a` ran 105 to 125 s behind the other Install queues in three runs, although the sequential measurement balanced them (697, 715 and 697 s). Two tests moved:
+
+- "checkout changes after compilation refuse mixed VERSION and code then stable B installs": `install-a` → `install-b`;
+- "missing incompatible or contradictory installation context cannot authorize publication": `install-a` → `install-c`.
+
+The estimate was about 683, 699 and 683 s.
+
+Result, run once with 0.6.4 first and `KOF_MUT_COMPATIBILITY_OTHER` = 0.6.8: exit 0 in 733 s, highest load1 23.54, no leftover process. Observation directory: `.agent/tmp/check-c49b1c87-a43d-4610-9cc8-74395a6dcd8c/`; output in `.agent/tmp/deterministic-timeouts/check-rebalance.out`.
+
+| Queue | Before | After |
+|---|---|---|
+| install-a | 10 tests, 765 s | 8 tests, 732 s |
+| install-b | 11 tests, 641 s | 12 tests, 687 s |
+| install-c | 10 tests, 659 s | 11 tests, 681 s |
+| total | 767 s | 733 s |
+
+- The total fell 34 s, which is close to the run to run variation of about 25 s.
+- `install-a` is still the slowest queue, 45 s ahead of `install-b`. That misses the adoption criterion of 30 s set before the run.
+- The two moved tests cost their new queues 46 s and 22 s, close to the estimate. `install-a` lost only 33 s, against the 82 s expected. Its remaining tests slowed when the other queues grew, so the parallel cost of a test depends on the whole mix.
+- **Adopted** by the user despite the missed criterion: the change is tags only, the check passed, and it did not get slower.
