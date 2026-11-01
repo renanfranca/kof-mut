@@ -128,3 +128,37 @@ Kof 0.6.4 was first on PATH, with `KOF_MUT_COMPATIBILITY_OTHER` = 0.6.8 and the 
 - This is the first full check with 0.6.4 as the main Kof.
 - `install-a` is now the slowest queue by about 110 s.
 - Each change after the first failed run fixed a separate cause and was checked by a new run, not by repeating an unchanged tree.
+
+## Deadlines that no longer decide passing tests
+
+Principle: in a passing test, no deadline decides the outcome except the deadline under test, and only the deliberate hang runs inside that window. Evidence: `.agent/tmp/deterministic-timeouts/`. The load harness `load.sh` runs N busy loops around a command.
+
+### Causes found
+
+- **Run timeout test.** In `timeout` mode, `src/test/fixtures/mutation-runner` simulated only the hanging mutant test. Baseline check, baseline test and the mutant check ran real Kof (one JVM each) inside the measured windows: the individual timeout and the global budget, which starts before the baseline. Under load, the mutant check exceeded the timeout, so the mutant test never started.
+- **Install evaluations held through installer work.** The test holds the evaluation until it writes `release`, while it runs installer builds that have no bound (`shell.runWith`). Two finite values raced with that work: the evaluated command timeout (120 s) and the `m3-runner` child `sleep 120`.
+
+### Changes, replacing the earlier slack
+
+- **`mutation-runner` in `timeout` mode** answers check and test synthetically. Only the candidate containing `7 / 0` gets an `ARITH001` rejection, which keeps `global-discard` meaningful. Real `ARITH001` discards stay covered by "a coherent compiler rejection is discarded…" and "compiler rejection permits a later detected mutant…". The individual timeout is back to 3000 ms.
+- **`Install.kf`:**
+  - `commandTimeoutBeyondAnyInstallerWorkMs()` = 3600000 ms is used by `startInstalledEvaluationPath` and by "failed preparation preserves A…" (previously 120000 ms). It is a safety value; the evaluations end through the test's `finally`.
+  - `stopRunnerGroupLeftActive(log)` kills the runner process group in those `finally` blocks, mirroring the existing idiom in `Run.kf`.
+- **`m3-runner`:** the child runs `sleep infinity`. It dies by release, by kof-mut cleanup (asserted in `Run.kf` `assertStopped`) or by the test's `finally`. It does not die with its parent, because that would hide a cleanup failure.
+
+### Runs (each once, Kof 0.6.4 first)
+
+| Tree | Load | Command | Result |
+|---|---|---|---|
+| before (timeout 6000 ms) | 96 busy loops, load1 up to 49.6 | `kof test Run.kf --tag timeout` | exit 1, `descendant and parent must have started` (`control-before.out`) |
+| after (timeout 3000 ms) | 96 busy loops, load1 up to 64.8 | `kof test Run.kf --tag timeout` | exit 0, 1/1, no leftover (`run-after-load.out`) |
+| after | 96 busy loops, load1 about 100 | `kof test Install.kf --tag update` | exit 1, 5/9 passed in 1737 s (`install-update-load.out`) |
+| after | none added; the run started while load1 was still decaying from 47 | `KOF_MUT_COMPATIBILITY_OTHER=<0.6.8 bin> ./scripts/check` | exit 1 in 790 s (`check.out`) |
+
+- **Install under load: inconclusive for this change.**
+  - Three evaluations never reached the hold. The product's compatibility probe failed first: its real `kof test` exceeded the production 10000 ms command timeout in `CompatibilityProbe.kf` ("synthetic mutation exit"). That is the product correctly refusing an environment it cannot verify in time; production deadlines were not changed.
+  - The fourth failure was the test's own 30 s `installReady` bound ("readiness missing: …/concurrent-B").
+- **Full check.** Every queue passed except `run-b`. Observation directory: `.agent/tmp/check-b3de23be-1db2-41fc-a07d-ad69333b1be8/`, no leftover after any stage.
+  - All Install queues passed, including the four held evaluations (install-a 10/10, install-b 11/11, install-c 10/10).
+  - `run-b` failed 1 of 23: "run detects a changed arithmetic result with compiler and suite evidence". Its baseline `kof test` (real Kof) timed out at 10127 ms against `commandTimeoutMs` 10000 in `fixtures/detected/kof-mut.json`.
+  - This is the same class of race in another test: a real Kof JVM against a fixture deadline that the test does not verify. The same 10000 ms value appears in `fixtures/equivalent`, `fixtures/survived` and `fixtures/invalid`, and in `fixtureConfig(…, 10000, …)` calls that use the real runner. Not changed yet.

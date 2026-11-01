@@ -256,7 +256,7 @@ test "individual timeout and global budget stop active descendants and reconcile
     try {
         for (var mode in listOf("individual", "global", "global-discard")) {
             var source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a + b } }\n"
-            var timeout: Long = 6000
+            var timeout: Long = 3000
             var budget: Long = 30000
             if (mode == "global" || mode == "global-discard") { source = "package src.math\nclass Calc { Int sum(Int a, Int b) { return a + b + 0 } }\n"; timeout = 20000; budget = 8000 }
             if (mode == "global-discard") {

@@ -34,6 +34,11 @@ void installReady(String path, Process child) {
 }
 
 Long installPreparationDeadlineWithCleanupMs() { return 92000 as Long }
+Long commandTimeoutBeyondAnyInstallerWorkMs() { return 3600000 as Long }
+
+void stopRunnerGroupLeftActive(String log) {
+    if (File(log + "/parent.pid").exists()) { var killed = process.run("kill", "-KILL", "--", "-" + installText(log + "/parent.pid").trim()) }
+}
 
 void installEvaluationReady(String path, Process child, Long started) {
     var elapsed = (System.nanoTime() - started) / 1000000
@@ -56,7 +61,7 @@ Process startInstalledEvaluationPath(InstallJourney journey, String label, Strin
     var copiedRunner = process.run("cp", "-a", "src/test/fixtures/m3-runner", runner)
     assert(copiedRunner.exitCode == 0)
     assert(File(project + "/src/math/original.txt").writeText(installText(project + "/src/math/Calc.kf")))
-    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), 300000, 0))))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), commandTimeoutBeyondAnyInstallerWorkMs(), 0))))
     var log = project + "/observations"
     assert(Directory(log).createDirectories())
     var stream = process.run("ln", "-s", "run.stdout", log + "/stdout")
@@ -358,7 +363,7 @@ test "failed preparation preserves A and activation of B preserves an active A e
     var copiedRunner = process.run("cp", "-a", "src/test/fixtures/m3-runner", runner)
     assert(copiedRunner.exitCode == 0)
     assert(File(project + "/src/math/original.txt").writeText(installText(project + "/src/math/Calc.kf")))
-    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), 120000, 0))))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(InstallConfig(1, listOf("src"), listOf("tests"), listOf("src", "tests", "kof.toml"), listOf(runner, "check", "baseline-check"), listOf(runner, "test", "baseline-check"), commandTimeoutBeyondAnyInstallerWorkMs(), 0))))
     var log = journey.base + "/active"
     assert(Directory(log).createDirectories())
     var runnerObservesDiscoveryStream = process.run("ln", "-s", "run.stdout", log + "/stdout")
@@ -405,6 +410,7 @@ test "failed preparation preserves A and activation of B preserves an active A e
         assert(installText(reportFile).contains("\"toolVersion\":\"0.1.0\""), "A must finish against A's VERSION")
     } finally {
         if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        stopRunnerGroupLeftActive(log)
     }
 }
 
@@ -460,7 +466,10 @@ test "INT and TERM stop installer children before and after emission and permit 
         assert(File(log + "/release").writeText("continue"), "expected: File(log + \"/release\").writeText(\"continue\")")
         assert(independent.waitFor(10000 as Long, TimeUnit.MILLISECONDS), "expected: independent.waitFor(10000 as Long, TimeUnit.MILLISECONDS)")
         installAssertEvidence(independent.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
-    } finally { if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
+    } finally {
+        if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        stopRunnerGroupLeftActive(log)
+    }
 }
 
 test "early INT and TERM cancel both unregistered children and children awaiting setsid", "m5-fixes", "update", "check-install-c" {
@@ -536,7 +545,10 @@ test "early INT and TERM cancel both unregistered children and children awaiting
         assert(File(log + "/release").writeText("continue"))
         assert(independent.waitFor(10000 as Long, TimeUnit.MILLISECONDS))
         installAssertEvidence(independent.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
-    } finally { if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
+    } finally {
+        if (independent.isAlive()) { independent.destroy(); independent.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        stopRunnerGroupLeftActive(log)
+    }
 }
 
 test "checkout changes after compilation refuse mixed VERSION and code then stable B installs", "m5-fixes", "update", "package", "check-install-a" {
@@ -1035,7 +1047,10 @@ test "an unusable selected Kof stops before project commands and valid PATH reco
         assert(File(log + "/release").writeText("continue"), "expected: File(log + \"/release\").writeText(\"continue\")")
         assert(running.waitFor(10000 as Long, TimeUnit.MILLISECONDS), "expected: running.waitFor(10000 as Long, TimeUnit.MILLISECONDS)")
         installAssertEvidence(running.exitValue() == 0, installText(log + "/run.stdout") + installText(log + "/run.stderr"))
-    } finally { if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) } }
+    } finally {
+        if (running.isAlive()) { running.destroy(); running.waitFor(5000 as Long, TimeUnit.MILLISECONDS) }
+        stopRunnerGroupLeftActive(log)
+    }
 }
 
 test "a read only application writes logs to state and refuses log destinations inside inputs", "install", "check-install-b" {

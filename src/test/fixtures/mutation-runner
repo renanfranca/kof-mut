@@ -120,6 +120,18 @@ if [[ "$mutant" == true ]]; then
         runner-error:test) printf 'runner unavailable\n' >&2; exit 127 ;;
     esac
 fi
+if [[ "$mode:$phase" == timeout:check ]]; then
+    if grep -qF '7 / 0' src/math/Calc.kf; then
+        printf '{"success":false,"filesChecked":1,"errorCount":1,"diagnostics":[{"code":"ARITH001","severity":"ERROR","message":"synthetic division by zero"}]}\n'
+        exit 1
+    fi
+    printf '{"success":true,"filesChecked":1,"errorCount":0,"diagnostics":[]}\n'
+    exit 0
+fi
+if [[ "$mode:$phase" == timeout:test ]]; then
+    printf 'SUITE tests/Suite.kf (1 tests)\nPASS one\n0 failed of 1 tests\n1 passed, 0 failed\n'
+    exit 0
+fi
 if [[ "$mode" == broken-link ]]; then ln -sf absent generated-link; fi
 if [[ "$phase" == check ]]; then exec kof check src/math/Calc.kf --json; fi
 exec kof test tests
