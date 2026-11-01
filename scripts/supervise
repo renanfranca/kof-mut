@@ -8,22 +8,23 @@ KOF_MUT_CREATING=0
 KOF_MUT_SIGNAL=""
 KOF_MUT_STATUS=2
 KOF_MUT_BARRIER=""
+signal_child_before_and_after_setsid() {
+    if [[ -n "$KOF_MUT_GROUP" ]]; then kill -"$1" -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
+    kill -"$1" -- "-$KOF_MUT_CHILD" 2>/dev/null || true
+    kill -"$1" -- "$KOF_MUT_CHILD" 2>/dev/null || true
+}
+await_jvm_shutdown_hook_for_detached_commands() {
+    local cleanup_start
+    cleanup_start="$(date +%s%3N)"
+    while (( $(date +%s%3N) - cleanup_start < 2000 )); do
+        if { [[ -n "$KOF_MUT_GROUP" ]] && kill -0 -- "-$KOF_MUT_GROUP" 2>/dev/null; } || kill -0 "$KOF_MUT_CHILD" 2>/dev/null; then /bin/sleep 0.02; else break; fi
+    done
+}
 cleanup() {
     if [[ -n "$KOF_MUT_CHILD" ]]; then
-        # Before setsid there is only a PID. After the handshake the child has
-        # reported its session leader. Cover both sides of that transition.
-        if [[ -n "$KOF_MUT_GROUP" ]]; then kill -TERM -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
-        kill -TERM -- "-$KOF_MUT_CHILD" 2>/dev/null || true
-        kill -TERM -- "$KOF_MUT_CHILD" 2>/dev/null || true
-        # Let the JVM shutdown hook stop its detached preparation commands.
-        local cleanup_start
-        cleanup_start="$(date +%s%3N)"
-        while (( $(date +%s%3N) - cleanup_start < 2000 )); do
-            if { [[ -n "$KOF_MUT_GROUP" ]] && kill -0 -- "-$KOF_MUT_GROUP" 2>/dev/null; } || kill -0 "$KOF_MUT_CHILD" 2>/dev/null; then /bin/sleep 0.02; else break; fi
-        done
-        if [[ -n "$KOF_MUT_GROUP" ]]; then kill -KILL -- "-$KOF_MUT_GROUP" 2>/dev/null || true; fi
-        kill -KILL -- "-$KOF_MUT_CHILD" 2>/dev/null || true
-        kill -KILL -- "$KOF_MUT_CHILD" 2>/dev/null || true
+        signal_child_before_and_after_setsid TERM
+        await_jvm_shutdown_hook_for_detached_commands
+        signal_child_before_and_after_setsid KILL
         wait "$KOF_MUT_CHILD" 2>/dev/null || true
     fi
     if [[ -n "$KOF_MUT_BARRIER" ]]; then rm -rf -- "$KOF_MUT_BARRIER"; fi

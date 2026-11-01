@@ -18,7 +18,11 @@ if [[ "$1" == info ]]; then
         /bin/ln -sfn -- "$KOF_MUT_TEST_REPLACEMENT" "$KOF_MUT_TEST_LINK"
     fi
 fi
+if [[ ( "$1" == check || "$1" == test ) && -n "${KOF_MUT_TEST_COMMAND_DELAY:-}" ]]; then
+    /bin/sleep "$KOF_MUT_TEST_COMMAND_DELAY"
+fi
 if [[ "$1" == build ]]; then
+    if [[ -n "${KOF_MUT_TEST_BUILD_DELAY:-}" ]]; then /bin/sleep "$KOF_MUT_TEST_BUILD_DELAY"; fi
     printf 'build\n' >> "$KOF_MUT_TEST_LOG"
     if [[ "${KOF_MUT_TEST_BUILD:-}" == block-before-output || "${KOF_MUT_TEST_BUILD:-}" == block-after-output ]]; then
         if [[ "$KOF_MUT_TEST_BUILD" == block-after-output ]]; then "$KOF_MUT_TEST_KOF" "$@"; fi

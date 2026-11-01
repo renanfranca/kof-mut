@@ -1,5 +1,7 @@
 package kofmut
 
+import kofmut.launch.CompatibilityContracts
+
 binaryTokenLocation() {
     var source = "Bool less(Int a, Int b) { return a < b }"
 
@@ -253,4 +255,5 @@ main() {
     frontendErrors()
     unsupportedForms()
     missingSource()
+    CompatibilityContracts.run()
 }

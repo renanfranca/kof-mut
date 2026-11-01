@@ -44,7 +44,7 @@ void compatibilityMutation(String kof, String version, String evidence, String m
     assert(File(project + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"sum contract\" { " + assertion + " }\n"))
     assert(File(project + "/kof.toml").writeText("[sources]\napp = \".\"\ntest = \"tests\"\n"))
     assert(File(project + "/scope.json").writeText("[\"src/math/Calc.kf\"]"))
-    assert(File(project + "/kof-mut.json").writeText(json.encode(CompatibilityConfig(1, listOf("src"), listOf("tests"), listOf("kof.toml", "src", "tests"), listOf(kof, "check", "src/math/Calc.kf", "--json"), listOf(kof, "test", "tests"), 10000, 8500))))
+    assert(File(project + "/kof-mut.json").writeText(json.encode(CompatibilityConfig(1, listOf("src"), listOf("tests"), listOf("kof.toml", "src", "tests"), listOf(kof, "check", "src/math/Calc.kf", "--json"), listOf(kof, "test", "tests"), 10000, 25000))))
     var args = new String[9]
     args[0] = "run"; args[1] = "--project"; args[2] = project; args[3] = "--files"; args[4] = project + "/scope.json"; args[5] = "--report-dir"; args[6] = evidence + "/" + mode + "-reports"; args[7] = "--run-id"; args[8] = "7b20e8d4-f994-4eaa-bb0c-f34b1ed99f31"
     var result = runMutation(args)

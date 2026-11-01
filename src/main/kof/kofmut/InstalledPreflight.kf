@@ -10,15 +10,18 @@ class InstalledPreflight {
     static RunConfig guardedConfig(RunOptions options, String root) {
         try { return loadConfig(options) }
         catch (Exception error) {
-            // Reuse the existing error report contract without admitting project commands.
-            System.setProperty("kofmut.root", root)
-            System.setProperty("kofmut.kof.version", KofVersion.version())
-            var execution = MutationRun(options, System.nanoTime(), Instant.now().toString())
-            execution.canPublish = !underPath(options.reportDir, options.project)
-            execution.limitations.add(error.toString())
-            process.exit(execution.finish())
+            InstalledPreflight.exitWithErrorReportWithoutProjectCommands(options, root, error)
             throw "Invalid configuration"
         }
+    }
+
+    static void exitWithErrorReportWithoutProjectCommands(RunOptions options, String root, Exception error) {
+        System.setProperty("kofmut.root", root)
+        System.setProperty("kofmut.kof.version", KofVersion.version())
+        var execution = MutationRun(options, System.nanoTime(), Instant.now().toString())
+        execution.canPublish = !underPath(options.reportDir, options.project)
+        execution.limitations.add(error.toString())
+        process.exit(execution.finish())
     }
 
     static void main(String[] arguments) {

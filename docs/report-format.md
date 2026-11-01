@@ -133,6 +133,8 @@ Both `check` and `test` contain **all six fields**, including the inapplicable n
 
 A phase that never started has all six values null. Do not interpret null as zero, and do not accept nonnull test counters as proof of valid protocol: inconsistent parsed output can retain observed counts while reporting invalid evidence. `filesChecked` counts entry files, not imported sources. Command exits are distinct from KofMut's process exit. Failed/invalid baseline prevents mutant evaluation; baseline budget expiry produces overall `incomplete`.
 
+With valid test evidence, `executedTests` and `failedTests` sum case results across all completed test invocations in the command output. The final CLI summaries count suite files within each invocation, not cases. Every invocation must have coherent suite and final summaries and executed cases. A failed case in any invocation remains a failure even when a later invocation passes. Nonnull counters alone do not validate incomplete or contradictory concatenated output.
+
 ## Mutants and discarded candidates
 
 Every `mutants` item has these required, nonnull fields:

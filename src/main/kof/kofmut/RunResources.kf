@@ -55,16 +55,23 @@ class RunResources implements Runnable {
         } finally { lock.unlock() }
     }
 
-    void terminateGroups(List<Process> groups, Long cleanupStart) {
-        // Signal every group before waiting; all waits share this two second deadline.
+    void killEveryGroup(List<Process> groups) {
         for (var child in groups) {
             var killed = process.run("kill", "-KILL", "--", "-" + child.pid())
             if (child.isAlive()) { child.destroyForcibly() }
         }
+    }
+
+    void awaitGroupsWithinSharedCleanupDeadline(List<Process> groups, Long cleanupStart) {
         for (var child in groups) {
             var remaining = 2000 - elapsedMs(cleanupStart)
             if (remaining > 0) { child.waitFor(remaining, TimeUnit.MILLISECONDS) }
         }
+    }
+
+    void terminateGroups(List<Process> groups, Long cleanupStart) {
+        killEveryGroup(groups)
+        awaitGroupsWithinSharedCleanupDeadline(groups, cleanupStart)
         var pending = true
         while (pending && elapsedMs(cleanupStart) < 2000) {
             pending = false

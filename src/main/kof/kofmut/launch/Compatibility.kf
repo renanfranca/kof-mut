@@ -144,8 +144,8 @@ class CompatibilityWork implements Runnable {
         var child = startCommand(command, cwd, label)
         try {
             var remaining = 90000 - (System.currentTimeMillis() - started)
-            if (remaining > 10000) { remaining = 10000 }
-            if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (10000 ms maximum)" }
+            if (remaining > 30000) { remaining = 30000 }
+            if (remaining <= 0 || !child.waitFor(remaining, TimeUnit.MILLISECONDS)) { throw label + " exceeded its command deadline (30000 ms maximum)" }
             active()
             return child.exitValue()
         } finally { lock.lock(); try { stopChildren() } finally { lock.unlock() } }
@@ -246,6 +246,16 @@ String compatibilityChecksums(List<CompatibilityFile> classes) {
     return text
 }
 
+String compatibilityIdentity(CompatibilityInstallation installation, List<CompatibilityFile> inputs) {
+    return crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+}
+
+void compatibilityRecordApproval(String candidate, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
+    var approval = CompatibilityApproval(1, identity, version, inputs, compatibilityClassInventory(candidate, work))
+    if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
+    if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
+}
+
 Bool compatibilityApproved(String image, String identity, String version, List<CompatibilityFile> inputs, CompatibilityWork work) {
     try {
         var approval = json.decode<CompatibilityApproval>(compatibilityText(image + "/approval.json"))
@@ -267,7 +277,7 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
     CompatibilityState.guard(state)
     work.active()
     var inputs = compatibilityInputs(root, kof, installation, work)
-    var identity = crypto.sha256("kofmut-compatibility-v1\0" + json.encode(installation) + json.encode(inputs))
+    var identity = compatibilityIdentity(installation, inputs)
     compatibilityDirectory(state + "/images")
     compatibilityDirectory(state + "/locks")
     compatibilityDirectory(state + "/approved")
@@ -301,16 +311,13 @@ String prepareCompatibility(String root, String kof, CompatibilityInstallation i
                 if (work.command(listOf(kof, "build", "--target", "jvm", "--classpath", jar, "--output", candidate + "/classes"), candidate, "compile") != 0) { throw "compilation failed; see compile.stdout and compile.stderr" }
                 work.phase("contracts")
                 System.err.println("kof-mut: checking compatibility...")
-                // Each child has its own ten second deadline; mutation evidence stays in work.evidence.
                 for (var probe in listOf("frontend", "killed", "survived")) {
                     if (work.command(listOf(java, "-cp", candidate + "/classes:" + jar, "kofmut.CompatibilityProbe", root, kof, installation.kof, work.evidence, probe), candidate, probe) != 0) { throw "compatibility " + probe + " verification failed; see " + probe + ".stdout and " + probe + ".stderr" }
                     if (compatibilityText(work.evidence + "/" + probe + ".ok") != "verified\n") { throw "missing compatibility " + probe + " evidence" }
                 }
                 work.phase("integrity")
                 if (json.encode(compatibilityInputs(root, kof, installation, work)) != json.encode(inputs)) { throw "components changed during preparation; retry" }
-                var approval = CompatibilityApproval(1, identity, installation.kof, inputs, compatibilityClassInventory(candidate, work))
-                if (!File(candidate + "/approval.json").writeText(json.encode(approval))) { throw "cannot write compatibility approval" }
-                if (!File(candidate + "/prepared.checksums").writeText(compatibilityChecksums(approval.classes))) { throw "cannot write prepared class checksums" }
+                compatibilityRecordApproval(candidate, identity, installation.kof, inputs, work)
                 work.lock.lock()
                 try {
                     work.active()
@@ -358,7 +365,7 @@ void compatibilityApplication(String[] arguments) {
     signature[0] = Class.forName("[Ljava.lang.String;")
     var method = Class.forName("Default.Main").getMethod("main", signature)
     var invocation = new Object[1]
-    invocation[0] = arguments
+    invocation[0] = arguments as Object
     var invoked = method.invoke(null, invocation)
 }
 
