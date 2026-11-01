@@ -220,3 +220,23 @@ Result, run once with 0.6.4 first and `KOF_MUT_COMPATIBILITY_OTHER` = 0.6.8: exi
 - `install-a` is still the slowest queue, 45 s ahead of `install-b`. That misses the adoption criterion of 30 s set before the run.
 - The two moved tests cost their new queues 46 s and 22 s, close to the estimate. `install-a` lost only 33 s, against the 82 s expected. Its remaining tests slowed when the other queues grew, so the parallel cost of a test depends on the whole mix.
 - **Adopted** by the user despite the missed criterion: the change is tags only, the check passed, and it did not get slower.
+
+## Fourth install queue, not adopted
+
+Tried once on 2026-11-01: a fourth queue `install-d` took five Install tests ("final package validation…" from `install-a`, "default prefix requires absolute nonempty HOME…" and "installed entry preserves exact argv…" from `install-b`, "early INT and TERM cancel both unregistered children…" and "the first installed invocation refuses overlapping logs…" from `install-c`), leaving Install at 7 + 10 + 9 + 5 of 31. Kof 0.6.4 on PATH, 0.6.8 as `KOF_MUT_COMPATIBILITY_OTHER`. Observation directory `.agent/tmp/check-8342cb0c-1044-452d-bcaf-1798ef213a69/`, log `.agent/tmp/install-d/check.log`.
+
+| Queue | Result | Time |
+|---|---|---|
+| install-d | 5/5 | 653 s |
+| cli-b | pass | 669 s |
+| run-b | pass | 670 s |
+| cli-a | pass | 705 s |
+| install-c | 9/9 | 713 s |
+| run-a | 23/24 | 714 s |
+| install-a | 7/7 | 758 s |
+| install-b | 10/10 | 761 s |
+
+- Check exit 1, total 761 s against 733 s with three Install queues. Highest load1 31.99 on 32 cores; no process left alive.
+- Every queue got slower, not only the Install ones (run-a 566 → 714 s, cli-b 505 → 669 s). The machine was saturated, so the extra queue added contention instead of parallelism.
+- The failing test was "cleanup failure preserves a prior discard survivor and kills with original identities and permits recovery" (run-a). It bounds a 5000 ms budget with `child.waitFor(8500)` and `durationMs < 8000`, so it still depends on host load. The unlabeled assertion that failed was not identified. Not retried.
+- **Reverted**: the tags, `scripts/check` and both READMEs are back to three Install queues.
