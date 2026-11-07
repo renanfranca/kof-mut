@@ -443,6 +443,25 @@ test "unsupported production forms and absent applicable operators stay inconclu
     } finally { assert(Directory(root).delete()) }
 }
 
+test "enum declarations complete without limitations or extra mutants", "enum", "check-run-a" {
+    var root = runProjectCopy()
+    assert(File(root + "/src/math/Calc.kf").writeText("package src.math\n\nclass Calc {\n    Int sum(Int a, Int b) { return a + b }\n}\n\nenum Phase { A, B }\n"))
+
+    try {
+        var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        var report = readRun(reportPath(result.stdout))
+        for (var limitation in report.limitations) { println(limitation) }
+        assert(report.limitations.size == 0, "enum must not produce limitations")
+        assert(result.exitCode == 0)
+        assert(report.status == "complete")
+        assert(report.counts.candidates == 1 && report.counts.killed == 1)
+        assert(report.mutants.size == 1)
+        assert(report.mutants.get(0).id == "src/math/Calc.kf:68:-")
+        assert(report.mutants.get(0).status == "Killed")
+    } finally { assert(Directory(root).delete()) }
+}
+
 test "snapshot materializes only internal links whose targets belong to inputs", "links", "check-run-b" {
     var root = runProjectCopy()
     var log = root + "/observed"

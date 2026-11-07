@@ -139,6 +139,30 @@ unsupportedForms() {
     println("PASS frontend: unsupported AST forms produce explicit limitations")
 }
 
+enumDeclarations() {
+    var result = scanSource("enum Phase { A, B }", "Phase.kf")
+
+    assert(result.errors.size == 0)
+    assert(result.limitations.size == 0)
+    assert(result.sites.size == 0)
+    var annotated = scanSource("@Name(\"fase\")\nenum Phase { A }", "Annotated.kf")
+    assert(annotated.errors.size == 0)
+    assert(annotated.limitations.size == 0)
+    assert(annotated.sites.size == 0)
+    var alongside = scanSource("Bool less(Int a, Int b) { return a < b } enum Phase { A, B }", "Alongside.kf")
+    assert(alongside.errors.size == 0)
+    assert(alongside.limitations.size == 0)
+    assert(alongside.sites.size == 1)
+    var site = alongside.sites.get(0)
+    assert(site.original == "<")
+    assert(site.replacement == "<=")
+    assert(site.offset == 35)
+    assert(site.line == 1)
+    assert(site.column == 36)
+    assert(site.length == 1)
+    println("PASS frontend: enum declarations are traversed without mutation points")
+}
+
 missingSource() {
     var result = scanFile("src/test/fixtures/does-not-exist.kf")
 
@@ -254,6 +278,7 @@ main() {
     unicodeLocations()
     frontendErrors()
     unsupportedForms()
+    enumDeclarations()
     missingSource()
     CompatibilityContracts.run()
 }

@@ -56,7 +56,7 @@ Concatenações conhecidas de strings são excluídas usando literais, declaraç
 
 ## Limitações
 
-Uma limitação é um motivo explícito pelo qual a ferramenta não pode declarar avaliação completa do escopo selecionado. Sintaxe válida ainda não percorrida, como declarações `record`, produz limitação e impede `complete`, mesmo quando outras mutações foram avaliadas. Associações de tokens ambíguas ou ausentes também permanecem explícitas. Erros léxicos/sintáticos no fonte original são erros, não detecções pelos testes. Ausência de substituição nas famílias suportadas é diferente de sintaxe não suportada.
+Uma limitação é um motivo explícito pelo qual a ferramenta não pode declarar avaliação completa do escopo selecionado. Sintaxe válida ainda não percorrida, como declarações `record`, produz limitação e impede `complete`, mesmo quando outras mutações foram avaliadas. Declarações sem expressões, como as listas de constantes de `enum`, são percorridas e não produzem candidatos nem limitações. Associações de tokens ambíguas ou ausentes também permanecem explícitas. Erros léxicos/sintáticos no fonte original são erros, não detecções pelos testes. Ausência de substituição nas famílias suportadas é diferente de sintaxe não suportada.
 
 Localizações vêm do lexer oficial, com linha/coluna começando em 1 e offsets/comprimentos em unidades UTF-16 da JVM. Veja [regras de localização](report-format.pt_BR.md#localizações-e-evidência) antes de indexar um buffer de fonte ou mostrar uma localização em bytes.
 
