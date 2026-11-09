@@ -56,7 +56,7 @@ Known string concatenations are excluded using literals, declarations and unambi
 
 ## Limitations
 
-A limitation is an explicit reason the tool cannot claim a complete evaluation of the selected scope. Valid syntax not yet traversed, such as `record` declarations, yields a limitation and prevents `complete`, even if other mutations were evaluated. Declarations without expressions, such as `enum` constant lists, are traversed and produce neither candidates nor limitations. Ambiguous or missing token associations also remain explicit. Lexical/parser errors in the original source are errors, not test kills. Absence of a replacement in the supported families is different from unsupported syntax.
+A limitation is an explicit reason the tool cannot claim a complete evaluation of the selected scope. Valid syntax not yet traversed, such as `record` declarations, yields a limitation and prevents `complete`, even if other mutations were evaluated. `enum` declarations, which contain only constant names, are traversed and produce neither candidates nor limitations. Ambiguous or missing token associations also remain explicit. Lexical/parser errors in the original source are errors, not test kills. Absence of a replacement in the supported families is different from unsupported syntax.
 
 Locations come from the official lexer, with line/column starting at 1 and offsets/lengths in JVM UTF-16 units. See [location rules](report-format.md#locations-and-evidence) before indexing a source buffer or displaying a byte location.
 

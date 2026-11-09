@@ -451,8 +451,7 @@ test "enum declarations complete without limitations or extra mutants", "enum", 
         var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
 
         var report = readRun(reportPath(result.stdout))
-        for (var limitation in report.limitations) { println(limitation) }
-        assert(report.limitations.size == 0, "enum must not produce limitations")
+        if (report.limitations.size != 0) { throw "enum must not produce limitations: " + report.limitations }
         assert(result.exitCode == 0)
         assert(report.status == "complete")
         assert(report.counts.candidates == 1 && report.counts.killed == 1)
