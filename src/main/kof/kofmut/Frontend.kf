@@ -33,6 +33,7 @@ import dev.kof.compiler.ClassDeclarationNode
 import dev.kof.compiler.ConstructorDeclarationNode
 import dev.kof.compiler.Diagnostic
 import dev.kof.compiler.DiagnosticCollector
+import dev.kof.compiler.EnumDeclarationNode
 import dev.kof.compiler.FunctionDeclarationNode
 import dev.kof.compiler.FieldDeclarationNode
 import dev.kof.compiler.IdentifierExpr
@@ -155,6 +156,7 @@ class SourceFrontend {
             fieldBindings = outerFields
             return null
         }
+        if (node instanceof EnumDeclarationNode) { return null }
         if (node instanceof MethodDeclarationNode) {
             var declaration = node as MethodDeclarationNode
             var bindingStart = bindings.size
