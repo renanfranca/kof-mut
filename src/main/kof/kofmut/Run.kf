@@ -20,6 +20,28 @@ record MutationCounts(Int candidates, Int executed, Int killed, Int survived, In
 record MutationReport(Int schemaVersion, String toolVersion, String kofVersion, String runId, String status, List<String> scope, BaselineEvidence baseline, MutationCounts counts, List<MutantResult> mutants, List<DiscardedCandidate> discardedCandidates, List<String> limitations, String startedAt, Long durationMs)
 record CandidateEvaluation(Int index, MutantResult? mutant, DiscardedCandidate? discarded, String failure)
 
+class PhaseTimings {
+    Bool evaluated = false
+    Long lockWait = 0
+    Long? prepare = null
+    Long? validate = null
+    Long? check = null
+    Long? checkRelease = null
+    Long? test = null
+    Long? testRelease = null
+    Long? remove = null
+    Long total = 0
+}
+
+String millisecondsCell(Long? nanos) {
+    if (nanos == null) { return "" }
+    return "" + (nanos / 1000000)
+}
+
+String timingRow(String index, PhaseTimings timings) {
+    return index + "\t" + millisecondsCell(timings.lockWait) + "\t" + millisecondsCell(timings.prepare) + "\t" + millisecondsCell(timings.validate) + "\t" + millisecondsCell(timings.check) + "\t" + millisecondsCell(timings.checkRelease) + "\t" + millisecondsCell(timings.test) + "\t" + millisecondsCell(timings.testRelease) + "\t" + millisecondsCell(timings.remove) + "\t" + millisecondsCell(timings.total) + "\n"
+}
+
 class MutationRun {
     RunOptions options
     Long start
@@ -35,6 +57,8 @@ class MutationRun {
     String reportPath = ""
     Int maxParallelMutants = 1
     RunResources resources = new RunResources()
+    PhaseTimings baselineTimings = new PhaseTimings()
+    List<PhaseTimings> candidateTimings = listOf()
 
     constructor(RunOptions input, Long clock, String instant) { options = input; start = clock; startedAt = instant }
 
@@ -61,7 +85,8 @@ class MutationRun {
                 if (!Directory(evidenceRoot).createDirectories()) { throw "Cannot create evidence directory" }
                 logs = Files.createTempDirectory(new java.io.File(evidenceRoot).toPath(), "run-" + options.runId + "-").toString()
                 temporary = resources.reserveSandbox()
-                evaluateSnapshot(config, entries, temporary)
+                try { evaluateSnapshot(config, entries, temporary) }
+                finally { writeTimings() }
             }
         } catch (Exception error) {
             status = "error"
@@ -70,33 +95,63 @@ class MutationRun {
             try { resources.cleanup() }
             catch (Exception error) { status = "error"; limitations.add("Cleanup failed: " + error.toString()) }
         }
-        resources.lock.lock()
+        resources.acquire()
         try { resources.requireActive(); return finish() }
         finally { resources.lock.unlock() }
         } finally { Runtime.getRuntime().removeShutdownHook(hook) }
     }
 
+    Bool evaluateBaseline(RunConfig config, List<InputEntry> entries, String sandbox) {
+        var baselineStart = System.nanoTime()
+        var waitsBeforeBaseline = resources.takeLockWaitNanos()
+        try {
+            var preparing = System.nanoTime()
+            resources.prepare(entries, sandbox)
+            baselineTimings.prepare = System.nanoTime() - preparing
+            var checkRun = executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs, resources)
+            baselineTimings.check = checkRun.runNanos
+            baselineTimings.checkRelease = checkRun.releaseNanos
+            var checked = checkEvidence(checkRun)
+            baseline = BaselineEvidence("error", checked.phase, notStarted())
+            if (checked.status != "passed") {
+                if (checked.status == "Timeout" || checked.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
+                baseline = BaselineEvidence("failed", checked.phase, notStarted())
+                return false
+            }
+            var testRun = executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs, resources)
+            baselineTimings.test = testRun.runNanos
+            baselineTimings.testRelease = testRun.releaseNanos
+            var tested = testEvidence(testRun)
+            baseline = BaselineEvidence("failed", checked.phase, tested.phase)
+            if (tested.status != "Survived") {
+                if (tested.status == "Timeout" || tested.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
+                return false
+            }
+            baseline = BaselineEvidence("passed", checked.phase, tested.phase)
+            return true
+        } finally {
+            baselineTimings.lockWait = resources.takeLockWaitNanos()
+            baselineTimings.total = System.nanoTime() - baselineStart
+        }
+    }
+
+    void writeTimings() {
+        try {
+            var text = "index\tlockWaitMs\tprepareMs\tvalidateMs\tcheckMs\tcheckReleaseMs\ttestMs\ttestReleaseMs\tremoveMs\ttotalMs\n" + timingRow("baseline", baselineTimings)
+            for (var index = 0; index < candidateTimings.size; index++) {
+                var timings = candidateTimings.get(index)
+                if (timings.evaluated) { text = text + timingRow("" + index, timings) }
+            }
+            var written = File(logs + "/timings.tsv").writeText(text)
+        } catch (Exception unusableEvidenceDirectory) { }
+    }
+
     void evaluateSnapshot(RunConfig config, List<InputEntry> entries, String temporary) {
-        var sandbox = temporary + "/baseline"
-        resources.prepare(entries, sandbox)
-        var checked = checkEvidence(executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs, resources))
-        baseline = BaselineEvidence("error", checked.phase, notStarted())
-        if (checked.status != "passed") {
-            if (checked.status == "Timeout" || checked.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
-            baseline = BaselineEvidence("failed", checked.phase, notStarted())
-            return
-        }
-        var tested = testEvidence(executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs, resources))
-        baseline = BaselineEvidence("failed", checked.phase, tested.phase)
-        if (tested.status != "Survived") {
-            if (tested.status == "Timeout" || tested.status == "Pending") { status = "incomplete" } else { status = "baseline_failed" }
-            return
-        }
-        baseline = BaselineEvidence("passed", checked.phase, tested.phase)
+        if (!evaluateBaseline(config, entries, temporary + "/baseline")) { return }
         var analysis = temporary + "/analysis"
         resources.prepare(entries, analysis)
         var candidates: List<MutantResult> = listOf()
-        resources.lock.lock()
+        resources.acquire()
         try {
         resources.requireActive()
         for (var file in scope) {
@@ -123,9 +178,10 @@ class MutationRun {
         var next = 0
         var running = 0
         var failure = ""
+        for (var candidate in candidates) { candidateTimings.add(new PhaseTimings()) }
         while (next < candidates.size || running > 0) {
             while (failure == "" && next < candidates.size && running < maxParallelMutants && !budgetExpired(start, config.budgetMs)) {
-                resources.lock.lock()
+                resources.acquire()
                 try {
                     resources.requireActive()
                     var task = spawnCandidateOutsideTry(this, candidates.get(next), config, entries, temporary + "/variant-" + next, next, completed)
@@ -166,18 +222,29 @@ class MutationRun {
 
     CandidateEvaluation evaluateTask(MutantResult mutant, RunConfig config, List<InputEntry> entries, String variant, Int index, Channel<CandidateEvaluation> completed) {
         var result = CandidateEvaluation(index, null, null, "Candidate did not finish")
+        var timings = candidateTimings.get(index)
+        timings.evaluated = true
         var mutantStart = System.nanoTime()
         try {
+            var preparing = System.nanoTime()
             resources.prepare(entries, variant)
-            try { result = evaluateCandidate(mutant, config, variant, index, mutantStart) }
-            finally { resources.removeVariant(variant) }
+            timings.prepare = System.nanoTime() - preparing
+            try { result = evaluateCandidate(mutant, config, variant, index, mutantStart, timings) }
+            finally {
+                var removing = System.nanoTime()
+                resources.removeVariant(variant)
+                timings.remove = System.nanoTime() - removing
+            }
         } catch (Exception error) { result = candidateFailure(mutant, index, "parse", mutantStart, error.toString()) }
+        timings.lockWait = resources.takeLockWaitNanos()
+        timings.total = System.nanoTime() - mutantStart
         completed.send(result)
         return result
     }
 
-    CandidateEvaluation evaluateCandidate(MutantResult mutant, RunConfig config, String variant, Int index, Long mutantStart) {
-        resources.lock.lock()
+    CandidateEvaluation evaluateCandidate(MutantResult mutant, RunConfig config, String variant, Int index, Long mutantStart, PhaseTimings timings) {
+        var validating = System.nanoTime()
+        resources.acquire()
         try {
         resources.requireActive()
         var original = readRequired(variant + "/" + mutant.file)
@@ -191,16 +258,29 @@ class MutationRun {
             if (!File(parseLog).writeText(validation.evidence + "\n")) { throw "Cannot write frontend evidence" }
             return CandidateEvaluation(index, null, DiscardedCandidate(mutant.id, mutant.file, mutant.operator, mutant.original, mutant.replacement, mutant.location, "parse", elapsedMs(mutantStart), validation.evidence + "; log: " + parseLog), "")
         }
-        } finally { resources.lock.unlock() }
+        } finally {
+            resources.lock.unlock()
+            timings.validate = System.nanoTime() - validating
+        }
         var check = CheckedEvidence("Pending", notStarted())
-        try { check = checkEvidence(executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources)) }
+        try {
+            var checkRun = executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources)
+            timings.check = checkRun.runNanos
+            timings.checkRelease = checkRun.releaseNanos
+            check = checkEvidence(checkRun)
+        }
         catch (Exception error) { return candidateFailure(mutant, index, "check", mutantStart, error.toString()) }
         var state = check.status
         var phase = "check"
         var evidence = check.phase.summary
         if (state == "passed") {
             var test = CheckedEvidence("Pending", notStarted())
-            try { test = testEvidence(executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources)) }
+            try {
+                var testRun = executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources)
+                timings.test = testRun.runNanos
+                timings.testRelease = testRun.releaseNanos
+                test = testEvidence(testRun)
+            }
             catch (Exception error) { return candidateFailure(mutant, index, "test", mutantStart, error.toString()) }
             state = test.status
             phase = "test"

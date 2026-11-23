@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "usage: scripts/measure-run LAUNCHER PROJECT BASE_CONFIG SCOPE BUDGET_MS REPETITIONS OUTPUT_DIR" >&2
+    exit 2
+}
+(( $# == 7 )) || usage
+launcher=$(realpath -- "$1")
+project=$(realpath -- "$2")
+base_config=$(realpath -- "$3")
+scope=$(realpath -- "$4")
+budget_ms=$5
+repetitions=$6
+[[ "$budget_ms" =~ ^[0-9]+$ && "$repetitions" =~ ^[1-9][0-9]*$ ]] || usage
+mkdir -p -- "$7"
+output=$(realpath -- "$7")
+maximum_load=${MEASURE_MAX_LOAD:-4}
+
+case "$output/" in "$project/"*) echo "measure-run: output must stay outside the project" >&2; exit 2 ;; esac
+
+launcher_root=$(dirname -- "$(dirname -- "$launcher")")
+kofmut_commit() {
+    if [[ -f "$launcher_root/COMMIT" ]]; then
+        printf '%s\n' "$(cat -- "$launcher_root/COMMIT")"
+    elif git -C "$launcher_root" rev-parse HEAD >/dev/null 2>&1; then
+        local dirty=""
+        [[ -z "$(git -C "$launcher_root" status --porcelain --untracked-files=no)" ]] || dirty="-dirty"
+        printf '%s%s\n' "$(git -C "$launcher_root" rev-parse HEAD)" "$dirty"
+    else
+        echo unknown
+    fi
+}
+load_one_minute() { cut -d' ' -f1 /proc/loadavg; }
+wait_for_quiet_machine() {
+    while ! awk -v load="$(load_one_minute)" -v limit="$maximum_load" 'BEGIN { exit !(load < limit) }'; do
+        echo "measure-run: load $(load_one_minute) is not under $maximum_load; waiting" >&2
+        sleep 15
+    done
+}
+
+file_label=$(python3 -I -c 'import json, sys; print(",".join(json.load(open(sys.argv[1]))))' "$scope")
+configs="$output/configs"
+reports="$output/reports"
+mkdir -p -- "$configs" "$reports"
+config="$configs/budget-$budget_ms.json"
+python3 -I -c '
+import json, sys
+config = json.load(open(sys.argv[1]))
+config["budgetMs"] = int(sys.argv[2])
+open(sys.argv[3], "w").write(json.dumps(config, indent=2) + "\n")
+' "$base_config" "$budget_ms" "$config"
+
+table="$output/runs.tsv"
+if [[ ! -s "$table" ]]; then
+    printf 'file\tbudgetMs\trun\texit\tstatus\treportDurationMs\twallMs\tcandidates\tkilled\tsurvived\ttimeout\ttestError\tpending\tdiscarded\tload1Before\tload1After\n' > "$table"
+fi
+
+kof_path=$(realpath -- "$(command -v kof)")
+for (( run = 1; run <= repetitions; run++ )); do
+    wait_for_quiet_machine
+    run_id=$(cat /proc/sys/kernel/random/uuid)
+    evidence="$output/budget-$budget_ms-run-$run-$run_id"
+    mkdir -p -- "$evidence"
+    load_before=$(load_one_minute)
+    {
+        printf 'uptime\t%s\n' "$(uptime)"
+        printf 'nproc\t%s\n' "$(nproc)"
+        printf 'projectCommit\t%s\n' "$(git -C "$project" rev-parse HEAD)"
+        printf 'kofmutCommit\t%s\n' "$(kofmut_commit)"
+        printf 'kof\t%s\n' "$kof_path"
+        printf 'kofSha256\t%s\n' "$(sha256sum -- "$kof_path" | cut -d' ' -f1)"
+        printf 'launcher\t%s\n' "$launcher"
+        printf 'config\t%s\n' "$config"
+        printf 'runId\t%s\n' "$run_id"
+    } > "$evidence/environment.tsv"
+    started=$(date +%s%3N)
+    exit_code=0
+    "$launcher" run --project "$project" --files "$scope" --config "$config" --report-dir "$reports" --run-id "$run_id" \
+        > "$evidence/stdout" 2> "$evidence/stderr" || exit_code=$?
+    wall_ms=$(( $(date +%s%3N) - started ))
+    load_after=$(load_one_minute)
+    printf 'uptimeAfter\t%s\n' "$(uptime)" >> "$evidence/environment.tsv"
+    report_path=$(sed -n 's/^reportPath=//p' -- "$evidence/stdout" | python3 -I -c 'import json, sys; lines = sys.stdin.read().splitlines(); print(json.loads(lines[0]) if len(lines) == 1 else "")')
+    if [[ -z "$report_path" || ! -f "$report_path" ]]; then
+        echo "measure-run: run $run produced no report; see $evidence" >&2
+        printf '%s\t%s\t%s\t%s\t\t\t%s\t\t\t\t\t\t\t\t%s\t%s\n' "$file_label" "$budget_ms" "$run" "$exit_code" "$wall_ms" "$load_before" "$load_after" >> "$table"
+        continue
+    fi
+    cp -- "$report_path" "$evidence/report.json"
+    python3 -I -c '
+import json, sys
+report = json.load(open(sys.argv[1]))
+counts = report["counts"]
+row = [sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], report["status"], report["durationMs"], sys.argv[6],
+       counts["candidates"], counts["killed"], counts["survived"], counts["timeout"], counts["testError"], counts["pending"],
+       len(report["discardedCandidates"]), sys.argv[7], sys.argv[8]]
+print("\t".join(str(value) for value in row))
+states = [(m["id"], m["status"], m["phase"]) for m in report["mutants"]]
+states += [(d["id"], "Discarded", d["phase"]) for d in report["discardedCandidates"]]
+with open(sys.argv[9], "w") as listing:
+    for state in sorted(states):
+        listing.write("\t".join(state) + "\n")
+' "$evidence/report.json" "$file_label" "$budget_ms" "$run" "$exit_code" "$wall_ms" "$load_before" "$load_after" "$evidence/states.tsv" >> "$table"
+    run_logs=$(python3 -I -c '
+import json, os, sys
+report = json.load(open(sys.argv[1]))
+for item in report["mutants"] + report["discardedCandidates"]:
+    evidence = item["evidence"]
+    for marker, end in (("stdout: ", "; stderr: "), ("log: ", None)):
+        start = evidence.find(marker)
+        if start >= 0:
+            stop = evidence.find(end, start) if end else len(evidence)
+            print(os.path.dirname(evidence[start + len(marker):stop]))
+            sys.exit(0)
+' "$evidence/report.json")
+    if [[ -n "$run_logs" && -f "$run_logs/timings.tsv" ]]; then
+        cp -- "$run_logs/timings.tsv" "$evidence/timings.tsv"
+        printf 'runLogs\t%s\n' "$run_logs" >> "$evidence/environment.tsv"
+    fi
+    tail -n 1 -- "$table"
+done

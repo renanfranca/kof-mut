@@ -21,23 +21,41 @@ class RunResources implements Runnable {
     Bool cancelled = false
     Bool admissionClosed = false
     Long stopClock = 0
+    Map<Long, Long> lockWaitNanosByThread = mapOf()
+
+    void acquire() {
+        var waitStart = System.nanoTime()
+        lock.lock()
+        var thread = Thread.currentThread().threadId()
+        lockWaitNanosByThread.put(thread, lockWaitNanosByThread.getOrDefault(thread, 0 as Long) + System.nanoTime() - waitStart)
+    }
+
+    Long takeLockWaitNanos() {
+        acquire()
+        try {
+            var thread = Thread.currentThread().threadId()
+            var waited = lockWaitNanosByThread.getOrDefault(thread, 0 as Long)
+            lockWaitNanosByThread.remove(thread)
+            return waited
+        } finally { lock.unlock() }
+    }
 
     void requireActive() { if (cancelled) { throw "Execution cancelled" } }
 
     String reserveSandbox() {
-        lock.lock()
+        acquire()
         try { requireActive(); sandbox = Files.createTempDirectory("kofmut-").toString(); return sandbox }
         finally { lock.unlock() }
     }
 
     void prepare(List<InputEntry> entries, String target) {
-        lock.lock()
+        acquire()
         try { requireActive(); materializeInputs(entries, target) }
         finally { lock.unlock() }
     }
 
     CommandStart startCommand(ProcessBuilder builder, Long timeoutMs, Long start, Long budgetMs) {
-        lock.lock()
+        acquire()
         try {
             requireActive()
             var clock = System.nanoTime()
@@ -87,7 +105,7 @@ class RunResources implements Runnable {
     }
 
     void stopCommands(Bool globalTimeout) {
-        lock.lock()
+        acquire()
         try {
             if (!admissionClosed) { stopClock = System.nanoTime(); admissionClosed = true }
             var groups: List<Process> = listOf()
@@ -100,7 +118,7 @@ class RunResources implements Runnable {
     }
 
     void releaseCommand(Process child, Long start, Long budgetMs) {
-        lock.lock()
+        acquire()
         try {
             if (admissionClosed || budgetExpired(start, budgetMs)) { stopCommands(budgetExpired(start, budgetMs)) }
             else if (active.contains(child)) {
@@ -112,14 +130,14 @@ class RunResources implements Runnable {
     }
 
     Bool commandInterrupted(Process child) {
-        lock.lock()
+        acquire()
         try { return timedOutGroups.contains(child.pid()) }
         finally { lock.unlock() }
     }
 
     void joinTasks() {
         var registered: List<Handle<Int>> = listOf()
-        lock.lock()
+        acquire()
         try { for (var task in tasks) { registered.add(task) } }
         finally { lock.unlock() }
         var failure = ""
@@ -131,7 +149,7 @@ class RunResources implements Runnable {
     }
 
     void removeVariant(String path) {
-        lock.lock()
+        acquire()
         try { if (!removeSandbox(path)) { throw "Cannot clean variant" } }
         finally { lock.unlock() }
     }
@@ -140,7 +158,7 @@ class RunResources implements Runnable {
         var failure = ""
         try { stopCommands(false) } catch (Exception error) { failure = error.toString() }
         try { joinTasks() } catch (Exception error) { failure = failure + "; " + error.toString() }
-        lock.lock()
+        acquire()
         try {
             if (sandbox != "") {
                 if (!removeSandbox(sandbox)) { throw "Cannot clean sandbox: " + sandbox }
@@ -151,7 +169,7 @@ class RunResources implements Runnable {
     }
 
     void run() {
-        lock.lock()
+        acquire()
         try { cancelled = true }
         finally { lock.unlock() }
         try { cleanup() }
