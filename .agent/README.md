@@ -4,6 +4,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Current entry points
 
+- [Cleanup deadline from the blocked command](validation/check-duration-origin.md): with a per command timeout, three cleanup tests now bound the interval from the blocked command's start to the run's end instead of the load dependent `durationMs`; a doubled cleanup deadline is still rejected, and the full check passes twice in a row with Kof 0.7.0.
 - [C1 only JVM option](validation/jvm-short-commands.md): `scripts/measure-run` now records foreign CPU, temperature, throttling and core frequencies per run. On SiFuture with Kof 0.7.0, prefixing the commands with `env JAVA_TOOL_OPTIONS=-XX:TieredStopAtLevel=1` keeps the same mutant states and takes 61.8% of the default time on Meteor and 61.0% on BossShot; adoption is left to the user.
 - [Stop budget performance](validation/stop-budget-performance.md): B0 and instrumented measurements of KofMut on SiFuture with Kof 0.7.0, plus the per phase `timings.tsv` breakdown. Project commands take 99.4% of mutant time and KofMut overhead 0.7%; the fixture lock race is corrected with `flock`; the full check still fails 3 cleanup tests over their duration bounds under load, listed there.
 - [Enum declarations](validation/enum-declarations.md): `enum` declarations are traversed without candidates or limitations; real SiFuture files with enums now reach `complete`, and unsupported forms such as `record` still produce limitations.

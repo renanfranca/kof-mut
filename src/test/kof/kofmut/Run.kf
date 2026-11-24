@@ -2,6 +2,7 @@ import java.lang.Process
 import java.lang.System
 import java.lang.Thread
 import java.nio.file.Files
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 record ActualKofVersion(String kof)
@@ -1245,6 +1246,25 @@ String readyEvent(String log, Int candidate, String phase) {
     return event
 }
 
+Long earliestBlockedCommandStartEpochMs(String log, List<Int> candidates) {
+    var earliest = Files.getLastModifiedTime(new java.io.File(log + "/ready-" + candidates.get(0) + "-test").toPath()).toMillis()
+    for (var candidate in candidates) {
+        var readyAt = Files.getLastModifiedTime(new java.io.File(log + "/ready-" + candidate + "-test").toPath()).toMillis()
+        if (readyAt < earliest) { earliest = readyAt }
+    }
+    return earliest
+}
+
+Long runEndEpochMs(RunReport report) {
+    return Instant.parse(report.startedAt).toEpochMilli() + report.durationMs
+}
+
+void assertCleanupDeadlineFromBlockedCommand(String log, List<Int> blockedCandidates, RunReport report, Long timeout) {
+    var interval = runEndEpochMs(report) - earliestBlockedCommandStartEpochMs(log, blockedCandidates)
+    println("cleanupDeadlineFromBlockedCommandMs=" + interval + " timeoutMs=" + timeout)
+    assert(interval >= timeout - 100 && interval < timeout + 3500, "cleanup deadline measured from the blocked command; see cleanupDeadlineFromBlockedCommandMs above")
+}
+
 void assertParallelStopped(String log) {
     for (var name in Directory(log + "/events").list()) {
         var event = log + "/events/" + name
@@ -1823,7 +1843,9 @@ test "persistent cleanup failure shares one deadline across concurrent callers a
 
             runAssertEvidence(child.exitValue() == 2, reportText(log + "/stdout") + reportText(log + "/stderr"))
             var report = cleanupReport(log, "four-active")
-            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 2500 && report.durationMs < 5500)
+            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 2500)
+            if (unbounded) { assertCleanupDeadlineFromBlockedCommand(log, listOf(0, 1, 2, 3), report, timeout) }
+            else { assert(report.durationMs < 5500) }
             assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
             assert(json.encode(report.limitations).contains("Cancellation failed:"), "retain cancellation diagnostics alongside task failures")
             assert(!reportText(log + "/stdout").contains(": complete"))
@@ -1875,7 +1897,9 @@ test "cleanup failure preserves five completed kills while the first candidate i
 
             assert(child.exitValue() == 2)
             var report = cleanupReport(log, "five-kills")
-            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+            assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000)
+            if (unbounded) { assertCleanupDeadlineFromBlockedCommand(log, listOf(0), report, timeout) }
+            else { assert(report.durationMs < 8000) }
             assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
             assert(!reportText(log + "/stdout").contains(": complete"))
             assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
@@ -1933,7 +1957,9 @@ test "cleanup failure preserves a prior discard survivor and kills with original
 
                 assert(child.exitValue() == 2)
                 var report = cleanupReport(log, "discard-survivor")
-                assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000 && report.durationMs < 8000)
+                assert(report.status == "error" && report.baseline.status == "passed" && report.durationMs >= 5000)
+                if (unbounded) { assertCleanupDeadlineFromBlockedCommand(log, listOf(5), report, timeout) }
+                else { assert(report.durationMs < 8000) }
                 assert(json.encode(report.limitations).contains("Cannot confirm process group cleanup"))
                 assert(!reportText(log + "/stdout").contains(": complete"))
                 assert(activePid(reportText(event + "/child")), "ineffective signals must leave a real cleanup failure")
