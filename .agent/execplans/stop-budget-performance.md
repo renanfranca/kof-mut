@@ -122,11 +122,12 @@ Acceptance:
   - [x] Findings recorded in `.agent/validation/stop-budget-performance.md`, linked from `.agent/README.md`.
   - [ ] Focused `check-run-a` and `check-run-b`: failed (4 and 5 parallel tests without `LC_ALL`); B0 under the same conditions failed 4 and 2.
   - [ ] `./scripts/check` with `PATH=<0.7.0>/bin`, `KOF_MUT_COMPATIBILITY_OTHER=<0.6.4>/bin`, `LC_ALL=C.UTF-8`: exit 1 in 1300 s, 2 failures in `run-a` and 2 in `run-b`, all parallel or budget tests; other queues and the coverage guard passed. Delivery is blocked until the check is green.
+  - [x] Fixture race corrected with `flock` (user decision: same branch). Second `./scripts/check`: exit 1 in 1119 s, only 3 cleanup failure tests in `run-a` over their duration bounds under load; `run-a` alone passes 25 of 25.
 
 ## Lessons learned
 
 - A `kof test` started from a background shell may not see a PATH exported in that shell; the tests then select the default Kof. `.agent/tmp/perf/with-kof-070` exports PATH, `KOF_MUT_COMPATIBILITY_OTHER` and `LC_ALL` and prints the selected Kof before running the command.
-- The `parallel-runner` fixture intermittently reports `rmdir: failed to remove '.../counter-lock': No such file or directory` under load, on B0 as well; the affected candidate becomes `TestError` and parallel tests fail.
+- The `parallel-runner` fixture reported `rmdir: failed to remove '.../counter-lock': No such file or directory` because the system `mkdir` (uutils coreutils 0.10.0) is not atomic. The fixture now locks with `flock`; see "Fixture race correction" in the validation record. Do not use `mkdir` as a lock in new fixtures.
 
 ## Decisions
 

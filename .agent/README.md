@@ -4,7 +4,7 @@ Public product instructions start at [README](../README.md) ([Português](../REA
 
 ## Current entry points
 
-- [Stop budget performance](validation/stop-budget-performance.md): B0 and instrumented measurements of KofMut on SiFuture with Kof 0.7.0, plus the per phase `timings.tsv` breakdown. Project commands take 99.4% of mutant time and KofMut overhead 0.7%; the full check failed on preexisting parallel test instability, listed there.
+- [Stop budget performance](validation/stop-budget-performance.md): B0 and instrumented measurements of KofMut on SiFuture with Kof 0.7.0, plus the per phase `timings.tsv` breakdown. Project commands take 99.4% of mutant time and KofMut overhead 0.7%; the fixture lock race is corrected with `flock`; the full check still fails 3 cleanup tests over their duration bounds under load, listed there.
 - [Enum declarations](validation/enum-declarations.md): `enum` declarations are traversed without candidates or limitations; real SiFuture files with enums now reach `complete`, and unsupported forms such as `record` still produce limitations.
 - [Parallel check queues](validation/check-parallel.md): the check runs its suites as seven test queues plus contracts, with a coverage guard per test file; the full check passes in 795 s instead of 2631 s, with 0.6.4 first and 0.6.8 as the alternate. Also records the fixes to test timing and to a contract.
 - [Explainable check failures and fewer repeated preparations](validation/check-diagnostics.md): named assertion failures, retained evidence, waits aligned with production bounds, the check observation directory, direct compatibility contracts and fewer real builds; final check passes on 0.6.8 with 0.6.6, with partial criteria listed.

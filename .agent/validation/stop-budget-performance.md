@@ -114,3 +114,16 @@ Speed of four slots, as the sum of candidate `totalMs` over `reportDurationMs` m
 | `./scripts/check` exits 0 | `PATH=<0.7.0>/bin:$PATH KOF_MUT_COMPATIBILITY_OTHER=<0.6.4>/bin LC_ALL=C.UTF-8 ./scripts/check` | exit 1 in 1300 s; `run-a` 2 failures, `run-b` 2 failures, the other queues and the coverage guard passed | Failed |
 
 The failing tests are parallel and budget tests: `persistent cleanup failure shares one deadline across concurrent callers and cannot approve`, `cleanup failure preserves a prior discard survivor and kills with original identities and permits recovery`, `individual deadlines leave siblings and the queue running while the global budget stops all active phases` (`readiness missing` after 15 s) and `zero budget continues baseline and queued candidates beyond a bounded run deadline`. Across these runs, the `parallel-runner` fixture also reports `rmdir: failed to remove '.../counter-lock': No such file or directory`, which turns a candidate into `TestError`; it appears on B0 too. The full check took 1300 s against the 803 s recorded with Kof 0.7.0 in `kof-070-revalidation.md`. Check observations: `.agent/tmp/check-c67d4fc9-21e8-402a-a8ff-d6c0622167b2`.
+
+## Fixture race correction
+
+The `counter-lock` error came from the system `mkdir`, uutils coreutils 0.10.0 (`/usr/bin/mkdir` resolves to `/usr/lib/cargo/bin/coreutils/mkdir`). It is not atomic: two concurrent `mkdir` calls on the same path both succeeded 473 times in 400 rounds, while GNU `mkdir` (`/usr/bin/gnumkdir`) succeeded exactly 400 times. The `parallel-runner` fixture used `mkdir` as a lock, so two runners could enter its counter section together. It now uses `flock` from util-linux on `$log/counter-lock`. The kernel also releases that lock when a runner is killed.
+
+| Check | Observed |
+| --- | --- |
+| Stress with 8 concurrent runners, 150 rounds each, group kill after each exit, old fixture | 62 of 1200 runs failed, final count 39 instead of 0, maximum 41 with only 8 runners |
+| The same with the `flock` fixture, twice | 0 of 1200 runs failed both times, final count 0, maximum 8 and 6 |
+| `./scripts/check` with the Kof 0.7.0 recipe | exit 1 in 1119 s; `run-b` and every other queue passed, no `counter-lock` error; `run-a` failed 3 cleanup failure tests (`persistent cleanup failure shares one deadline...`, `cleanup failure preserves five completed kills...`, `cleanup failure preserves a prior discard survivor...`) |
+| `kof test src/test/kof/kofmut/Run.kf --tag check-run-a` alone, same recipe | `0 failed of 25 tests` in 442 s |
+
+The remaining failures exceed duration bounds under the full check's load, with the expected states and limitations. `four-active` took 6149 ms in the full check against a `durationMs < 5500` bound, and 5115 ms with `run-a` alone. Two of these three tests also failed on B0. Check observations: `.agent/tmp/check-b3e05365-5a5a-47b0-8c25-9014f7cf7988`.
