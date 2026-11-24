@@ -153,3 +153,19 @@ The change SiFuture would make in its own `kof-mut.json`, two lines, without any
 ```
 
 Whether to recommend this, document it publicly and adopt it in SiFuture is the user's decision and is not made here.
+
+## Performance power profile
+
+Measured on 2026-11-24 after `powerprofilesctl set performance` (platform profile and energy performance preference `performance`; the session above ran under `balanced`). Same Kof, SiFuture `15f8f4a`, KofMut `8dfd35f`, A and C configurations and session driver (`.agent/tmp/perf/perf-session.sh`, log `perf-session.log`, evidence `.agent/tmp/perf/perf-session-<file>/<a|c>/`). Runs with `foreignCoreMax` of 1 or more were kept and excluded: Meteor A runs 1, 2, 4 and 5, BossShot A run 2.
+
+| File | Config | Clean `budgetMs: 0` runs (reportDurationMs) | Median | Median under `balanced` | Change | 85000 run |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Meteor | A | 54144, 54372, 54404 | 54372 | 60679 | -10.4% | complete, 54560 |
+| Meteor | C | 31326, 31549, 31585 | 31549 | 37496 | -15.9% | complete, 31764 |
+| BossShot | A | 34455, 34622, 34578 | 34578 | 38627 | -10.5% | complete, 34362 |
+| BossShot | C | 20058, 20021, 19909 | 20021 | 23579 | -15.1% | complete, 19813 |
+
+- Identity: all 12 Meteor and 9 BossShot `states.tsv` files, discarded runs included, have the hashes of "Identity" above.
+- Under `performance`, C takes 58% of A on both files. C under `performance` takes 52% of A under `balanced`.
+- Every run, C included, reached 94 to 100 °C and throttled (`throttleDelta` 494 to 3314); P cores averaged 3.4 to 3.5 GHz for A and 2.6 to 2.8 GHz for C. Under `balanced`, C did not throttle.
+- SiFuture preserved: status empty and manifest identical before and after (`perf-sifuture-*`).
