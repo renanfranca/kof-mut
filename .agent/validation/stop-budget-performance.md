@@ -127,3 +127,18 @@ The `counter-lock` error came from the system `mkdir`, uutils coreutils 0.10.0 (
 | `kof test src/test/kof/kofmut/Run.kf --tag check-run-a` alone, same recipe | `0 failed of 25 tests` in 442 s |
 
 The remaining failures exceed duration bounds under the full check's load, with the expected states and limitations. `four-active` took 6149 ms in the full check against a `durationMs < 5500` bound, and 5115 ms with `run-a` alone. Two of these three tests also failed on B0. Check observations: `.agent/tmp/check-b3e05365-5a5a-47b0-8c25-9014f7cf7988`.
+
+## Slow runs diagnosis
+
+Measured on 2026-11-24 with Kof 0.7.0, SiFuture `15f8f4a`, KofMut `ff2e756`: six BossShot `budgetMs: 0` runs with a one second monitor of load, mean P core and E core frequency, package temperature, thermal throttle counters, runnable threads per core type and `top` every 5 s. Evidence: `.agent/tmp/perf/diag-bossshot/` (`mon/samples.tsv`, `mon/top.log`, `monitor.sh`, `drive.sh`).
+
+| Run | reportDurationMs | Mean runnable threads (P/E) | Other process above one core |
+| ---: | ---: | --- | --- |
+| 1 | 54528 | 16.2 / 17.4 | IntelliJ IDEA, 4 to 8.5 cores through the whole run, at nice 0 |
+| 2 to 6 | 37739 to 38993 | 8.4 to 10.2 / 10.6 to 12.1 | none |
+
+- The fast runs repeat within 3%. The only slow run coincides with an IDE starting and indexing. Its slowdown starts with the first parallel candidate and lasts the whole run, as in the slow runs of 2026-11-23, where every candidate of a slow run took about twice as long and the serial baseline did not change.
+- Thermal throttling is not what separates the runs: every run reaches 91 to 92 °C, increases the throttle counters by a similar amount, and keeps P cores near 3 GHz against 5.8 GHz maximum. It is a constant cap on four slots, not the cause of the bimodality.
+- The `measure-run` gate only checks the one minute load before starting. On 2026-11-23 the five and fifteen minute loads before runs were 7 to 12, so other heavy work ran between and probably during those runs. Which process it was is not recorded.
+- The background session that ran this diagnosis runs at nice 5 (not recorded for 2026-11-23), so any foreground process at nice 0 takes priority over the mutant commands.
+- Consequence for comparisons: a run is comparable only when the monitor shows no foreign process above one core during the run. The B0 against instrumented gap of 2026-11-23 is consistent with this noise; it was not measured under a clean monitor.
