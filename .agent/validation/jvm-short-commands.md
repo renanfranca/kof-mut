@@ -169,3 +169,39 @@ Measured on 2026-11-24 after `powerprofilesctl set performance` (platform profil
 - Under `performance`, C takes 58% of A on both files. C under `performance` takes 52% of A under `balanced`.
 - Every run, C included, reached 94 to 100 °C and throttled (`throttleDelta` 494 to 3314); P cores averaged 3.4 to 3.5 GHz for A and 2.6 to 2.8 GHz for C. Under `balanced`, C did not throttle.
 - SiFuture preserved: status empty and manifest identical before and after (`perf-sifuture-*`).
+
+## Fans at maximum
+
+Measured on 2026-11-24 under `performance`, C configuration only, KofMut `4a86373`, same Kof and SiFuture. The `acer_wmi` driver exposes both fans in the `acer` hwmon; `pwm*_enable` 2 is automatic, 1 with `pwm*` 255 is full speed (`pwm*` already reads 255 in automatic, so only the rpm tells the modes apart). Driver `.agent/tmp/perf/fan/session.sh LABEL` runs three clean runs (`foreignCoreMax` under 1) per file and logs the fans every second (`fan/fanlog.sh`). Evidence: `.agent/tmp/perf/fan-<auto|max>-<file>/`, `fan-<auto|max>-fans.tsv`, `fan-<auto|max>-session.log`. Automatic BossShot run 2 was excluded (`foreignCoreMax` 8.08).
+
+| File | Fans | Clean `budgetMs: 0` runs (reportDurationMs) | Median | Change | maxTempC | throttleDelta | pMHzMean (mean) |
+| --- | --- | --- | ---: | ---: | --- | --- | ---: |
+| Meteor | auto | 31882, 32335, 32693 | 32335 | | 100 | 2256 to 3648 | 2848 |
+| Meteor | max | 31254, 31421, 31478 | 31421 | -2.8% | 100 | 2048 to 2422 | 2704 |
+| BossShot | auto | 20569, 20572, 20910 | 20572 | | 100 | 1902 to 2238 | 2775 |
+| BossShot | max | 19848, 20100, 19833 | 19848 | -3.5% | 100 | 980 to 1244 | 2740 |
+
+| Fans | Samples | CPU fan (fan1) mean / max rpm | fan2 mean / max rpm |
+| --- | ---: | --- | --- |
+| auto | 303 | 4260 / 4838 | 3840 / 4285 |
+| max | 220 | 7307 / 7317 | 6976 / 6976 |
+
+- Identity: all 6 Meteor and 7 BossShot `states.tsv` files, discarded run included, have the hashes of "Identity" above.
+- Full speed (about 1.7 times the automatic rpm) still lets every run reach 100 °C and throttle. It lowers `throttleDelta` (about 30% for Meteor, 45% for BossShot) but not the mean P core clock, which stays at 2.7 to 2.8 GHz.
+- The gain is 3% and smaller than the spread between sessions with automatic fans: the earlier "Performance power profile" session, also automatic, gave C medians of 31549 (Meteor) and 20021 (BossShot), within 0.4% and 0.9% of full speed. Full speed fans are not worth it for these measurements; the CPU stays thermally limited either way.
+- SiFuture preserved: `git status --short` empty after the session.
+
+### Intermediate profile
+
+Measured on 2026-11-24 with automatic fans, C configuration, `platform_profile` `balanced-performance` and EPP `balance_performance` on all CPUs, written directly to sysfs (`powerprofilesctl` has no such profile and kept reporting `performance`). Both values were logged every 5 s and stayed unchanged for the whole session (`fan-balperf-profile.tsv`). Evidence: `.agent/tmp/perf/fan-balperf-<file>/`, `fan-balperf-fans.tsv`, `fan-balperf-session.log`.
+
+Background load was high: the driver stopped at five runs per file with only 2 clean Meteor runs and 1 clean BossShot run. The other runs had `foreignCoreMax` from 1.05 to 3.95, plus one Meteor run at 15.89, and are listed in parentheses because they agree with the clean ones.
+
+| File | Runs (reportDurationMs) | Median of clean runs | `balanced` median | `performance` auto median | maxTempC | throttleDelta |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| Meteor | 37692, 37844 (37779, 37614; 40364 at 15.89) | 37768 | 37496 | 31549 / 32335 | 78 to 88 | 0 |
+| BossShot | 23868 (24963, 24187, 24098, 24637) | 23868 | 23579 | 20021 / 20572 | 80 to 84 | 0 |
+
+- Identity: all 5 Meteor and 5 BossShot `states.tsv` files have the hashes of "Identity" above.
+- `balanced-performance` behaves like `balanced` for these commands: no throttling, peak 88 °C, CPU fan mean 3191 rpm (max 4285), and about 19% slower than `performance`. `balanced` from `power-profiles-daemon` also uses EPP `balance_performance`, so the speed of `performance` probably comes from EPP `performance` rather than from the platform profile; that combination was not measured.
+- SiFuture preserved: `git status --short` empty after the session.
