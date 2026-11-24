@@ -5,7 +5,7 @@ import java.util.UUID
 import java.lang.System
 
 record RunOptions(String project, String config, String files, String reportDir, String runId)
-record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs, Object maxParallelMutants)
+record RunConfig(Int schemaVersion, List<String> sourceRoots, List<String> testRoots, List<String> inputs, List<String> checkCommand, List<String> testCommand, Long commandTimeoutMs, Long budgetMs, Object maxParallelMutants, Object fastJvmCommands)
 
 String readRequired(String path) {
     var text = File(path).readText()
@@ -64,6 +64,10 @@ void rejectLinkPath(String root, String relative) {
         current = current + "/" + part
         if (Files.isSymbolicLink(new java.io.File(current).toPath())) { throw "Symbolic link in selected path: " + relative }
     }
+}
+
+Bool fastJvmCommandsEnabled(RunConfig config) {
+    return config.fastJvmCommands != null && config.fastJvmCommands.toString() == "true"
 }
 
 RunConfig loadConfig(RunOptions options) {

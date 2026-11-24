@@ -3,6 +3,7 @@ set -euo pipefail
 phase="$1"
 mode="${2:-real}"
 if [[ -n "${KOF_MUT_OBSERVATIONS:-}" ]]; then
+    printf '%s\t%s\n' "$phase" "${JAVA_TOOL_OPTIONS-<unset>}" >> "$KOF_MUT_OBSERVATIONS/java-tool-options"
     if [[ "$phase" == check ]]; then
         printf '%s\0' "$@" > "$KOF_MUT_OBSERVATIONS/argv"
         if IFS= read -r ignored; then printf 'open\n' > "$KOF_MUT_OBSERVATIONS/stdin"; else printf 'closed\n' > "$KOF_MUT_OBSERVATIONS/stdin"; fi

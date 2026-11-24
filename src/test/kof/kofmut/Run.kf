@@ -2246,3 +2246,128 @@ test "invalid trailing invocations cannot approve baseline or detect mutation", 
         }
     } finally { assert(Directory(root).delete()) }
 }
+
+void fastJvmCommands(String root, String value) {
+    var original = reportText(root + "/kof-mut.json").trim()
+    assert(File(root + "/kof-mut.json").writeText(original.substring(0, original.length() - 1) + ",\"fastJvmCommands\":" + value + "}"))
+}
+
+test "fast JVM commands rejects every value other than a JSON boolean before project commands and internal output", "fast-jvm", "check-run-a" {
+    var root = runProjectCopy()
+    fixtureConfig(root, listOf("touch", root + "/executed"), listOf("touch", root + "/executed"), 10000, 30000)
+    var original = reportText(root + "/kof-mut.json")
+    var source = readFixtureSource(root)
+    var bytes = new Int[4]; bytes[0] = 0; bytes[1] = 255; bytes[2] = 13; bytes[3] = 10
+    assert(File(root + "/src/math/data.bin").writeBytes(bytes))
+    assert(process.run("chmod", "640", root + "/src/math/data.bin").exitCode == 0)
+    try {
+        for (var value in listOf("1", "0", "\"true\"", "[]", "{}", "1.0")) {
+            assert(File(root + "/kof-mut.json").writeText(original))
+            fastJvmCommands(root, value)
+
+            var result = process.run("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json")
+
+            runAssertEvidence(result.exitCode == 2, value + ": " + result.stdout + result.stderr)
+            runAssertEvidence(!result.stdout.contains("reportPath="), value)
+            runAssertEvidence(!File(root + "/executed").exists(), value)
+            runAssertEvidence(!File(root + "/.kof-mut").exists(), value)
+            assert(readFixtureSource(root) == source)
+            var observed = File(root + "/src/math/data.bin").readBytes()
+            assert(observed.length == 4 && observed[0] == 0 && observed[1] == 255 && observed[2] == 13 && observed[3] == 10)
+            assert(process.run("stat", "-c", "%a", root + "/src/math/data.bin").stdout.trim() == "640")
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+record FastJvmRun(Int exitCode, String stdout, String reportKeys, List<String> observedOptions)
+
+FastJvmRun runWithJavaToolOptions(String root, String name, String exported) {
+    var log = root + "/" + name
+    var reports = root + "/reports-" + name
+    assert(Directory(log).createDirectories())
+    var command = listOf("env", "-u", "JAVA_TOOL_OPTIONS")
+    if (exported != "<unset>") { command.add("JAVA_TOOL_OPTIONS=" + exported) }
+    command.add("KOF_MUT_OBSERVATIONS=" + log)
+    for (var argument in listOf("./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", reports, "--run-id", "5f0c8a2e-4b1d-4c6e-9a3f-7d2b1e0c9a84")) { command.add(argument) }
+    var argv = new String[command.size]
+    for (var i = 0; i < command.size; i++) { argv[i] = command.get(i) }
+    var builder = new java.lang.ProcessBuilder(argv)
+    builder.redirectOutput(new java.io.File(log + "/stdout"))
+    builder.redirectError(new java.io.File(log + "/stderr"))
+    var child = builder.start()
+    child.getOutputStream().close()
+    assert(child.waitFor(60000 as Long, TimeUnit.MILLISECONDS))
+    var stdout = reportText(log + "/stdout")
+    var report = json.decode<Map<String, Object>>(reportText(reportPath(stdout)))
+    var observed: List<String> = listOf()
+    for (var line in reportText(log + "/java-tool-options").split("\n")) { if (line != "") { observed.add(line) } }
+    var summary = ""
+    for (var line in stdout.split("\n")) { if (!line.startsWith("reportPath=")) { summary = summary + line + "\n" } }
+    return FastJvmRun(child.exitValue(), summary, sortedKeys(report), observed)
+}
+
+void assertEveryCommandSaw(FastJvmRun run, String expected, String name) {
+    runAssertEvidence(run.observedOptions.size >= 4, name + ": " + run.observedOptions)
+    for (var line in run.observedOptions) {
+        var fields = line.split("\t")
+        runAssertEvidence(fields.length == 2 && (fields[0] == "check" || fields[0] == "test"), name + ": " + line)
+        runAssertEvidence(fields.length == 2 && fields[1] == expected, name + ": expected " + expected + " but saw " + line)
+    }
+}
+
+test "fast JVM commands reaches every project command environment and leaves stdout and report keys unchanged", "fast-jvm", "check-run-a" {
+    var root = runProjectCopy()
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check", "timeout"), listOf("./runner", "test", "timeout"), 10000, 60000)
+    var original = reportText(root + "/kof-mut.json")
+    try {
+        var reference = runWithJavaToolOptions(root, "reference", "<unset>")
+        runAssertEvidence(reference.stdout.contains(": complete\n"), "reference: " + reference.stdout)
+        assertEveryCommandSaw(reference, "<unset>", "reference")
+
+        var cases = listOf(
+            listOf("false-unset", "false", "<unset>", "<unset>"),
+            listOf("false-heap", "false", "-Xmx64m", "-Xmx64m"),
+            listOf("true-unset", "true", "<unset>", "-XX:TieredStopAtLevel=1"),
+            listOf("true-heap", "true", "-Xmx64m", "-Xmx64m -XX:TieredStopAtLevel=1"),
+            listOf("true-level", "true", "-XX:TieredStopAtLevel=4", "-XX:TieredStopAtLevel=4"),
+            listOf("absent-heap", "absent", "-Xmx64m", "-Xmx64m"))
+        for (var item in cases) {
+            var name = item.get(0)
+            assert(File(root + "/kof-mut.json").writeText(original))
+            if (item.get(1) != "absent") { fastJvmCommands(root, item.get(1)) }
+
+            var run = runWithJavaToolOptions(root, name, item.get(2))
+
+            assertEveryCommandSaw(run, item.get(3), name)
+            runAssertEvidence(run.exitCode == reference.exitCode, name + " exit " + run.exitCode + " differs from " + reference.exitCode)
+            runAssertEvidence(run.stdout == reference.stdout, name + " stdout changed:\n" + run.stdout + "\nreference:\n" + reference.stdout)
+            runAssertEvidence(run.reportKeys == reference.reportKeys, name + " report keys changed: " + run.reportKeys)
+        }
+    } finally { assert(Directory(root).delete()) }
+}
+
+test "fast JVM commands keeps literal kof commands redirected and detects every operator family", "fast-jvm", "check-run-b" {
+    var root = runProjectCopy()
+    assert(File(root + "/src/math/Calc.kf").writeText("package src.math\nclass Calc { Bool less(Int a, Int b) { return a < b } Bool equal(Int a, Int b) { return a == b } Bool both(Bool a, Bool b) { return a && b } Bool enabled() { return true } Int sum(Int a, Int b) { return a + b } }\n"))
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"families\" { var c = new Calc() assert(!c.less(2, 2)) assert(c.equal(2, 2)) assert(!c.both(true, false)) assert(c.enabled()) assert(c.sum(2, 3) == 5) }"))
+    fastJvmCommands(root, "true")
+
+    try {
+        var result = process.run("env", "-u", "JAVA_TOOL_OPTIONS", "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        runAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+        var report = readRun(reportPath(result.stdout))
+        assert(report.status == "complete")
+        assert(report.counts.candidates == 5)
+        assert(report.counts.killed == 5)
+        assert(report.mutants.get(0).operator == "boundary")
+        assert(report.mutants.get(1).operator == "equality")
+        assert(report.mutants.get(2).operator == "logical")
+        assert(report.mutants.get(3).operator == "boolean")
+        assert(report.mutants.get(4).operator == "arithmetic")
+        var logs = evidenceDirectoryOf(report.mutants.get(0).evidence)
+        var notice = process.run("grep", "-rlF", "--include=*.stderr", "Picked up JAVA_TOOL_OPTIONS: -XX:TieredStopAtLevel=1", logs)
+        runAssertEvidence(notice.exitCode == 0 && notice.stdout.trim() != "", "no command stderr log under " + logs + " shows the option")
+    } finally { assert(Directory(root).delete()) }
+}

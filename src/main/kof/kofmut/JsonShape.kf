@@ -1,6 +1,6 @@
 package kofmut
 
-record ConfigShape(Object schemaVersion, List<Object> sourceRoots, List<Object> testRoots, List<Object> inputs, List<Object> checkCommand, List<Object> testCommand, Object commandTimeoutMs, Object budgetMs, Object maxParallelMutants)
+record ConfigShape(Object schemaVersion, List<Object> sourceRoots, List<Object> testRoots, List<Object> inputs, List<Object> checkCommand, List<Object> testCommand, Object commandTimeoutMs, Object budgetMs, Object maxParallelMutants, Object fastJvmCommands)
 record CheckShape(Object success, Object filesChecked, Object errorCount, List<DiagnosticShape> diagnostics)
 record DiagnosticShape(Object code, Object severity, Object message)
 
@@ -31,6 +31,8 @@ void validateConfigShape(String jsonText) {
         var value = parallel.toString().toLong()
         if (value < 1 || value > 4) { throw "maxParallelMutants must be a JSON integer between 1 and 4" }
     }
+    var fastJvm = shape.fastJvmCommands
+    if (fastJvm != null && fastJvm.getClass().getName() != "java.lang.Boolean") { throw "fastJvmCommands must be a JSON boolean" }
     if (!jsonInteger(shape.schemaVersion) || shape.schemaVersion.toString() != "1" || !jsonInteger(shape.commandTimeoutMs) || !jsonInteger(shape.budgetMs)) { throw "Configuration versions and time limits must be JSON integers" }
     requireStrings(shape.sourceRoots)
     requireStrings(shape.testRoots)

@@ -108,7 +108,7 @@ class MutationRun {
             var preparing = System.nanoTime()
             resources.prepare(entries, sandbox)
             baselineTimings.prepare = System.nanoTime() - preparing
-            var checkRun = executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs, resources)
+            var checkRun = executeCommand(config.checkCommand, sandbox, logs + "/baseline-check", config.commandTimeoutMs, start, config.budgetMs, fastJvmCommandsEnabled(config), resources)
             baselineTimings.check = checkRun.runNanos
             baselineTimings.checkRelease = checkRun.releaseNanos
             var checked = checkEvidence(checkRun)
@@ -118,7 +118,7 @@ class MutationRun {
                 baseline = BaselineEvidence("failed", checked.phase, notStarted())
                 return false
             }
-            var testRun = executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs, resources)
+            var testRun = executeCommand(config.testCommand, sandbox, logs + "/baseline-test", config.commandTimeoutMs, start, config.budgetMs, fastJvmCommandsEnabled(config), resources)
             baselineTimings.test = testRun.runNanos
             baselineTimings.testRelease = testRun.releaseNanos
             var tested = testEvidence(testRun)
@@ -264,7 +264,7 @@ class MutationRun {
         }
         var check = CheckedEvidence("Pending", notStarted())
         try {
-            var checkRun = executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, resources)
+            var checkRun = executeCommand(config.checkCommand, variant, logs + "/" + index + "-check", config.commandTimeoutMs, start, config.budgetMs, fastJvmCommandsEnabled(config), resources)
             timings.check = checkRun.runNanos
             timings.checkRelease = checkRun.releaseNanos
             check = checkEvidence(checkRun)
@@ -276,7 +276,7 @@ class MutationRun {
         if (state == "passed") {
             var test = CheckedEvidence("Pending", notStarted())
             try {
-                var testRun = executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, resources)
+                var testRun = executeCommand(config.testCommand, variant, logs + "/" + index + "-test", config.commandTimeoutMs, start, config.budgetMs, fastJvmCommandsEnabled(config), resources)
                 timings.test = testRun.runNanos
                 timings.testRelease = testRun.releaseNanos
                 test = testEvidence(testRun)
