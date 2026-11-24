@@ -25,19 +25,21 @@ cp src/math/data.bin "$event/binary"
 stat -c '%a' src/math/data.bin > "$event/mode"
 if [[ -e state ]]; then printf dirty > "$event/state"; else printf clean > "$event/state"; fi
 if [[ "$phase" == test ]]; then printf 'changed by %s\n' "$candidate" > state; fi
-while ! mkdir "$log/counter-lock" 2>/dev/null; do sleep 0.005; done
-count=0; maximum=0
-if [[ -e "$log/count" ]]; then read -r count < "$log/count"; read -r maximum < "$log/maximum"; fi
-count=$((count+1))
-if ((count>maximum)); then maximum="$count"; fi
-printf '%s\n' "$count" > "$log/count"
-printf '%s\n' "$maximum" > "$log/maximum"
-rmdir "$log/counter-lock"
+{
+    flock 9
+    count=0; maximum=0
+    if [[ -e "$log/count" ]]; then read -r count < "$log/count"; read -r maximum < "$log/maximum"; fi
+    count=$((count+1))
+    if ((count>maximum)); then maximum="$count"; fi
+    printf '%s\n' "$count" > "$log/count"
+    printf '%s\n' "$maximum" > "$log/maximum"
+} 9> "$log/counter-lock"
 finish() {
-    while ! mkdir "$log/counter-lock" 2>/dev/null; do sleep 0.005; done
-    read -r count < "$log/count"
-    printf '%s\n' "$((count-1))" > "$log/count"
-    rmdir "$log/counter-lock"
+    {
+        flock 9
+        read -r count < "$log/count"
+        printf '%s\n' "$((count-1))" > "$log/count"
+    } 9> "$log/counter-lock"
     printf finished > "$event/finished"
 }
 trap finish EXIT

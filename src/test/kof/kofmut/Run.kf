@@ -1482,6 +1482,133 @@ test "out of order completion keeps candidate identities evidence states and dis
     } finally { assert(Directory(root).delete()) }
 }
 
+String evidenceDirectoryOf(String evidence) {
+    var marker = "stdout: "
+    var start = evidence.indexOf(marker)
+    var end = evidence.indexOf("; stderr: ")
+    if (start < 0) {
+        marker = "log: "
+        start = evidence.indexOf(marker)
+        end = evidence.length()
+    }
+    assert(start >= 0 && end > start, "evidence must reference its log directory")
+    return new java.io.File(evidence.substring(start + marker.length(), end)).getParent()
+}
+
+List<String[]> timingRows(String directory) {
+    var lines = reportText(directory + "/timings.tsv").split("\n")
+    assert(lines[0] == "index\tlockWaitMs\tprepareMs\tvalidateMs\tcheckMs\tcheckReleaseMs\ttestMs\ttestReleaseMs\tremoveMs\ttotalMs")
+    var rows: List<String[]> = listOf()
+    for (var i = 1; i < lines.length; i++) {
+        if (lines[i] != "") {
+            var fields = lines[i].split("\t", -1)
+            runAssertEvidence(fields.length == 10, "timing row must have ten columns: " + lines[i])
+            rows.add(fields)
+        }
+    }
+    return rows
+}
+
+void assertTimingRowIsConsistent(String[] row) {
+    for (var column = 1; column < 10; column++) { runAssertEvidence(row[column] == "" || row[column].matches("[0-9]+"), "timing must be empty or a nonnegative integer: " + row[column]) }
+    runAssertEvidence(row[1] != "" && row[9] != "", "lock wait and total are always measured: " + row[0])
+    var phases = 0
+    for (var column = 2; column < 9; column++) { if (row[column] != "") { phases = phases + row[column].toInt() } }
+    runAssertEvidence(row[9].toInt() >= phases, "total must cover every measured phase of " + row[0])
+}
+
+String presentPhases(String[] row) {
+    var names = listOf("index", "lockWait", "prepare", "validate", "check", "checkRelease", "test", "testRelease", "remove", "total")
+    var present = ""
+    for (var column = 2; column < 9; column++) { if (row[column] != "") { present = present + names.get(column) + " " } }
+    return present.trim()
+}
+
+void assertKeys(Object? value, String expected) {
+    var actual = sortedKeys(value)
+    runAssertEvidence(actual == expected, "report keys changed: " + actual)
+}
+
+String sortedKeys(Object? value) {
+    assert(value != null, "report object must be present")
+    var keys = (value as Map<String, Object>).keys().sorted((a: String, b: String) -> a.compareTo(b))
+    var joined = ""
+    for (var key in keys) { joined = joined + key + " " }
+    return joined.trim()
+}
+
+test "parallel runs record phase durations for the baseline and each candidate in index order without changing report or stdout", "timings", "parallel", "check-run-b" {
+    var root = runProjectCopy()
+    var log = root + "/timings"
+    prepareParallel(root, "4", "survivor", 10000, 60000)
+    var child = startRun(root, log, root + "/artifacts")
+    try {
+
+        assert(child.waitFor(60000 as Long, TimeUnit.MILLISECONDS))
+
+        runAssertEvidence(child.exitValue() == 1, reportText(log + "/stdout") + reportText(log + "/stderr"))
+        var path = reportPath(reportText(log + "/stdout"))
+        var report = readRun(path)
+        assert(report.status == "complete" && report.mutants.size == 5 && report.discardedCandidates.size == 1)
+        var rows = timingRows(evidenceDirectoryOf(report.mutants.get(0).evidence))
+        runAssertEvidence(rows.size == 1 + report.mutants.size + report.discardedCandidates.size, "one baseline row and one row per candidate")
+        var indexes = listOf("baseline", "0", "1", "2", "3", "4", "5")
+        for (var i = 0; i < rows.size; i++) {
+            assert(rows.get(i)[0] == indexes.get(i), "rows follow candidate index order")
+            assertTimingRowIsConsistent(rows.get(i))
+        }
+        assert(presentPhases(rows.get(0)) == "prepare check checkRelease test testRelease")
+        assert(presentPhases(rows.get(1)) == "prepare validate check checkRelease remove", "a check rejection runs no test")
+        for (var i = 2; i < rows.size; i++) { assert(presentPhases(rows.get(i)) == "prepare validate check checkRelease test testRelease remove") }
+
+        var decoded = json.decode<Map<String, Object>>(reportText(path))
+        assertKeys(decoded, "baseline counts discardedCandidates durationMs kofVersion limitations mutants runId schemaVersion scope startedAt status toolVersion")
+        assertKeys(decoded.get("baseline"), "check status test")
+        assertKeys((decoded.get("baseline") as Map<String, Object>).get("check"), "durationMs executedTests exitCode failedTests filesChecked summary")
+        assertKeys(decoded.get("counts"), "candidates compileError executed killed pending survived testError timeout")
+        for (var mutant in decoded.get("mutants") as List<Object>) { assertKeys(mutant, "durationMs evidence file id location operator original phase replacement status") }
+        for (var discarded in decoded.get("discardedCandidates") as List<Object>) { assertKeys(discarded, "durationMs evidence file id location operator original phase replacement") }
+        var output = reportText(log + "/stdout")
+        var stdout = output.trim().split("\n")
+        runAssertEvidence(stdout.length == 8, "stdout keeps its announcement, summaries, survivor and discard lines: " + output)
+        runAssertEvidence(stdout[0].startsWith("reportPath="), output)
+        runAssertEvidence(stdout[1] == "KofMut 248a229c-2c75-46d4-a802-ae69ac23376b: complete", output)
+        runAssertEvidence(stdout[2] == "maxParallelMutants=4", output)
+        runAssertEvidence(stdout[3] == "candidates=5 killed=4 survived=1 compileError=0 timeout=0 testError=0 pending=0", output)
+        runAssertEvidence(stdout[4].startsWith("Survived src/math/Calc.kf:2:"), output)
+        runAssertEvidence(stdout[5] == "src/math/Calc.kf: candidates=5 Killed=4 Survived=1 CompileError=0 Timeout=0 TestError=0 Pending=0", output)
+        runAssertEvidence(stdout[6] == "discardedCandidates=1", output)
+        runAssertEvidence(stdout[7].startsWith("Discarded src/math/Calc.kf:2:"), output)
+    } finally {
+        stopParallel(child, log)
+        assert(Directory(root).delete())
+    }
+}
+
+test "a candidate discarded by token validation records validation without check or test durations", "timings", "discard-parse", "check-run-b" {
+    var root = runProjectCopy()
+    var log = root + "/observed"
+    assert(Directory(log).createDirectories())
+    assert(process.run("cp", "-a", "src/test/fixtures/mutation-runner", root + "/runner").exitCode == 0)
+    fixtureConfig(root, listOf("./runner", "check"), listOf("./runner", "test"), hangProtectionCommandTimeoutMs(), hangProtectionBudgetMs())
+    assert(File(root + "/tests/Suite.kf").writeText("import src.math.Calc\ntest \"product plus one\" { assert(new Calc().sum(2, 3) == 7) }"))
+    assert(File(root + "/src/math/Calc.kf").writeText("package src.math\nclass Calc {\n Int sum(Int a, Int b) {\n return a*/* comment */b + 1\n }\n}\n"))
+    try {
+
+        var result = process.run("env", "KOF_MUT_OBSERVATIONS=" + log, "./bin/kof-mut", "run", "--project", root, "--files", root + "/scope.json", "--report-dir", root + "/report.json")
+
+        runAssertEvidence(result.exitCode == 0, result.stdout + result.stderr)
+        var discarded = readDiscards(reportPath(result.stdout))
+        assert(discarded.size == 1 && discarded.get(0).phase == "parse")
+        var rows = timingRows(evidenceDirectoryOf(discarded.get(0).evidence))
+        assert(rows.size == 3)
+        assert(rows.get(0)[0] == "baseline" && rows.get(1)[0] == "0" && rows.get(2)[0] == "1")
+        for (var row in rows) { assertTimingRowIsConsistent(row) }
+        assert(presentPhases(rows.get(1)) == "prepare validate remove", "a token collision starts no check")
+        assert(presentPhases(rows.get(2)) == "prepare validate check checkRelease test testRelease remove")
+    } finally { assert(Directory(root).delete()) }
+}
+
 test "an unexpected worker log access failure cancels active siblings drains tasks and publishes error with recovery", "parallel", "budget", "check-run-b" {
     for (var unbounded in listOf(false, true)) {
         var budget: Long = 60000

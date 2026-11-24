@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "usage: scripts/measure-run LAUNCHER PROJECT BASE_CONFIG SCOPE BUDGET_MS REPETITIONS OUTPUT_DIR" >&2
+    exit 2
+}
+(( $# == 7 )) || usage
+launcher=$(realpath -- "$1")
+project=$(realpath -- "$2")
+base_config=$(realpath -- "$3")
+scope=$(realpath -- "$4")
+budget_ms=$5
+repetitions=$6
+[[ "$budget_ms" =~ ^[0-9]+$ && "$repetitions" =~ ^[1-9][0-9]*$ ]] || usage
+mkdir -p -- "$7"
+output=$(realpath -- "$7")
+maximum_load=${MEASURE_MAX_LOAD:-4}
+
+case "$output/" in "$project/"*) echo "measure-run: output must stay outside the project" >&2; exit 2 ;; esac
+
+launcher_root=$(dirname -- "$(dirname -- "$launcher")")
+kofmut_commit() {
+    if [[ -f "$launcher_root/COMMIT" ]]; then
+        printf '%s\n' "$(cat -- "$launcher_root/COMMIT")"
+    elif git -C "$launcher_root" rev-parse HEAD >/dev/null 2>&1; then
+        local dirty=""
+        [[ -z "$(git -C "$launcher_root" status --porcelain --untracked-files=no)" ]] || dirty="-dirty"
+        printf '%s%s\n' "$(git -C "$launcher_root" rev-parse HEAD)" "$dirty"
+    else
+        echo unknown
+    fi
+}
+load_one_minute() { cut -d' ' -f1 /proc/loadavg; }
+wait_for_quiet_machine() {
+    while ! awk -v load="$(load_one_minute)" -v limit="$maximum_load" 'BEGIN { exit !(load < limit) }'; do
+        echo "measure-run: load $(load_one_minute) is not under $maximum_load; waiting" >&2
+        sleep 15
+    done
+}
+
+file_label=$(python3 -I -c 'import json, sys; print(",".join(json.load(open(sys.argv[1]))))' "$scope")
+configs="$output/configs"
+reports="$output/reports"
+mkdir -p -- "$configs" "$reports"
+config="$configs/budget-$budget_ms.json"
+python3 -I -c '
+import json, sys
+config = json.load(open(sys.argv[1]))
+config["budgetMs"] = int(sys.argv[2])
+open(sys.argv[3], "w").write(json.dumps(config, indent=2) + "\n")
+' "$base_config" "$budget_ms" "$config"
+
+table="$output/runs.tsv"
+if [[ ! -s "$table" ]]; then
+    printf 'file\tbudgetMs\trun\texit\tstatus\treportDurationMs\twallMs\tcandidates\tkilled\tsurvived\ttimeout\ttestError\tpending\tdiscarded\tload1Before\tload1After\tforeignCoreMax\tforeignCoreMean\tmaxTempC\tthrottleDelta\tpMHzMean\teMHzMean\n' > "$table"
+elif [[ "$(head -n 1 -- "$table")" != *$'\t'foreignCoreMax$'\t'* ]]; then
+    echo "measure-run: $table predates the machine columns; use a new output directory" >&2
+    exit 2
+fi
+first_run=$(awk -F '\t' -v budget="$budget_ms" 'NR > 1 && $2 == budget { count++ } END { print count + 1 }' "$table")
+
+monitor_script='
+import os, sys, time
+
+launcher_pid, own_pid, listing, summary = int(sys.argv[1]), os.getpid(), sys.argv[2], sys.argv[3]
+ticks_per_second = os.sysconf("SC_CLK_TCK")
+
+def read(path):
+    try:
+        with open(path) as source:
+            return source.read().strip()
+    except OSError:
+        return None
+
+def cpu_list(path):
+    text = read(path)
+    if not text:
+        return []
+    cpus = []
+    for part in text.split(","):
+        first, _, last = part.partition("-")
+        cpus.extend(range(int(first), int(last or first) + 1))
+    return cpus
+
+def processes():
+    table = {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        stat = read("/proc/" + name + "/stat")
+        if stat is None:
+            continue
+        fields = stat[stat.rfind(")") + 2:].split()
+        table[int(name)] = (int(fields[1]), int(fields[19]), int(fields[11]) + int(fields[12]))
+    return table
+
+def descendants(table):
+    children = {}
+    for pid, (parent, _, _) in table.items():
+        children.setdefault(parent, []).append(pid)
+    found, pending = set(), [launcher_pid]
+    while pending:
+        pid = pending.pop()
+        if pid in found:
+            continue
+        found.add(pid)
+        pending.extend(children.get(pid, []))
+    return found
+
+def launcher_alive():
+    stat = read("/proc/%d/stat" % launcher_pid)
+    return stat is not None and stat[stat.rfind(")") + 2] != "Z"
+
+def mean_mhz(cpus):
+    values = [read("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq" % cpu) for cpu in cpus]
+    values = [int(value) / 1000 for value in values if value]
+    return sum(values) / len(values) if values else None
+
+def package_temperature():
+    for hwmon in sorted(os.listdir("/sys/class/hwmon")):
+        base = "/sys/class/hwmon/" + hwmon
+        if read(base + "/name") != "coretemp":
+            continue
+        inputs = sorted(name for name in os.listdir(base) if name.startswith("temp") and name.endswith("_input"))
+        chosen = next((name for name in inputs if (read(base + "/" + name[:-6] + "_label") or "").startswith("Package")), None)
+        value = read(base + "/" + (chosen or (inputs[0] if inputs else "missing")))
+        return int(value) / 1000 if value else None
+    return None
+
+all_cpus = cpu_list("/sys/devices/system/cpu/online")
+def throttle_count():
+    values = [read("/sys/devices/system/cpu/cpu%d/thermal_throttle/core_throttle_count" % cpu) for cpu in all_cpus]
+    values = [int(value) for value in values if value]
+    return sum(values) if values else None
+
+performance_cpus = cpu_list("/sys/devices/cpu_core/cpus")
+efficiency_cpus = cpu_list("/sys/devices/cpu_atom/cpus")
+
+def text(value):
+    return "" if value is None else ("%.2f" % value if isinstance(value, float) else str(value))
+
+started = time.monotonic()
+previous_time = started
+previous = {pid: (start, used) for pid, (_, start, used) in processes().items()}
+throttle_start = throttle_count()
+throttle_last = throttle_start
+samples = []
+with open(listing, "w") as output:
+    output.write("elapsedMs\tforeignCores\townCores\tpMHz\teMHz\ttempC\tthrottleCount\n")
+    while True:
+        alive = launcher_alive()
+        if alive:
+            time.sleep(max(0.0, 1.0 - (time.monotonic() - previous_time)))
+        now = time.monotonic()
+        table = processes()
+        own = descendants(table)
+        foreign_ticks = own_ticks = 0
+        current = {}
+        for pid, (_, start, used) in table.items():
+            current[pid] = (start, used)
+            before = previous.get(pid)
+            delta = used - before[1] if before and before[0] == start else used
+            if pid in own:
+                own_ticks += delta
+            elif pid != own_pid:
+                foreign_ticks += delta
+        interval = now - previous_time
+        previous, previous_time = current, now
+        if interval >= 0.2:
+            foreign = foreign_ticks / ticks_per_second / interval
+            temperature = package_temperature()
+            throttle_last = throttle_count()
+            sample = (foreign, mean_mhz(performance_cpus), mean_mhz(efficiency_cpus), temperature)
+            samples.append(sample)
+            output.write("\t".join([str(round((now - started) * 1000)), text(foreign), text(own_ticks / ticks_per_second / interval),
+                                    text(sample[1]), text(sample[2]), text(temperature), text(throttle_last)]) + "\n")
+            output.flush()
+        if not alive:
+            break
+
+def column(index, reduce):
+    values = [sample[index] for sample in samples if sample[index] is not None]
+    return text(reduce(values)) if values else ""
+average = lambda values: sum(values) / len(values)
+throttle_delta = "" if throttle_start is None or throttle_last is None else str(throttle_last - throttle_start)
+with open(summary, "w") as output:
+    output.write("\t".join([column(0, max), column(0, average), column(3, max), throttle_delta,
+                            column(1, average), column(2, average)]) + "\n")
+'
+
+kof_path=$(realpath -- "$(command -v kof)")
+for (( run = first_run; run < first_run + repetitions; run++ )); do
+    wait_for_quiet_machine
+    run_id=$(cat /proc/sys/kernel/random/uuid)
+    evidence="$output/budget-$budget_ms-run-$run-$run_id"
+    mkdir -p -- "$evidence"
+    load_before=$(load_one_minute)
+    {
+        printf 'uptime\t%s\n' "$(uptime)"
+        printf 'nproc\t%s\n' "$(nproc)"
+        printf 'projectCommit\t%s\n' "$(git -C "$project" rev-parse HEAD)"
+        printf 'kofmutCommit\t%s\n' "$(kofmut_commit)"
+        printf 'kof\t%s\n' "$kof_path"
+        printf 'kofSha256\t%s\n' "$(sha256sum -- "$kof_path" | cut -d' ' -f1)"
+        printf 'launcher\t%s\n' "$launcher"
+        printf 'config\t%s\n' "$config"
+        printf 'runId\t%s\n' "$run_id"
+    } > "$evidence/environment.tsv"
+    started=$(date +%s%3N)
+    exit_code=0
+    "$launcher" run --project "$project" --files "$scope" --config "$config" --report-dir "$reports" --run-id "$run_id" \
+        > "$evidence/stdout" 2> "$evidence/stderr" &
+    launcher_pid=$!
+    python3 -I -c "$monitor_script" "$launcher_pid" "$evidence/monitor.tsv" "$evidence/monitor-summary.tsv" &
+    monitor_pid=$!
+    wait "$launcher_pid" || exit_code=$?
+    wall_ms=$(( $(date +%s%3N) - started ))
+    monitor_exit=0
+    wait "$monitor_pid" || monitor_exit=$?
+    machine=$'\t\t\t\t\t'
+    if (( monitor_exit == 0 )) && [[ -s "$evidence/monitor-summary.tsv" ]]; then
+        machine=$(head -n 1 -- "$evidence/monitor-summary.tsv")
+    else
+        echo "measure-run: run $run has no machine summary; see $evidence" >&2
+    fi
+    load_after=$(load_one_minute)
+    printf 'uptimeAfter\t%s\n' "$(uptime)" >> "$evidence/environment.tsv"
+    report_path=$(sed -n 's/^reportPath=//p' -- "$evidence/stdout" | python3 -I -c 'import json, sys; lines = sys.stdin.read().splitlines(); print(json.loads(lines[0]) if len(lines) == 1 else "")')
+    if [[ -z "$report_path" || ! -f "$report_path" ]]; then
+        echo "measure-run: run $run produced no report; see $evidence" >&2
+        printf '%s\t%s\t%s\t%s\t\t\t%s\t\t\t\t\t\t\t\t%s\t%s\t%s\n' "$file_label" "$budget_ms" "$run" "$exit_code" "$wall_ms" "$load_before" "$load_after" "$machine" >> "$table"
+        continue
+    fi
+    cp -- "$report_path" "$evidence/report.json"
+    python3 -I -c '
+import json, sys
+report = json.load(open(sys.argv[1]))
+counts = report["counts"]
+row = [sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], report["status"], report["durationMs"], sys.argv[6],
+       counts["candidates"], counts["killed"], counts["survived"], counts["timeout"], counts["testError"], counts["pending"],
+       len(report["discardedCandidates"]), sys.argv[7], sys.argv[8]]
+print("\t".join(str(value) for value in row) + "\t" + sys.argv[10])
+states = [(m["id"], m["status"], m["phase"]) for m in report["mutants"]]
+states += [(d["id"], "Discarded", d["phase"]) for d in report["discardedCandidates"]]
+with open(sys.argv[9], "w") as listing:
+    for state in sorted(states):
+        listing.write("\t".join(state) + "\n")
+' "$evidence/report.json" "$file_label" "$budget_ms" "$run" "$exit_code" "$wall_ms" "$load_before" "$load_after" "$evidence/states.tsv" "$machine" >> "$table"
+    run_logs=$(python3 -I -c '
+import json, os, sys
+report = json.load(open(sys.argv[1]))
+for item in report["mutants"] + report["discardedCandidates"]:
+    evidence = item["evidence"]
+    for marker, end in (("stdout: ", "; stderr: "), ("log: ", None)):
+        start = evidence.find(marker)
+        if start >= 0:
+            stop = evidence.find(end, start) if end else len(evidence)
+            print(os.path.dirname(evidence[start + len(marker):stop]))
+            sys.exit(0)
+' "$evidence/report.json")
+    if [[ -n "$run_logs" && -f "$run_logs/timings.tsv" ]]; then
+        cp -- "$run_logs/timings.tsv" "$evidence/timings.tsv"
+        printf 'runLogs\t%s\n' "$run_logs" >> "$evidence/environment.tsv"
+    fi
+    tail -n 1 -- "$table"
+done

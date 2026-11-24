@@ -5,7 +5,7 @@ import java.lang.System
 import java.lang.Thread
 import java.util.concurrent.TimeUnit
 
-record CommandResult(Int? exitCode, Long durationMs, String stdout, String stderr, String stdoutPath, String stderrPath, Bool timeout, Bool started, Bool cleaned)
+record CommandResult(Int? exitCode, Long durationMs, String stdout, String stderr, String stdoutPath, String stderrPath, Bool timeout, Bool started, Bool cleaned, Long? runNanos, Long? releaseNanos)
 record CheckDiagnostic(String code, String severity, String message)
 record CheckOutput(Bool success, Int filesChecked, Int errorCount, List<CheckDiagnostic> diagnostics)
 record PhaseEvidence(Int? exitCode, Long? durationMs, String? summary, Int? filesChecked, Int? executedTests, Int? failedTests)
@@ -24,21 +24,26 @@ CommandResult executeCommand(List<String> arguments, String cwd, String log, Lon
     builder.directory(new java.io.File(cwd))
     builder.redirectOutput(new java.io.File(log + ".stdout"))
     builder.redirectError(new java.io.File(log + ".stderr"))
+    var admissionStart = System.nanoTime()
     var admitted = resources.startCommand(builder, timeoutMs, start, budgetMs)
     var child = admitted.child
-    if (child == null) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true) }
+    if (child == null) { return CommandResult(null, 0, "", "", log + ".stdout", log + ".stderr", false, false, true, null, null) }
     var commandStart = admitted.clock
     var finished = false
     var cleaned = false
+    var waitReturned = admissionStart
+    var releaseFinished = admissionStart
     try {
         child.getOutputStream().close()
         var waitMs = admitted.timeoutMs - elapsedMs(commandStart)
         if (waitMs > 0) { finished = child.waitFor(waitMs, TimeUnit.MILLISECONDS) }
     } finally {
+        waitReturned = System.nanoTime()
         resources.releaseCommand(child, start, budgetMs)
+        releaseFinished = System.nanoTime()
         cleaned = true
     }
-    return CommandResult(child.exitValue(), elapsedMs(commandStart), readRequired(log + ".stdout"), readRequired(log + ".stderr"), log + ".stdout", log + ".stderr", !finished || resources.commandInterrupted(child), true, cleaned)
+    return CommandResult(child.exitValue(), elapsedMs(commandStart), readRequired(log + ".stdout"), readRequired(log + ".stderr"), log + ".stdout", log + ".stderr", !finished || resources.commandInterrupted(child), true, cleaned, waitReturned - admissionStart, releaseFinished - waitReturned)
 }
 
 Bool processGroupActive(Long group) {
